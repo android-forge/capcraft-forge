@@ -338,6 +338,23 @@ pub struct Segment {
     pub end: f64,
     /// What was said.
     pub text: String,
+    /// The words of it, each with its own times, where the request asked
+    /// for them; empty otherwise.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Word>,
+}
+
+/// One word of a caption, in seconds relative to the transcribed window's
+/// start.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Word {
+    /// Seconds from the window's start.
+    pub start: f64,
+    /// Seconds from the window's start.
+    pub end: f64,
+    /// The word, its punctuation with it.
+    pub text: String,
 }
 
 /// What to transcribe.
@@ -356,7 +373,15 @@ pub struct TranscribeRequest {
     pub window: f64,
     /// Which model to use, e.g. "base.en".
     pub model_id: String,
+    /// Time every word, and write down the sounds between them ("um",
+    /// "uh"), which whisper otherwise leaves out.
+    #[serde(default)]
+    pub words: bool,
 }
+
+/// What whisper is told came before, for a transcript that keeps hesitations:
+/// it writes on in the way this is written.
+const HESITANT: &str = "Um, so, uh, hmm, I was, er, like, you know, um, thinking, uh, about it.";
 
 struct LoadedModel {
     id: String,
@@ -583,6 +608,10 @@ impl Transcriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
+        if request.words {
+            params.set_token_timestamps(true);
+            params.set_initial_prompt(HESITANT);
+        }
         // The raw hooks, not `set_abort_callback_safe`. whisper-rs 0.16's
         // safe one hands whisper a pointer to a boxed trait object with a
         // trampoline typed for the closure itself, so whisper reads the
@@ -638,7 +667,19 @@ impl Transcriber {
                 let end = segment.end_timestamp() as f64 / 100.0;
                 let (start, end) = on_speech(start, end, &speech);
                 let text = segment.to_str_lossy().ok()?.trim().to_owned();
-                keep_segment(start, end, text)
+                let mut kept = keep_segment(start, end, text)?;
+                if request.words {
+                    kept.words = words_of(
+                        (0..segment.n_tokens())
+                            .filter_map(|index| segment.get_token(index))
+                            .filter_map(|token| {
+                                let data = token.token_data();
+                                let bytes = token.to_bytes().ok()?.to_vec();
+                                Some((data.t0 as f64 / 100.0, data.t1 as f64 / 100.0, bytes))
+                            }),
+                    );
+                }
+                Some(kept)
             })
             .collect())
     }
@@ -661,7 +702,42 @@ fn keep_segment(start: f64, end: f64, text: String) -> Option<Segment> {
     if text.is_empty() || (text.starts_with('[') && text.ends_with(']')) {
         return None;
     }
-    (end > start).then_some(Segment { start, end, text })
+    (end > start).then_some(Segment {
+        start,
+        end,
+        text,
+        words: Vec::new(),
+    })
+}
+
+/// Whisper's tokens - `(start, end, text)` each - joined into words: one
+/// begins at a token that starts with a space. Its marks ("[_BEG_]",
+/// "[_TT_150]") are no words.
+fn words_of(tokens: impl Iterator<Item = (f64, f64, Vec<u8>)>) -> Vec<Word> {
+    let mut words: Vec<(f64, f64, Vec<u8>)> = Vec::new();
+    for (start, end, bytes) in tokens {
+        if bytes.starts_with(b"[_") || bytes.starts_with(b"<|") {
+            continue;
+        }
+        match words.last_mut() {
+            // a word's bytes are joined before they are read: a letter of
+            // another script may be split across tokens
+            Some(last) if !bytes.starts_with(b" ") => {
+                last.1 = last.1.max(end);
+                last.2.extend_from_slice(&bytes);
+            }
+            _ => words.push((start, end.max(start), bytes)),
+        }
+    }
+    words
+        .into_iter()
+        .map(|(start, end, bytes)| Word {
+            start,
+            end,
+            text: String::from_utf8_lossy(&bytes).trim().to_owned(),
+        })
+        .filter(|word| !word.text.is_empty())
+        .collect()
 }
 
 #[cfg(test)]
@@ -689,6 +765,7 @@ mod tests {
                     source_start: 0.0,
                     window,
                     model_id,
+                    words: false,
                 },
                 |_| {},
             )
@@ -717,6 +794,27 @@ mod tests {
         // Over no detected speech, or with no detector: whisper's times.
         assert_eq!(on_speech(40.0, 45.0, &speech), (40.0, 45.0));
         assert_eq!(on_speech(0.0, 7.0, &[]), (0.0, 7.0));
+    }
+
+    #[test]
+    fn tokens_join_into_words_with_the_times_they_span() {
+        let token = |a: f64, b: f64, t: &str| (a, b, t.as_bytes().to_vec());
+        let words = words_of(
+            [
+                token(0.0, 0.0, "[_BEG_]"),
+                token(0.1, 0.3, " Um"),
+                token(0.3, 0.35, ","),
+                token(0.5, 0.7, " hel"),
+                token(0.7, 0.9, "lo"),
+                token(1.0, 1.0, "[_TT_50]"),
+            ]
+            .into_iter(),
+        );
+        let read: Vec<(f64, f64, &str)> = words
+            .iter()
+            .map(|word| (word.start, word.end, word.text.as_str()))
+            .collect();
+        assert_eq!(read, vec![(0.1, 0.35, "Um,"), (0.5, 0.9, "hello")]);
     }
 
     #[test]
@@ -782,6 +880,7 @@ mod real_audio {
             source_start: 0.0,
             window: 30.0,
             model_id: "tiny.en".to_owned(),
+            words: false,
         };
         let segments = transcriber
             .transcribe(&dirs, &request, |stage| eprintln!("{stage:?}"))

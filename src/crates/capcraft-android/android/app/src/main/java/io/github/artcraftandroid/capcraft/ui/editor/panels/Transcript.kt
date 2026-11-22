@@ -48,6 +48,7 @@ import io.github.artcraftandroid.capcraft.ui.LucideIcons
 import io.github.artcraftandroid.capcraft.ui.Palette
 import io.github.artcraftandroid.capcraft.ui.Type
 import io.github.artcraftandroid.capcraft.ui.editor.EditorViewModel
+import io.github.artcraftandroid.capcraft.ui.editor.Panel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -179,6 +180,11 @@ fun TranscriptPanel(vm: EditorViewModel) {
                             done.view
                         }
                     }.padding(8.dp),
+                )
+                Text(
+                    "Fillers",
+                    style = Type.Small.copy(color = Palette.Accent),
+                    modifier = Modifier.clickable { vm.panel = Panel.Fillers }.padding(8.dp),
                 )
             }
         }

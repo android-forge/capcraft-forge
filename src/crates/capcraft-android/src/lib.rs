@@ -41,6 +41,7 @@ pub mod cutout;
 pub mod deflicker;
 pub mod enhance;
 pub mod export;
+pub mod fillers;
 pub mod frames;
 pub mod gif;
 pub mod history;

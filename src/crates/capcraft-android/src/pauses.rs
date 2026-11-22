@@ -78,7 +78,7 @@ fn after_cuts(t: f64, cuts: &[(f64, f64)]) -> f64 {
 
 /// `lines` moved to where they sit once `cuts` are taken out; a line that
 /// was all pause is dropped.
-fn moved(lines: Vec<TranscriptLine>, cuts: &[(f64, f64)]) -> Vec<TranscriptLine> {
+pub(crate) fn moved(lines: Vec<TranscriptLine>, cuts: &[(f64, f64)]) -> Vec<TranscriptLine> {
     lines
         .into_iter()
         .filter_map(|line| {

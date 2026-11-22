@@ -276,6 +276,7 @@ private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
     },
     Tool("stickers", "Stickers", LucideIcons.Sticker) { vm.panel = Panel.Stickers },
     Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
+    Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
     Tool("ratio", "Aspect ratio", LucideIcons.Square) { vm.panel = Panel.Ratio },
     Tool("background", "Background", MaterialIcons.Texture) { vm.dock = vm.dock + DockLevel.Group("background") },
 )
@@ -319,6 +320,8 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
     "captions" -> listOf(
         Tool("entercaptions", "Enter captions", LucideIcons.TextCursorInput) { vm.panel = Panel.EnterCaptions },
         Tool("autocaptions", "Auto Captions", LucideIcons.Captions) { vm.panel = Panel.Captions },
+        Tool("highlight", "Highlight", LucideIcons.Paintbrush) { vm.panel = Panel.Highlight },
+        Tool("captionemojis", "Emojis", LucideIcons.Smile) { io.github.artcraftandroid.capcraft.ui.editor.panels.toggleCaptionEmojis(vm) },
         Tool("captiontemplates", "Caption templates", LucideIcons.LayoutTemplate) { vm.panel = Panel.CaptionTemplates },
         Tool("autolyrics", "Auto lyrics", LucideIcons.Music) { vm.panel = Panel.Lyrics },
         Tool("importcaptions", "Import captions", LucideIcons.FolderOpen) { pickers.captions { vm.importCaptions(it) } },
@@ -402,6 +405,7 @@ private fun clipTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers
             Tool("style", "Style", LucideIcons.ALargeSmall) { vm.panel = Panel.Text(clip.id) },
             // every caption's words in one list
             Tool("editcaptions", "Edit captions", LucideIcons.TextCursorInput) { vm.panel = Panel.BatchEdit },
+            Tool("highlight", "Highlight", LucideIcons.Paintbrush) { vm.panel = Panel.Highlight },
             duplicate,
             delete,
             Tool("tts", "Text to speech", LucideIcons.AudioLines) { vm.panel = Panel.Speech(clip.id) },

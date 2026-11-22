@@ -19,7 +19,7 @@ use crate::lanes::RowKind;
 use crate::session::MobileSession;
 use crate::{MobileError, context};
 
-fn transcriber() -> &'static Transcriber {
+pub(crate) fn transcriber() -> &'static Transcriber {
     static ONE: OnceLock<Transcriber> = OnceLock::new();
     ONE.get_or_init(Transcriber::new)
 }
@@ -67,9 +67,10 @@ pub trait TranscriptListener: Send + Sync {
 
 /// What is heard on the timeline: each audible clip's window of its file,
 /// with where the clip starts and its speed, to be heard with `model_id`.
-fn heard(
+pub(crate) fn heard(
     session: &MobileSession,
     model_id: &str,
+    words: bool,
 ) -> Result<Vec<(f64, f64, TranscribeRequest)>, MobileError> {
     session.with_session(|session| {
         let project = session.project();
@@ -99,6 +100,7 @@ fn heard(
                         source_start: clip.source_start,
                         window: clip.duration * clip.speed,
                         model_id: model_id.to_owned(),
+                        words,
                     },
                 ))
             })
@@ -240,7 +242,7 @@ pub fn cancel_speech() {
     speech().cancel();
 }
 
-fn stage_of(stage: JobStage) -> (f32, String) {
+pub(crate) fn stage_of(stage: JobStage) -> (f32, String) {
     match stage {
         JobStage::Reading => (0.0, "read".to_owned()),
         JobStage::Loading => (0.0, "load".to_owned()),
@@ -335,7 +337,7 @@ impl MobileSession {
         listener: Arc<dyn SpeechListener>,
     ) -> Result<(), MobileError> {
         let dirs = context()?.dirs.clone();
-        let mut windows = heard(&self, &model_id)?;
+        let mut windows = heard(&self, &model_id, false)?;
         if windows.is_empty() {
             return Err(MobileError::Failed(
                 "There is no sound on the timeline to caption.".to_owned(),
@@ -436,7 +438,7 @@ impl MobileSession {
         listener: Arc<dyn TranscriptListener>,
     ) -> Result<(), MobileError> {
         let dirs = context()?.dirs.clone();
-        let windows = heard(&self, &model_id)?;
+        let windows = heard(&self, &model_id, false)?;
         if windows.is_empty() {
             return Err(MobileError::Failed(
                 "There is no sound on the timeline to transcribe.".to_owned(),

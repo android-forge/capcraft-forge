@@ -66,6 +66,8 @@ sealed interface Panel {
     data object Voiceover : Panel
     data object SoundFx : Panel
     data object Transcript : Panel
+    data object Fillers : Panel
+    data object Highlight : Panel
     data object Draw : Panel
     data object Tracking : Panel
     data object Enhance : Panel
