@@ -49,6 +49,9 @@ private val GRAPHS = listOf(
     Graph("Elastic", doubleArrayOf(0.5, -0.6, 0.5, 1.6)),
 )
 
+/** The mask's package. */
+private const val MASK_ID = "concat.mask"
+
 /** Two keys this close (as fractions of the clip) are one moment. */
 private const val NEAR = 0.002
 
@@ -61,12 +64,18 @@ fun GraphsPanel(vm: EditorViewModel) {
     val clip = vm.selectedClip ?: run { vm.panel = null; return }
     val keys: JSONArray = remember(clip.json) { vm.clipJson(clip.id)?.optJSONArray("keys") ?: JSONArray() }
     val at = ((vm.playhead - clip.startUs).toDouble() / clip.durationUs.coerceAtLeast(1)).coerceIn(0.0, 1.0)
-    val times = (0 until keys.length()).map { keys.getJSONObject(it).optDouble("at") }.sorted()
+    // the mask's keys, parameter by parameter: its link of the chain carries them
+    val chain: JSONArray = remember(clip.json) { vm.clipJson(clip.id)?.optJSONArray("videoEffects") ?: JSONArray() }
+    val maskKeys: List<JSONObject> = (0 until chain.length()).map { chain.getJSONObject(it) }.filter { it.optString("id") == MASK_ID }.flatMap { link ->
+        val by = link.optJSONObject("keys") ?: JSONObject()
+        by.keys().asSequence().flatMap { name -> by.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty() }.toList()
+    }
+    val times = ((0 until keys.length()).map { keys.getJSONObject(it) } + maskKeys).map { it.optDouble("at") }.sorted()
         .fold(mutableListOf<Double>()) { acc, t -> if (acc.isEmpty() || t - acc.last() > NEAR) acc.add(t); acc }
     // the key the stretch ends on: the first after the playhead, or the one under it
     val target = times.drop(1).firstOrNull { it > at + NEAR } ?: times.drop(1).lastOrNull { abs(it - at) <= NEAR }
     val current: DoubleArray? = target?.let { t ->
-        (0 until keys.length()).map { keys.getJSONObject(it) }.firstOrNull { abs(it.optDouble("at") - t) <= NEAR }?.let(::easeOf)
+        ((0 until keys.length()).map { keys.getJSONObject(it) } + maskKeys).firstOrNull { abs(it.optDouble("at") - t) <= NEAR }?.let(::easeOf)
     }
 
     fun apply(g: Graph) {
@@ -81,7 +90,26 @@ fun GraphsPanel(vm: EditorViewModel) {
                     .put("ease", JSONArray().apply { g.points.forEach { put(it) } }),
             )
         }
-        if (batch.length() > 0) vm.edit { applyBatch(batch.toString()) }
+        // and the mask's keys there, in the same step
+        if (maskKeys.any { abs(it.optDouble("at") - t) <= NEAR }) {
+            val next = JSONArray()
+            for (i in 0 until chain.length()) {
+                val link = JSONObject(chain.getJSONObject(i).toString())
+                if (link.optString("id") == MASK_ID) {
+                    val by = link.optJSONObject("keys") ?: JSONObject()
+                    by.keys().forEach { name ->
+                        val list = by.getJSONArray(name)
+                        for (j in 0 until list.length()) {
+                            val k = list.getJSONObject(j)
+                            if (abs(k.optDouble("at") - t) <= NEAR) k.put("ease", JSONArray().apply { g.points.forEach { put(it) } })
+                        }
+                    }
+                }
+                next.put(link)
+            }
+            batch.put(JSONObject().put("op", "updateClip").put("clipId", clip.id).put("patch", JSONObject().put("videoEffects", next)))
+        }
+        if (batch.length() > 0) vm.command(JSONObject().put("op", "batch").put("commands", batch))
     }
 
     // a curve of one's own: its handles dragged on a square below the shelf
