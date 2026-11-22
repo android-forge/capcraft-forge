@@ -87,12 +87,13 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                     // the smallest multilingual model and the English one
                     captionModels().filter { it.id == "tiny" || it.id == "base.en" || it.id == "base" }
                 } else {
-                    // the compact Kokoro first: the smallest download that reads in many voices
+                    // the one that reads words by their meaning first, then the compact Kokoro
                     voiceModels().sortedBy { m ->
                         when {
-                            m.id.contains("kokoro-int8") -> 0
-                            m.id.contains("kokoro") -> 1
-                            else -> 2
+                            m.family == "supertonic" -> 0
+                            m.id.contains("kokoro-int8") -> 1
+                            m.id.contains("kokoro") -> 2
+                            else -> 3
                         }
                     }
                 }
@@ -103,6 +104,7 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
         }.let { (m, v) ->
             models = m
             voiceList = v
+            if (voice == null) voice = v.firstOrNull { it.family == m.getOrNull(model)?.family }?.id
         }
     }
     DisposableEffect(Unit) { onDispose { if (job is Job.Running) runCatching { cancelSpeech() } } }
@@ -174,7 +176,11 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                         "base.en" -> "English"
                         else -> m.label
                     }
-                    Chip("$label · ${mb(m.sizeBytes)}${if (m.downloaded) "" else " ↓"}", i == model) { model = i }
+                    Chip("$label · ${mb(m.sizeBytes)}${if (m.downloaded) "" else " ↓"}", i == model) {
+                        model = i
+                        // a voice of another model cannot read for this one
+                        if (!captions && voiceList.none { it.id == voice && it.family == m.family }) voice = voiceList.firstOrNull { it.family == m.family }?.id
+                    }
                 }
             }
             if (!captions) {
@@ -255,7 +261,10 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                     ) { Text(label, style = Type.BodyStrong.copy(color = if (m == null) Palette.TextSecondary else Palette.OnAccent)) }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Runs on this phone. The model is downloaded once.",
+                        when {
+                            chosen?.family != "supertonic" -> "Runs on this phone. The model is downloaded once."
+                            else -> "Runs on this phone. The model is downloaded once, under its OpenRAIL-M licence: not for deceiving or harming anyone, or speaking as a real person without their consent. 31 languages."
+                        },
                         style = Type.Tiny,
                     )
                 }
@@ -275,6 +284,7 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 /** A voice's name as people read it: "af_heart" is Heart (US), "bm_george" George (UK). */
 private fun voiceLabel(raw: String): String {
     val parts = raw.split('_')
+    if (parts.first() == "supertonic") return (if (parts.last().startsWith("f")) "Woman " else "Man ") + parts.last().drop(1)
     val name = parts.last().replaceFirstChar { it.uppercase() }
     val accent = when (parts.firstOrNull()?.firstOrNull()) {
         'a' -> " (US)"

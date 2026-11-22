@@ -45,7 +45,7 @@ use concat_host::{AppDirs, SingleFlight, projects};
 use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
-    OfflineTtsModelConfig, OfflineTtsPocketModelConfig,
+    OfflineTtsModelConfig, OfflineTtsPocketModelConfig, OfflineTtsSupertonicModelConfig,
 };
 
 use crate::{DownloadProgress, JobStage};
@@ -60,6 +60,9 @@ pub enum Family {
     Kokoro,
     /// Kyutai's Pocket TTS: a voice is a reference recording.
     Pocket,
+    /// Supertone's Supertonic 3: ten voices, thirty-one languages, and
+    /// words read by their meaning rather than looked up.
+    Supertonic,
     /// Resemble's Chatterbox Turbo: a voice is a reference recording,
     /// and the engine is ONNX Runtime rather than sherpa.
     Chatterbox,
@@ -69,6 +72,8 @@ pub enum Family {
 pub fn family_of(id: &str) -> Family {
     if id.starts_with("sherpa-onnx-pocket-tts") {
         Family::Pocket
+    } else if id.starts_with("sherpa-onnx-supertonic") {
+        Family::Supertonic
     } else if id.starts_with("chatterbox") {
         Family::Chatterbox
     } else {
@@ -108,6 +113,13 @@ const KNOWN_MODELS: &[KnownModel] = &[
         // Nine files, each checked against its own digest in
         // `chatterbox::FILES`; this row never reaches `verify`.
         sha256: "",
+    },
+    KnownModel {
+        id: SUPERTONIC_ID,
+        label: "Supertonic 3 (natural)",
+        blurb: "Reads words by their meaning, in studio quality and thirty-one languages. The model is under the OpenRAIL-M licence.",
+        approx_bytes: 128_774_318,
+        sha256: "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427",
     },
     KnownModel {
         id: POCKET_ID,
@@ -196,6 +208,30 @@ pub const POCKET_CLONE: i32 = 1099;
 /// The Pocket bundle, which is also where the stock recordings live.
 pub const POCKET_ID: &str = "sherpa-onnx-pocket-tts-int8-2026-01-26";
 
+/// The Supertonic bundle.
+pub const SUPERTONIC_ID: &str = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11";
+
+/// Supertonic's voices, by our own id: the model's speaker is the id less
+/// [`SUPERTONIC_FIRST`].
+pub const SUPERTONIC_VOICES: &[(i32, &str)] = &[
+    (3000, "supertonic_f1"),
+    (3001, "supertonic_f2"),
+    (3002, "supertonic_f3"),
+    (3003, "supertonic_f4"),
+    (3004, "supertonic_f5"),
+    (3005, "supertonic_m1"),
+    (3006, "supertonic_m2"),
+    (3007, "supertonic_m3"),
+    (3008, "supertonic_m4"),
+    (3009, "supertonic_m5"),
+];
+
+const SUPERTONIC_FIRST: i32 = 3000;
+
+/// Supertonic's steps unless asked otherwise: five is its least, and eight
+/// is cleaner for a wait that is still shorter than the speech.
+const SUPERTONIC_STEPS: i32 = 8;
+
 /// Chatterbox's voices. The model has no speakers of its own and ships no
 /// recording of anyone's under a licence this build may carry, so its
 /// stock voice is Pocket's Bria recording, read from the Pocket bundle:
@@ -228,6 +264,8 @@ pub fn voice_family(voice: i32) -> Option<Family> {
         Some(Family::Kokoro)
     } else if POCKET_VOICES.iter().any(|(id, _, _)| *id == voice) {
         Some(Family::Pocket)
+    } else if SUPERTONIC_VOICES.iter().any(|(id, _)| *id == voice) {
+        Some(Family::Supertonic)
     } else if CHATTERBOX_VOICES.iter().any(|(id, _, _)| *id == voice) {
         Some(Family::Chatterbox)
     } else {
@@ -240,6 +278,7 @@ fn voice_name(voice: i32) -> Option<&'static str> {
     VOICES
         .iter()
         .find(|(id, _)| *id == voice)
+        .or_else(|| SUPERTONIC_VOICES.iter().find(|(id, _)| *id == voice))
         .map(|(_, name)| *name)
         .or_else(|| {
             POCKET_VOICES
@@ -571,6 +610,12 @@ impl Speech {
                     family: Family::Kokoro,
                     avatar: None,
                 })
+                .chain(SUPERTONIC_VOICES.iter().map(|(id, name)| VoiceInfo {
+                    id: *id,
+                    name: (*name).to_owned(),
+                    family: Family::Supertonic,
+                    avatar: None,
+                }))
                 .chain(POCKET_VOICES.iter().map(|(id, name, _)| VoiceInfo {
                     id: *id,
                     name: (*name).to_owned(),
@@ -834,6 +879,7 @@ impl Speech {
                 Ok(match family {
                     Family::Kokoro => Engine::Sherpa(load_kokoro(&dir, accelerated)?),
                     Family::Pocket => Engine::Sherpa(load_pocket(&dir, accelerated)?),
+                    Family::Supertonic => Engine::Sherpa(load_supertonic(&dir, accelerated)?),
                     #[cfg(feature = "chatterbox")]
                     Family::Chatterbox => Engine::Chatterbox(Box::new(
                         crate::chatterbox::Engine::load(&dir, accelerated)?,
@@ -972,6 +1018,23 @@ impl Speech {
                 silence_scale,
                 ..Default::default()
             },
+            Family::Supertonic => GenerationConfig {
+                sid: request.voice - SUPERTONIC_FIRST,
+                speed,
+                silence_scale,
+                num_steps: request
+                    .steps
+                    .map_or(SUPERTONIC_STEPS, |steps| steps.clamp(2, 16)),
+                extra: Some(
+                    [(
+                        "lang".to_owned(),
+                        serde_json::json!(crate::saying::language(text)),
+                    )]
+                    .into_iter()
+                    .collect(),
+                ),
+                ..Default::default()
+            },
             _ => {
                 progress(JobStage::Reading);
                 let samples = reference_samples(&recordings()?, request)?;
@@ -993,6 +1056,18 @@ impl Speech {
                 }
             }
         };
+
+        // Words are spelt as they sound where their spelling does not tell;
+        // the title or the caption they came from is not touched.
+        let language = crate::saying::language(text);
+        let said = match (language, family) {
+            ("en", Family::Supertonic) => {
+                crate::saying::in_words(&crate::saying::respell(text))
+            }
+            ("en", _) => crate::saying::respell(text),
+            _ => text.to_owned(),
+        };
+        let text = said.as_str();
 
         // Sherpa reports as each sentence is done, and the next is about
         // as long as the average one so far: before the first report, one
@@ -1242,6 +1317,40 @@ fn threads() -> i32 {
 ///
 /// The lexicon list mirrors the official sherpa-onnx invocation for this
 /// bundle: US English and Chinese, joined by commas, each only if present.
+/// The Supertonic bundle's networks, each by the start of its name, beside
+/// its tables.
+fn load_supertonic(dir: &Path, accelerated: bool) -> Result<OfflineTts, String> {
+    let network = |prefix: &str| {
+        onnx_starting(dir, prefix)
+            .ok_or_else(|| format!("the model folder has no {prefix} network - re-download it"))
+    };
+    let table = |name: &str| {
+        let path = dir.join(name);
+        path.is_file()
+            .then(|| path.to_string_lossy().into_owned())
+            .ok_or_else(|| format!("the model folder has no {name} - re-download it"))
+    };
+    let config = OfflineTtsConfig {
+        model: OfflineTtsModelConfig {
+            supertonic: OfflineTtsSupertonicModelConfig {
+                duration_predictor: Some(network("duration_predictor")?),
+                text_encoder: Some(network("text_encoder")?),
+                vector_estimator: Some(network("vector_estimator")?),
+                vocoder: Some(network("vocoder")?),
+                tts_json: Some(table("tts.json")?),
+                unicode_indexer: Some(table("unicode_indexer.bin")?),
+                voice_style: Some(table("voice.bin")?),
+            },
+            num_threads: threads(),
+            provider: Some(provider(accelerated).to_owned()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    OfflineTts::create(&config)
+        .ok_or_else(|| "the speech engine failed to load - try re-downloading the model".to_owned())
+}
+
 fn load_kokoro(dir: &Path, accelerated: bool) -> Result<OfflineTts, String> {
     let network = onnx_file(dir)
         .ok_or_else(|| "the model folder has no .onnx network - re-download it".to_owned())?;
@@ -1376,6 +1485,8 @@ mod tests {
         assert_eq!(voice_family(3), Some(Family::Kokoro));
         assert_eq!(voice_family(52), Some(Family::Kokoro));
         assert_eq!(voice_family(1000), Some(Family::Pocket));
+        assert_eq!(voice_family(3009), Some(Family::Supertonic));
+        assert_eq!(family_of(SUPERTONIC_ID), Family::Supertonic);
         assert_eq!(voice_family(POCKET_CLONE), Some(Family::Pocket));
         assert_eq!(voice_family(CHATTERBOX_CLONE), Some(Family::Chatterbox));
         assert_eq!(family_of("chatterbox-turbo-q8"), Family::Chatterbox);

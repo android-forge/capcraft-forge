@@ -47,6 +47,7 @@ pub mod fillers;
 pub mod finecut;
 pub mod frames;
 pub mod gif;
+pub mod graphics;
 pub mod groups;
 pub mod highlights;
 pub mod history;
