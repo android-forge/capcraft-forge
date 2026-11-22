@@ -16,7 +16,7 @@ use concat_export::ExportClip;
 use concat_host::preview::FrameSpec;
 use concat_host::session::Session;
 use concat_project::commands::{ClipPatch, NewMedia};
-use concat_project::model::{ClipKind, MediaKind, Timeline, VideoSettings};
+use concat_project::model::{Clip, ClipKind, MediaKind, Timeline, VideoSettings};
 use concat_project::{Command, DocumentSettings};
 use serde_json::{Value, json};
 
@@ -66,6 +66,8 @@ pub struct TimelineView {
     pub fps_den: i64,
     /// Where the last clip ends, in microseconds.
     pub duration_us: i64,
+    /// The timeline is HDR: it has an HDR clip.
+    pub hdr: bool,
     /// Whether there is an edit to undo.
     pub can_undo: bool,
     /// Whether there is an edit to redo.
@@ -232,6 +234,7 @@ impl MobileSession {
             fps_num: settings.rate_num,
             fps_den: settings.rate_den,
             duration_us: micros(duration),
+            hdr: session.video().color_space.is_hdr(),
             can_undo: session.can_undo(),
             can_redo: session.can_redo(),
             rows: lanes::rows(project),
@@ -1811,6 +1814,9 @@ impl MobileSession {
         } else {
             summary.to_new_media()
         };
+        if let Some(view) = self.replace_kind(&clip_id, &path, item.kind)? {
+            return Ok(view);
+        }
         self.run(vec![Command::ReplaceClipMedia {
             clip_id,
             item,
@@ -1955,6 +1961,73 @@ impl MobileSession {
 }
 
 impl MobileSession {
+    /// A video in a picture's place, or a picture in a video's: a clip of
+    /// the new file where the old one was, with its look, as one undo step.
+    /// The engine swaps a file for one of the same kind only, and showed a
+    /// video put in a picture's place as a still. None when the kinds match.
+    fn replace_kind(
+        &self,
+        clip_id: &str,
+        path: &str,
+        kind: MediaKind,
+    ) -> Result<Option<TimelineView>, MobileError> {
+        let timeline = self.timeline();
+        let Some(old) = timeline.clips.iter().find(|clip| clip.id == clip_id) else {
+            return Ok(None);
+        };
+        let differs = matches!(
+            (old.kind, kind),
+            (ClipKind::Image, MediaKind::Video) | (ClipKind::Video, MediaKind::Image)
+        );
+        if !differs {
+            return Ok(None);
+        }
+        let old = Clip::clone(old);
+        let main = lanes::on_main(&timeline, clip_id);
+        let media = self.import(path.to_owned())?;
+        // a video runs no longer than it is
+        let length = match kind {
+            MediaKind::Video => old.duration.min(self.media_length(&media.id)),
+            _ => old.duration,
+        };
+        let gesture = self.gesture();
+        let mut state = self.lock();
+        let put = (|| {
+            Self::apply_all(
+                &mut state,
+                vec![Command::RemoveClips {
+                    clip_ids: vec![old.id.clone()],
+                    ripple: main,
+                }],
+                Some(&gesture),
+            )?;
+            let made = Self::apply_all(
+                &mut state,
+                vec![Command::AddClip {
+                    media_id: media.id.clone(),
+                    track_id: old.track_id.clone(),
+                    start: old.start,
+                    ripple: main,
+                }],
+                Some(&gesture),
+            )?
+            .ok_or_else(|| "the new clip has no id".to_owned())?;
+            // the look goes over; where in the old file it began, how fast it ran and its animations do not
+            let like = Clip {
+                source_start: 0.0,
+                speed: 1.0,
+                speed_curve: None,
+                duration: length,
+                ..old.clone()
+            };
+            copy_look(&mut state, &like, &made, &gesture)?;
+            Ok::<_, MobileError>(made)
+        })();
+        state.session.end_gesture();
+        let made = put?;
+        Ok(Some(Self::changed(&mut state, Some(made))))
+    }
+
     /// Moves a clip the engine placed itself onto a lane of `kind`, when
     /// the lane it got holds other kinds: a free lane of the kind, or a new
     /// one, as a move of `gesture`.

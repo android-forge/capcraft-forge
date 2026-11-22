@@ -86,6 +86,12 @@ private fun multiTools(vm: EditorViewModel): List<Tool> {
             vm.edit { delete(chosen.toList()) }
             vm.chosen = null
         },
+        // video clips side by side, made one
+        Tool("compound", "Compound clip", LucideIcons.Layers2, enabled = chosen.size >= 2 && chosen.all { vm.clip(it)?.kind == "video" }) {
+            val ids = chosen.toList()
+            vm.chosen = null
+            vm.compound(ids)
+        },
         // clips off the main track, to move and go together
         Tool("group", "Group", LucideIcons.Link2, enabled = chosen.count { vm.rowOf(it)?.kind != RowKind.MAIN } >= 2) {
             val ids = chosen.filter { vm.rowOf(it)?.kind != RowKind.MAIN }
@@ -369,7 +375,12 @@ private fun clipSubTools(vm: EditorViewModel, clip: ClipView, level: String): Li
 
 private fun clipTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers: Pickers): List<Tool> {
     val tools = ownTools(vm, clip, row, pickers)
-    if (row == RowKind.MAIN) return tools
+    if (row == RowKind.MAIN) {
+        return tools + Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {
+            vm.select(null)
+            vm.chosen = setOf(clip.id)
+        }
+    }
     // several clips off the main track go together: choose them, or take a group apart
     val grouped = clip.id in vm.groupOf(clip.id)
     return buildList {
@@ -478,6 +489,8 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             add(Tool("crop", "Crop", LucideIcons.Crop) { vm.panel = Panel.Crop })
             add(duplicate)
             add(Tool("replace", "Replace", LucideIcons.Repeat) { pickers.single { vm.replace(clip, it) } })
+            // a live photo's picture moves: its video takes its place
+            if (!video) add(Tool("live", "Live photo", LucideIcons.ImagePlay) { vm.playLive(clip) })
             if (main) add(Tool("tooverlay", "Overlay", LucideIcons.Shuffle) { vm.switchToOverlay(clip) })
             else add(Tool("tomain", "Maintrack", LucideIcons.Shuffle) { vm.switchToMain(clip) })
             add(Tool("adjust", "Adjust", LucideIcons.Settings2) { vm.panel = Panel.Adjust })

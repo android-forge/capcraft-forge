@@ -37,6 +37,9 @@ import io.github.artcraftandroid.capcraft.core.SpeechListener
 import io.github.artcraftandroid.capcraft.core.SpeechModel
 import io.github.artcraftandroid.capcraft.core.TimelineView
 import io.github.artcraftandroid.capcraft.core.Voice
+import io.github.artcraftandroid.capcraft.core.hasMyVoice
+import io.github.artcraftandroid.capcraft.core.myVoiceId
+import io.github.artcraftandroid.capcraft.ui.editor.Panel
 import io.github.artcraftandroid.capcraft.core.cancelSpeech
 import io.github.artcraftandroid.capcraft.core.captionModels
 import io.github.artcraftandroid.capcraft.core.downloadSpeechModel
@@ -179,6 +182,13 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                 Text("Voice", style = Type.Small)
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // the user's own, recorded by them; only Pocket reads in one
+                    if (chosen?.family == "pocket") {
+                        Chip("My voice", voice == myVoiceId()) {
+                            if (hasMyVoice()) voice = myVoiceId() else vm.panel = Panel.MyVoice
+                        }
+                        if (voice == myVoiceId()) Chip("Change my voice", false) { vm.panel = Panel.MyVoice }
+                    }
                     voiceList.filter { chosen == null || it.family == chosen.family }.take(40).forEach { v ->
                         Chip(voiceLabel(v.name), voice == v.id) { voice = v.id }
                     }

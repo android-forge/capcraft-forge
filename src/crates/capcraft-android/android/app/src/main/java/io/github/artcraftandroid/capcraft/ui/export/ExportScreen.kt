@@ -122,6 +122,18 @@ fun ExportScreen(vm: EditorViewModel, onClose: () -> Unit, onHome: () -> Unit) {
             // a photo: the frame under the playhead at the chosen size, saved straight to Pictures
             val size = exportSize(t.width, t.height, exportResolutionOf(vm).toUInt())
             val at = vm.playhead.coerceIn(0, (t.durationUs - 1).coerceAtLeast(0))
+            if (vm.exportLive) {
+                val made = withContext(Threads.preview) {
+                    runCatching {
+                        io.github.artcraftandroid.capcraft.engine.LivePhoto.make(context, s, at, t.durationUs, size[0].toInt(), size[1].toInt()) { f ->
+                            scope.launch(Dispatchers.Main) { progress = f }
+                        }
+                    }
+                }
+                val uri = made.getOrNull()?.let { withContext(Dispatchers.IO) { publishLive(context, it) } }
+                stage = if (uri != null) Stage.Done(uri) else Stage.Failed(made.exceptionOrNull()?.userMessage ?: "The photo could not be saved.")
+                return@LaunchedEffect
+            }
             val picture = withContext(Threads.preview) {
                 runCatching { s.frame(at, size[0], size[1], Motion.STILL).intoBitmap(null) }.getOrNull()
             }
@@ -175,7 +187,7 @@ fun ExportScreen(vm: EditorViewModel, onClose: () -> Unit, onHome: () -> Unit) {
                 } else {
                     startExport(
                         s,
-                        ExportSettings(res.toUInt(), vm.exportFps.toUInt(), kbps.toUInt(), false, out),
+                        ExportSettings(res.toUInt(), vm.exportFps.toUInt(), kbps.toUInt(), false, vm.exportHdr && t.hdr, out),
                         listener,
                     )
                 }
@@ -331,8 +343,14 @@ private fun open(context: Context, uri: Uri, gif: Boolean, photo: Boolean = fals
 }
 
 /** Saves a still as a JPEG in Pictures/CapCraft. */
-private fun publishPhoto(context: Context, picture: Bitmap): Uri? = runCatching {
-    val name = "CapCraftForge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg"
+private fun publishPhoto(context: Context, picture: Bitmap): Uri? =
+    publishJpeg(context, ".jpg") { out -> picture.compress(Bitmap.CompressFormat.JPEG, 95, out) }
+
+/** Saves a live photo to Pictures/CapCraft Forge, under the kind of name phones tell one by. */
+private fun publishLive(context: Context, bytes: ByteArray): Uri? = publishJpeg(context, ".MP.jpg") { it.write(bytes) }
+
+private fun publishJpeg(context: Context, ending: String, write: (java.io.OutputStream) -> Unit): Uri? = runCatching {
+    val name = "CapCraftForge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ending
     val values = ContentValues().apply {
         put(MediaStore.Images.Media.DISPLAY_NAME, name)
         put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
@@ -342,7 +360,7 @@ private fun publishPhoto(context: Context, picture: Bitmap): Uri? = runCatching 
     val resolver = context.contentResolver
     val uri = resolver.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
         ?: return@runCatching null
-    resolver.openOutputStream(uri)?.use { out -> picture.compress(Bitmap.CompressFormat.JPEG, 95, out) }
+    resolver.openOutputStream(uri)?.use { out -> write(out) }
     values.clear()
     values.put(MediaStore.Images.Media.IS_PENDING, 0)
     resolver.update(uri, values, null, null)

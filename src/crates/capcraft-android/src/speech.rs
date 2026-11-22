@@ -591,13 +591,14 @@ fn speak_onto(
 ) -> Result<(), MobileError> {
     let dirs = context()?.dirs.clone();
     let project = session.with_session(|s| Ok(s.path().to_owned()))?;
+    let reference = crate::myvoice::reference(voice)?;
     std::thread::Builder::new()
         .name("capcraft-speech".to_owned())
         .spawn(move || {
             let request = SpeakRequest {
                 model_id,
                 voice,
-                reference: None,
+                reference,
                 text,
                 speed: 1.0,
                 pauses: None,
@@ -809,6 +810,7 @@ impl MobileSession {
         let dirs = context()?.dirs.clone();
         let project = self.with_session(|session| Ok(session.path().to_owned()))?;
         let start = crate::seconds(at_us).max(0.0);
+        let reference = crate::myvoice::reference(voice)?;
         std::thread::Builder::new()
             .name("capcraft-captions".to_owned())
             .spawn(move || {
@@ -818,7 +820,7 @@ impl MobileSession {
                     let request = SpeakRequest {
                         model_id: model_id.clone(),
                         voice,
-                        reference: None,
+                        reference: reference.clone(),
                         text: line.clone(),
                         speed: 1.0,
                         pauses: None,

@@ -67,6 +67,7 @@ sealed interface Panel {
     data object SoundFx : Panel
     data object Transcript : Panel
     data object Fillers : Panel
+    data object MyVoice : Panel
     data object AutoHighlight : Panel
     data object PreviewQuality : Panel
     data object Highlight : Panel
@@ -680,6 +681,10 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     var exportGif by mutableStateOf(false)
     /** The export a still of the frame under the playhead, as a picture, rather than a video or GIF. */
     var exportPhoto by mutableStateOf(false)
+    /** An HDR timeline's HDR kept in the export. */
+    var exportHdr by mutableStateOf(true)
+    /** A photo is saved with the video round it behind it, as a live photo. */
+    var exportLive by mutableStateOf(false)
     /** The export sheet offers Photo: in a photo project or one opened to capture a frame, as the reference's video projects offer only video and GIF. */
     var photoTab by mutableStateOf(false)
     /** The sound clip the Sounds page's choice takes the place of, when it was opened by Replace. */
@@ -925,7 +930,56 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 }
             }
             busy = null
-            result.onSuccess { timeline = it; scheduleSave() }.onFailure { fail(it) }
+            // a video in a picture's place is a clip of its own
+            result.onSuccess { timeline = it; if (it.createdId.isNotEmpty()) selected = it.createdId; scheduleSave() }.onFailure { fail(it) }
+        }
+    }
+
+    /** Makes the video clips [ids] one, rendered as they look; says how far along it is meanwhile. */
+    fun compound(ids: List<String>) {
+        val s = session ?: return
+        busy = "Making a compound clip"
+        val listener = object : io.github.artcraftandroid.capcraft.core.CompoundListener {
+            override fun onProgress(fraction: Float) {
+                viewModelScope.launch { if (busy != null) busy = "Making a compound clip ${(fraction * 100).toInt()}%" }
+            }
+
+            override fun onDone(view: TimelineView) {
+                viewModelScope.launch {
+                    busy = null
+                    applyView(view)
+                    message = "Made one clip"
+                }
+            }
+
+            override fun onFailed(message: String, cancelled: Boolean) {
+                viewModelScope.launch {
+                    busy = null
+                    if (!cancelled) this@EditorViewModel.message = message
+                }
+            }
+        }
+        viewModelScope.launch {
+            withContext(Threads.commands) { runCatching { s.compound(ids, listener) } }.onFailure { busy = null; fail(it) }
+        }
+    }
+
+    /** Puts a live photo's video in the place of its picture, or says there is none in it. */
+    fun playLive(clip: ClipView) {
+        val s = session ?: return
+        viewModelScope.launch {
+            busy = "Looking for the video"
+            val result = withContext(Threads.commands) {
+                runCatching { io.github.artcraftandroid.capcraft.engine.LivePhoto.takeOut(java.io.File(clip.path))?.let { s.replaceMedia(clip.id, it.absolutePath) } }
+            }
+            busy = null
+            result.onSuccess { v ->
+                if (v == null) message = "This photo has no video in it" else {
+                    timeline = v
+                    selected = v.createdId.ifEmpty { null }
+                    scheduleSave()
+                }
+            }.onFailure { fail(it) }
         }
     }
 

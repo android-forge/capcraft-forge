@@ -86,7 +86,7 @@ fun ExportSheet(vm: EditorViewModel, onExport: () -> Unit) {
         ) {
             Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) {
-                    Tabs(if (vm.photoTab) listOf("Video", "GIF", "Photo") else listOf("Video", "GIF"), if (vm.exportPhoto) 2 else if (vm.exportGif) 1 else 0) {
+                    Tabs(listOf("Video", "GIF", "Photo"), if (vm.exportPhoto) 2 else if (vm.exportGif) 1 else 0) {
                         vm.exportGif = it == 1
                         vm.exportPhoto = it == 2
                     }
@@ -136,6 +136,7 @@ fun ExportSheet(vm: EditorViewModel, onExport: () -> Unit) {
                 vm.exportResolution = RESOLUTIONS[it.roundToInt().coerceIn(0, RESOLUTIONS.size - 1)]
             }
             if (vm.exportPhoto) {
+                SwitchRow("Live photo", "With the video round it, silent", vm.exportLive) { vm.exportLive = !vm.exportLive }
                 Divider()
                 Text(
                     "The picture under the playhead, saved as a photo",
@@ -156,6 +157,7 @@ fun ExportSheet(vm: EditorViewModel, onExport: () -> Unit) {
                 // the suggestion is sticky, so it can be found again
                 vm.exportMbps = if (abs(chosen - suggested) <= max(1, suggested / 10)) null else chosen
             }
+            if (t.hdr) SwitchRow("HDR", "Keeps the video's HDR, in H.265", vm.exportHdr) { vm.exportHdr = !vm.exportHdr }
             Divider()
             val kbps = exportKbps(vm, dims[0].toInt(), dims[1].toInt())
             val mb = (kbps + 128) / 8.0 / 1000.0 * (t.durationUs / 1e6)
@@ -175,6 +177,24 @@ private val RESOLUTION_HINTS = listOf(
     "Extra sharp on big screens",
     "The finest detail, the biggest file",
 )
+
+/** A setting that is on or off: its name over a line about it, and a switch. */
+@Composable
+private fun SwitchRow(label: String, hint: String, on: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = Type.Body.copy(fontSize = 16.sp, color = Palette.Text))
+            Text(hint, style = Type.Small.copy(fontSize = 12.sp, color = Palette.TextSecondary))
+        }
+        Box(
+            Modifier.width(40.dp).height(24.dp).clip(RoundedCornerShape(12.dp)).background(if (on) Palette.Accent else Color(0xFF555555)).padding(3.dp),
+            contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
+        ) { Box(Modifier.width(18.dp).height(18.dp).clip(RoundedCornerShape(9.dp)).background(Color.White)) }
+    }
+}
 
 @Composable
 private fun Divider() {
