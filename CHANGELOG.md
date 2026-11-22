@@ -31,4 +31,8 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Builds on a Mac as `mobile-env.sh` sets it up (#52). Photo is offered in every project's export.
 - Remove objects: the people and things in a photo found, removed with the picture filled in behind, or put over the video; on
   main and overlay photos.
+- Exposure in Adjust. Light people: people given the light they want, the rest left alone. Fine cutout: branches and other fine
+  things cut from the sky. Atmosphere: overlays of the user's own, laid with a preset for their kind, behind people if asked.
+- A much smaller app (38 MB, from 116): ONNX Runtime linked once, FFmpeg without what an editor of files never uses, the native
+  libraries packed, the less-used fonts downloaded when wanted. The baseline profile is in, so it starts and scrolls smoothly.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

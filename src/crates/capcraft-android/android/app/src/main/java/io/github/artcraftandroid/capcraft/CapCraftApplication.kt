@@ -35,6 +35,12 @@ class CapCraftApplication : Application() {
     @Volatile
     private var engineLoaded = false
 
+    override fun onCreate() {
+        super.onCreate()
+        // begun with the process rather than with the first screen: it is ready the sooner
+        engine
+    }
+
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN && engineLoaded) {

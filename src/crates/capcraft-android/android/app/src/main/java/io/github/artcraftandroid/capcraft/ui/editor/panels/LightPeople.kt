@@ -32,7 +32,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** The copy of [clipId]'s people a body effect made, by id, with the effect's name; null when it has none. */
-private fun bodyOf(vm: EditorViewModel, clipId: String): Pair<String, String>? = runCatching {
+internal fun bodyOf(vm: EditorViewModel, clipId: String): Pair<String, String>? = runCatching {
     val all = vm.session?.extra("capcraftBody")?.takeIf { it.isNotBlank() }?.let(::JSONObject) ?: return null
     val mine = all.optJSONObject(clipId) ?: return null
     mine.optString("copy") to mine.optString("kind")

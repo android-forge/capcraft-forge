@@ -290,6 +290,8 @@ private object Trying {
     var id by mutableStateOf<String?>(null)
     var strength by mutableFloatStateOf(0.7f)
     var busy by mutableStateOf(false)
+    /** The last one laid is behind the people. */
+    @Volatile var behind = false
 }
 
 private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, file: OverlayFile) {
@@ -311,13 +313,19 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
             val out = Media.uniqueFile(dir, Media.safeName(file.name) + ".jpg")
             out.outputStream().use { picture.compress(Bitmap.CompressFormat.JPEG, 92, it) }
             val how = laid(presetFor(file.category), seen(small), scene, t.width.toFloat() / t.height.toFloat())
-            s.layOver(clip.id, out.absolutePath, how) to how
+            // the people stay in front of the next one tried, where they were of the last
+            val stay = Trying.behind
+            var view = s.layOver(clip.id, out.absolutePath, how)
+            val made = view.createdId
+            val copy = bodyOf(vm, clip.id)?.first
+            if (stay && copy != null) view = s.restack(copy, 99)
+            Triple(view, how, made)
         }
     }
     Trying.busy = false
-    result.onSuccess { (view, how) ->
+    result.onSuccess { (view, how, made) ->
         vm.applyView(view)
-        Trying.id = view.createdId.ifEmpty { null }
+        Trying.id = made.ifEmpty { null }
         Trying.file = file
         Trying.strength = how.opacity.toFloat()
     }.onFailure { vm.message = it.userMessage }
@@ -374,8 +382,18 @@ fun AtmospherePanel(vm: EditorViewModel) {
             }
         }
     }
-    val front = clip != null && runCatching { vm.session?.extra("capcraftBody")?.takeIf { it.isNotBlank() }?.let(::JSONObject)?.optJSONObject(clip.id)?.optString("kind") }.getOrNull().let { it == "front" || it?.startsWith("light:") == true }
+    // whether the people's copy is in front of the overlay: the boxes come the front one first
+    val front by produceState(false, vm.timeline?.revision, Trying.id, clip?.id) {
+        val over = Trying.id
+        val copy = clip?.let { bodyOf(vm, it.id) }?.first
+        val s = vm.session
+        val at = clip?.let { vm.playhead.coerceIn(it.startUs, it.startUs + it.durationUs - 1) } ?: 0L
+        value = if (over == null || copy == null || s == null) false else withContext(Threads.commands) {
+            runCatching { s.clipBoxes(at).map { it.clipId } }.getOrDefault(emptyList()).let { o -> copy in o && over in o && o.indexOf(copy) < o.indexOf(over) }
+        }
+    }
 
+    if (Trying.id != null) Trying.behind = front
     PanelFrame("Atmosphere", vm, tall = true, titleOnTop = true, left = {
         if (Trying.id != null && !Trying.busy) {
             Text(
@@ -431,9 +449,18 @@ fun AtmospherePanel(vm: EditorViewModel) {
                             val s = vm.session ?: return@Choice
                             val c = clip ?: return@Choice
                             if (finding != null) return@Choice
-                            finding = ""
-                            scope.launch(Threads.commands) {
-                                runCatching { s.bodyEffect(c.id, if (front) "" else "front", listener) }.onFailure { e -> withContext(Dispatchers.Main) { finding = null; vm.message = e.userMessage } }
+                            val over = Trying.id ?: return@Choice
+                            val body = bodyOf(vm, c.id)
+                            when {
+                                // the people are cut out already, for their light or an effect: one or the other goes to the front
+                                body != null && !front -> vm.edit { restack(body.first, 99) }
+                                body != null && body.second != "front" -> vm.edit { restack(over, 99) }
+                                else -> {
+                                    finding = ""
+                                    scope.launch(Threads.commands) {
+                                        runCatching { s.bodyEffect(c.id, if (front) "" else "front", listener) }.onFailure { e -> withContext(Dispatchers.Main) { finding = null; vm.message = e.userMessage } }
+                                    }
+                                }
                             }
                         }
                         Spacer(Modifier.weight(1f))
