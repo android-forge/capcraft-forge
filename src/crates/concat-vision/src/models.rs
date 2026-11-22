@@ -37,6 +37,10 @@ pub enum ModelId {
     /// Real-ESRGAN's compact general model: a picture four times its size
     /// with its noise and compression gone, what Enhance is made of.
     Enhance,
+    /// YOLOX-S: the people and everyday things in a picture, a box each.
+    Detect,
+    /// MI-GAN: the gap a thing taken out of a picture leaves, filled.
+    Erase,
 }
 
 /// One model as the table describes it.
@@ -60,7 +64,7 @@ pub struct ModelSpec {
 }
 
 /// Every downloadable model.
-pub const MODELS: [ModelSpec; 5] = [
+pub const MODELS: [ModelSpec; 7] = [
     ModelSpec {
         id: ModelId::Person,
         file: "rvm-mobilenetv3.onnx",
@@ -101,6 +105,22 @@ pub const MODELS: [ModelSpec; 5] = [
         sha256: "1940a93ee08283a0a7286183186357b1688fe9fa8ede74604b424586aaddf112",
         licence: "BSD-3-Clause",
     },
+    ModelSpec {
+        id: ModelId::Detect,
+        file: "yolox-s.onnx",
+        upstream: "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx",
+        bytes: 35_858_002,
+        sha256: "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
+        licence: "Apache-2.0",
+    },
+    ModelSpec {
+        id: ModelId::Erase,
+        file: "migan-512-places2.onnx",
+        upstream: "https://huggingface.co/andraniksargsyan/migan/resolve/406830d0fa60666da0071c342ad2fbc8f30c5c64/migan.onnx",
+        bytes: 29_546_882,
+        sha256: "593eba0b7e04730f1b61c0a3cbca68d97d8d6a7ff5c6a44a7b9d7fcd880fc5ae",
+        licence: "MIT",
+    },
 ];
 
 impl ModelId {
@@ -120,6 +140,8 @@ impl ModelId {
             ModelId::BrushEncoder => "slimsam-77-encoder",
             ModelId::BrushDecoder => "slimsam-77-decoder",
             ModelId::Enhance => "realesr-general-x4v3",
+            ModelId::Detect => "yolox-s",
+            ModelId::Erase => "migan-512-places2",
         }
     }
 }

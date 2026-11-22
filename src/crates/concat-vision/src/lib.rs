@@ -48,16 +48,23 @@ pub mod apply;
 #[cfg(feature = "infer")]
 pub mod brush;
 pub mod compact;
+#[cfg(feature = "infer")]
+pub mod detect;
 pub mod enhance;
+#[cfg(feature = "infer")]
+pub mod erase;
 pub mod mask;
 pub mod models;
 pub mod onnx;
+#[cfg(feature = "infer")]
+pub mod outline;
 #[cfg(feature = "infer")]
 pub mod runtime;
 #[cfg(feature = "infer")]
 pub mod segment;
 pub mod stabilize;
 pub mod store;
+pub mod window;
 pub mod strokes;
 
 pub use apply::{Mapping, cut, highlight};

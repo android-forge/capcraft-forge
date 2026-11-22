@@ -225,6 +225,13 @@ except the first:
 - SlimSAM (https://github.com/czg1225/SlimSAM, Apache-2.0), in the ONNX
   export published at https://huggingface.co/Xenova/slimsam-77-uniform
   (Apache-2.0), downloaded on first use. The brushes' model.
+- YOLOX-S (https://github.com/Megvii-BaseDetection/YOLOX, Apache-2.0,
+  Megvii), in the ONNX export its releases publish, downloaded on first use.
+  Finds the people and things in a photo. Used by CapCraft Forge.
+- MI-GAN (https://github.com/Picsart-AI-Research/MI-GAN, code and weights
+  MIT, Picsart AI Research), in the ONNX export one of its authors publishes
+  at https://huggingface.co/andraniksargsyan/migan (MIT), downloaded on first
+  use. Fills in what was behind a thing removed. Used by CapCraft Forge.
 
 Downloaded models live in the app's data directory under `cutout-models`
 and are never bundled; the three that are downloaded come from Concat's own

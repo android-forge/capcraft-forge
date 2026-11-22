@@ -30,6 +30,14 @@ pub enum Data {
     F32(Vec<f32>),
     /// Integer values.
     I64(Vec<i64>),
+    /// Bytes: a picture as it is.
+    U8(Vec<u8>),
+}
+
+impl From<Vec<u8>> for Data {
+    fn from(values: Vec<u8>) -> Data {
+        Data::U8(values)
+    }
 }
 
 impl From<Vec<f32>> for Data {
@@ -148,24 +156,9 @@ impl Model {
     /// Runs the model on `inputs` and returns the named outputs, in the
     /// order asked for.
     pub fn run(&mut self, inputs: Vec<Input<'_>>, outputs: &[&str]) -> Result<Vec<Output>, String> {
-        let mut fed: Vec<(
-            std::borrow::Cow<'static, str>,
-            ort::session::SessionInputValue<'_>,
-        )> = Vec::with_capacity(inputs.len());
-        for input in inputs {
-            let value: ort::session::SessionInputValue<'_> = match input.data {
-                Data::F32(data) => Tensor::from_array((input.dims, data))
-                    .map_err(|error| format!("cutout input {}: {error}", input.name))?
-                    .into(),
-                Data::I64(data) => Tensor::from_array((input.dims, data))
-                    .map_err(|error| format!("cutout input {}: {error}", input.name))?
-                    .into(),
-            };
-            fed.push((input.name.to_owned().into(), value));
-        }
         let answered = self
             .session
-            .run(fed)
+            .run(fed(inputs)?)
             .map_err(|error| format!("cutout: {error}"))?;
         outputs
             .iter()
@@ -183,6 +176,43 @@ impl Model {
             })
             .collect()
     }
+
+    /// Runs the model on `inputs` and returns its output `name`, one of
+    /// bytes.
+    pub fn run_bytes(&mut self, inputs: Vec<Input<'_>>, name: &str) -> Result<Vec<u8>, String> {
+        let answered = self
+            .session
+            .run(fed(inputs)?)
+            .map_err(|error| format!("model: {error}"))?;
+        let value = answered
+            .get(name)
+            .ok_or_else(|| format!("the model has no output {name:?}"))?;
+        let (_, data) = value
+            .try_extract_tensor::<u8>()
+            .map_err(|error| format!("model output {name}: {error}"))?;
+        Ok(data.to_vec())
+    }
+}
+
+/// A run's inputs as the runtime takes them.
+type Fed<'v> = Vec<(
+    std::borrow::Cow<'static, str>,
+    ort::session::SessionInputValue<'v>,
+)>;
+
+fn fed<'v>(inputs: Vec<Input<'_>>) -> Result<Fed<'v>, String> {
+    inputs
+        .into_iter()
+        .map(|input| {
+            let failed = |error: ort::Error| format!("cutout input {}: {error}", input.name);
+            let value: ort::session::SessionInputValue<'v> = match input.data {
+                Data::F32(data) => Tensor::from_array((input.dims, data)).map_err(failed)?.into(),
+                Data::I64(data) => Tensor::from_array((input.dims, data)).map_err(failed)?.into(),
+                Data::U8(data) => Tensor::from_array((input.dims, data)).map_err(failed)?.into(),
+            };
+            Ok((input.name.to_owned().into(), value))
+        })
+        .collect()
 }
 
 /// The platform's accelerators, ahead of the CPU. A provider the machine

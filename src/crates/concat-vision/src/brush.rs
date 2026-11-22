@@ -135,7 +135,7 @@ impl Brush {
                 .collect()
         };
         // Three candidates, scored; the model's own best guess wins.
-        let candidates = self.candidates(embedding, &picked)?;
+        let candidates = self.candidates(embedding, &picked, &[])?;
         candidates
             .into_iter()
             .max_by(|a, b| a.0.total_cmp(&b.0))
@@ -155,7 +155,7 @@ impl Brush {
         if prompts.is_empty() {
             return Ok(None);
         }
-        let candidates = self.candidates(embedding, &prompts)?;
+        let candidates = self.candidates(embedding, &prompts, &[])?;
         let best = candidates
             .into_iter()
             .map(|(_, mask)| (overlap(&mask, previous), mask))
@@ -165,19 +165,33 @@ impl Brush {
             .map(|(_, mask)| mask))
     }
 
-    /// The model's three answers for `picked` points, each with the
-    /// score it gives itself, as masks over the source picture.
+    /// Every answer the model has for the thing at `on` and not at `off`,
+    /// points as fractions of the picture, with how sure it is of each.
+    pub fn answers(
+        &self,
+        embedding: &Embedding,
+        on: &[[f64; 2]],
+        off: &[[f64; 2]],
+    ) -> Result<Vec<(f32, Mask)>, String> {
+        self.candidates(embedding, on, off)
+    }
+
+    /// The model's three answers for `picked` points and against `off`, each
+    /// with the score it gives itself, as masks over the source picture.
     fn candidates(
         &self,
         embedding: &Embedding,
         picked: &[[f64; 2]],
+        off: &[[f64; 2]],
     ) -> Result<Vec<(f32, Mask)>, String> {
         if picked.is_empty() {
             return Err("brush: a stroke with no points".to_owned());
         }
         let (sw, sh) = embedding.scaled;
+        let count = picked.len() + off.len();
         let coords: Vec<f32> = picked
             .iter()
+            .chain(off)
             .flat_map(|[x, y]| {
                 [
                     (*x as f32).clamp(0.0, 1.0) * sw,
@@ -185,16 +199,16 @@ impl Brush {
                 ]
             })
             .collect();
-        let labels = vec![1i64; picked.len()];
+        let labels: Vec<i64> = (0..count).map(|i| i64::from(i < picked.len())).collect();
         let inputs = vec![
             Input {
                 name: "input_points",
-                dims: vec![1, 1, picked.len(), 2],
+                dims: vec![1, 1, count, 2],
                 data: coords.into(),
             },
             Input {
                 name: "input_labels",
-                dims: vec![1, 1, picked.len()],
+                dims: vec![1, 1, count],
                 data: labels.into(),
             },
             Input {
