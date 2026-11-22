@@ -38,6 +38,8 @@
 //! stores them, so a title looks the same at 720p and 4K. Everything here
 //! converts to pixels once, at the top.
 
+mod colr;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
@@ -1121,17 +1123,16 @@ fn own_colours(face: &ttf_parser::Face<'_>, glyph: ttf_parser::GlyphId) -> bool 
     if !face.is_color_glyph(glyph) {
         return false;
     }
-    // Probed rather than trusted: a `COLR` v1 glyph drawn with gradients
-    // or clips would come out wrong, and a face that only has those would
-    // draw nothing at all - a box, or a fallback face, beats that.
-    Layering::of(face, glyph, ttf_parser::RgbaColor::new(0, 0, 0, 255)).is_some()
+    // Probed rather than trusted: the plain layers, or else whatever the
+    // version 1 painter makes of it at a size too small to cost much.
+    let black = ttf_parser::RgbaColor::new(0, 0, 0, 255);
+    Layering::of(face, glyph, black).is_some() || colr::paint(face, glyph, 16.0, black).is_some()
 }
 
 /// What a face's `COLR` says about one glyph: the layers it paints, as
 /// glyph and palette colour, in the order they go down - and whether it
-/// painted only what this crate follows. A gradient, a clip, a transform
-/// or a composite mode would come out wrong or not at all, so the glyph
-/// falls back to its outline instead.
+/// painted only solid fills. A gradient, a clip, a transform or a composite
+/// mode is painted into a picture instead; see [`colr`].
 struct Layering {
     layers: Vec<(ttf_parser::GlyphId, ttf_parser::RgbaColor)>,
     /// The outline awaiting its colour; `COLR` pairs them.
@@ -1581,7 +1582,19 @@ impl Setter<'_> {
             });
         }
         let scale = em / face.units_per_em() as f32;
-        let layers = Layering::of(face, glyph, foreground)?;
+        if !face.is_color_glyph(glyph) {
+            return None;
+        }
+        let Some(layers) = Layering::of(face, glyph, foreground) else {
+            let painted = colr::paint(face, glyph, em, foreground)?;
+            return Some(Mark::Bitmap {
+                x: x + painted.x,
+                y: y + painted.y,
+                width: painted.pixmap.width() as f32,
+                height: painted.pixmap.height() as f32,
+                pixmap: painted.pixmap,
+            });
+        };
         let mut placed = Vec::with_capacity(layers.len());
         for (glyph_id, colour) in layers {
             let mut builder = PathBuilder::new();
