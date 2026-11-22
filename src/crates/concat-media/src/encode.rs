@@ -660,8 +660,10 @@ fn opens_here(codec: VideoCodec, encoder_name: &'static str) -> bool {
     answer
 }
 
-/// Whether the encoder takes ten-bit pictures. FFmpeg's MediaCodec and
-/// Media Foundation encoders are fed eight bits only here; VideoToolbox
+/// Whether the encoder takes ten-bit pictures. FFmpeg's Media Foundation
+/// encoders are fed eight bits only here; its MediaCodec HEVC takes ten with
+/// this engine's patch (scripts/ffmpeg-patches), and whether the phone's
+/// chip does is found by trying; VideoToolbox
 /// and AMF make ten-bit HEVC but not ten-bit H.264, and NVENC and Quick
 /// Sync make ten-bit HEVC and AV1.
 fn takes_ten_bits(encoder_name: &str) -> bool {
@@ -675,7 +677,8 @@ fn takes_ten_bits(encoder_name: &str) -> bool {
         Family::Nvenc | Family::Qsv => {
             encoder_name.starts_with("hevc_") || encoder_name.starts_with("av1_")
         }
-        Family::MediaCodec | Family::MediaFoundation => false,
+        Family::MediaCodec => encoder_name == "hevc_mediacodec",
+        Family::MediaFoundation => false,
     }
 }
 
@@ -1056,6 +1059,17 @@ fn open_video(
         // mode Android keeps its quality floor in. The quantiser is capped
         // too, so an encoder that misjudges its budget still spends enough
         // on each picture.
+        _ if family == Family::MediaCodec && options.ten_bit => match attempt {
+            Attempt::AsAsked => ffmpeg::dict! {
+                "profile" => "main10",
+                "bitrate_mode" => "vbr",
+            },
+            Attempt::Plain => ffmpeg::dict! { "profile" => "main10" },
+            Attempt::Component(component) => ffmpeg::dict! {
+                "codec_name" => component,
+                "profile" => "main10",
+            },
+        },
         _ if family == Family::MediaCodec => match attempt {
             Attempt::AsAsked => ffmpeg::dict! {
                 "bitrate_mode" => "vbr",

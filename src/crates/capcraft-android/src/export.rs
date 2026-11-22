@@ -39,6 +39,9 @@ pub struct ExportSettings {
     pub bitrate_kbps: u32,
     /// H.265 rather than H.264.
     pub hevc: bool,
+    /// The timeline's HDR kept, in ten-bit H.265; a timeline that is not HDR
+    /// is written as it is.
+    pub hdr: bool,
     /// The file to write.
     pub output: String,
 }
@@ -110,7 +113,7 @@ pub fn cancel_export() {
 
 /// Drawing the frames is most of the work; mixing the sound and the mux
 /// the rest. The stages are the engine's own names for them.
-fn fraction_of(progress: Progress) -> f32 {
+pub(crate) fn fraction_of(progress: Progress) -> f32 {
     let done = if progress.total > 0 {
         (progress.frame as f32 / progress.total as f32).clamp(0.0, 1.0)
     } else {
@@ -140,21 +143,22 @@ impl MobileSession {
             } else {
                 suggested_bitrate_kbps(width, height, settings.fps)
             };
+            let hdr = settings.hdr && session.video().color_space.is_hdr();
             let spec = ExportSpec {
                 output: settings.output.clone(),
                 crf: 20,
                 preset: "veryfast".to_owned(),
-                codec: if settings.hevc {
+                codec: if settings.hevc || hdr {
                     VideoCodec::Hevc
                 } else {
                     VideoCodec::H264
                 },
-                ten_bit: false,
+                ten_bit: hdr,
                 // the target to hold; the phone's encoder holds it in VBR
                 rate_mode: RateMode::Cbr,
                 bitrate_kbps: bitrate,
                 color_range: Default::default(),
-                hdr: false,
+                hdr,
             };
             let titles = context()
                 .map(|context| {
