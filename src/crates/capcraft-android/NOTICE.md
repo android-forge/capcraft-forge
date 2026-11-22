@@ -6,6 +6,9 @@ the Free Software Foundation (`LICENSE`). It is built on the engine of Concat (J
 contributors, AGPL-3.0-or-later); the engine's own third-party notices are in
 `THIRD_PARTY_NOTICES.md`.
 
+This copy is an unofficial build, modified in November 2026 by praveenkrishna16n-sys; its changes are listed in
+`CHANGELOG.md`. The original authors do not maintain or endorse it. It comes with no warranty.
+
 CapCraft is not affiliated with, endorsed by or connected to ByteDance or CapCut.
 
 ## In the Android app

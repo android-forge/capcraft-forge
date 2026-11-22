@@ -339,6 +339,13 @@ androidComponents {
                 File(crateDir, "NOTICE.md"),
                 File(crateDir, "assets/icons/LICENSE-lucide.txt"),
                 File(crateDir, "assets/icons-material/LICENSE-material-symbols.txt"),
+                File(repoDir, "CREDITS.md"),
+                File(repoDir, "licences/NATIVE.txt"),
+                File(repoDir, "licences/FONTS.txt"),
+                File(repoDir, "licences/RUST_CRATES.txt"),
+                File(repoDir, "licences/LGPL-2.1.txt"),
+                File(repoDir, "licences/GPL-3.0.txt"),
+                File(repoDir, "licences/MPL-2.0.txt"),
             )
             targets.set(
                 mapOf(
@@ -347,6 +354,13 @@ androidComponents {
                     "NOTICE.md" to "licences/NOTICE.md",
                     "LICENSE-lucide.txt" to "licences/LICENSE-lucide.txt",
                     "LICENSE-material-symbols.txt" to "licences/LICENSE-material-symbols.txt",
+                    "CREDITS.md" to "licences/CREDITS.md",
+                    "NATIVE.txt" to "licences/NATIVE.txt",
+                    "FONTS.txt" to "licences/FONTS.txt",
+                    "RUST_CRATES.txt" to "licences/RUST_CRATES.txt",
+                    "LGPL-2.1.txt" to "licences/LGPL-2.1.txt",
+                    "GPL-3.0.txt" to "licences/GPL-3.0.txt",
+                    "MPL-2.0.txt" to "licences/MPL-2.0.txt",
                 ),
             )
         }

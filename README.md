@@ -1,3 +1,8 @@
+> **This is an unofficial, modified build of [CapCraft for Android](https://github.com/artcraft-android/capcraft-android)**
+> by the ArtCraft Team, built on [Concat](https://github.com/jub0t/Concat) by Jareer Abdullah and the Concat contributors.
+> All credit for the original work goes to them. They do not maintain or endorse this build; please report its problems here.
+> See [CREDITS.md](CREDITS.md) and [CHANGELOG.md](CHANGELOG.md). Not affiliated with ByteDance or CapCut.
+
 <p align="center">
   <img src="docs/images/capcraft-512.png" alt="CapCraft's app icon" width="128">
 </p>
@@ -5,13 +10,8 @@
 <h1 align="center">CapCraft for Android</h1>
 
 <p align="center">
-  <b>CapCraft-android is an open-source reimplementation of the CapCut android app.</b><br>
+  <b>An open-source video editor for Android.</b><br>
   Many credits to the original maintainers, <a href="https://github.com/jub0t">jub0t</a> and the Concat contributors.
-</p>
-
-<p align="center">
-  <a href="https://github.com/artcraft-android/capcraft-android/releases"><img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/main/get-it-on-github.png" alt="Get it on GitHub" height="60"></a>
-  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/artcraft-android/capcraft-android"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="60"></a>
 </p>
 
 <p align="center">

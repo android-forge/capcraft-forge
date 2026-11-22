@@ -1093,8 +1093,12 @@ private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> U
     }
 }
 
-/** Where the app's source lives. */
-private const val SOURCE_URL = "https://github.com/artcraft-android/capcraft-android"
+/** Where the source of this build lives. */
+private const val SOURCE_URL = "https://github.com/praveenkrishna16n-sys/capcraft-android"
+
+/** The project this build is a modified version of, and the engine under it. */
+private const val ORIGINAL_URL = "https://github.com/artcraft-android/capcraft-android"
+private const val ENGINE_URL = "https://github.com/jub0t/Concat"
 
 /** What CapCraft is, who made the engine under it, and that it is nobody else's app. */
 @Composable
@@ -1102,7 +1106,7 @@ private fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val version = remember { appVersion(context) }
     Page("About CapCraft", onBack) {
-        Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(24.dp))
             Text("CapCraft", style = ink(26f, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
@@ -1115,20 +1119,33 @@ private fun AboutScreen(onBack: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Text(
+                "This is an unofficial, modified build of CapCraft for Android. The original authors do not maintain or endorse it.",
+                style = ink(13f, color = Home.Muted).copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+            )
+            Spacer(Modifier.height(16.dp))
+            // the notices the licence asks an app to show: whose it is, that it comes with no warranty, and where its terms are
+            Text(
+                "Copyright © 2026 ArtCraft Team and the CapCraft contributors. Engine © 2026 Jareer Abdullah and the Concat contributors. " +
+                    "Changes in this build © 2026 praveenkrishna16n-sys. It comes with no warranty; you may share it under the licence in Settings, Licences.",
+                style = ink(13f, color = Home.Muted).copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
                 "Not affiliated with or endorsed by ByteDance or CapCut.",
                 style = ink(13f, color = Home.Muted).copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
             )
-            Spacer(Modifier.height(28.dp))
-            // the source, as the licence asks of every copy handed on
-            Text("Source code", style = ink(13f, color = Home.Muted))
-            Spacer(Modifier.height(4.dp))
-            Text(
-                SOURCE_URL.removePrefix("https://"),
-                style = ink(14f, FontWeight.SemiBold).copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
-                modifier = Modifier.clickable {
-                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(SOURCE_URL))) }
-                }.padding(8.dp),
-            )
+            // the source, as the licence asks of every copy handed on, and those it comes from
+            listOf("Source code of this build" to SOURCE_URL, "Original project" to ORIGINAL_URL, "Engine" to ENGINE_URL).forEach { (label, url) ->
+                Spacer(Modifier.height(20.dp))
+                Text(label, style = ink(13f, color = Home.Muted))
+                Text(
+                    url.removePrefix("https://"),
+                    style = ink(14f, FontWeight.SemiBold).copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
+                    modifier = Modifier.clickable {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+                    }.padding(8.dp),
+                )
+            }
         }
     }
 }
@@ -1163,10 +1180,17 @@ private fun LicencesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val files = listOf(
         "NOTICE.md" to "CapCraft",
+        "CREDITS.md" to "Credits and changes in this build",
         "LICENSE.txt" to "GNU Affero General Public License",
         "THIRD_PARTY_NOTICES.md" to "Engine third-party notices",
         "LICENSE-lucide.txt" to "Lucide icons",
         "LICENSE-material-symbols.txt" to "Material Symbols",
+        "NATIVE.txt" to "Native libraries",
+        "FONTS.txt" to "Fonts",
+        "RUST_CRATES.txt" to "Rust libraries",
+        "LGPL-2.1.txt" to "GNU Lesser General Public License 2.1 (FFmpeg)",
+        "GPL-3.0.txt" to "GNU General Public License 3 (espeak-ng)",
+        "MPL-2.0.txt" to "Mozilla Public License 2.0 (UniFFI)",
     )
     var open by remember { mutableStateOf<String?>(null) }
     Page(files.firstOrNull { it.first == open }?.second ?: "Licences", onBack = { if (open != null) open = null else onBack() }) {
@@ -1176,15 +1200,25 @@ private fun LicencesScreen(onBack: () -> Unit) {
                 SettingRow(title, null) { open = name }
             }
         } else {
-            val text = remember(file) {
-                runCatching { context.assets.open("licences/$file").bufferedReader().readText() }.getOrDefault("")
+            // a paragraph at a time: the longest of them is half a megabyte, too much to lay out at once
+            val paragraphs by androidx.compose.runtime.produceState(emptyList<String>(), file) {
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { context.assets.open("licences/$file").bufferedReader().readText() }.getOrDefault("").split("\n\n")
+                }
             }
             androidx.compose.foundation.text.selection.SelectionContainer {
-                Text(
-                    text,
-                    style = ink(12f).copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-                )
+                androidx.compose.foundation.lazy.LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                ) {
+                    items(paragraphs.size) { i ->
+                        Text(
+                            paragraphs[i],
+                            style = ink(12f).copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        )
+                    }
+                }
             }
         }
     }
