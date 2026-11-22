@@ -86,7 +86,10 @@ abstract class CargoNdkBuild : DefaultTask() {
         execOperations.exec {
             workingDir(workspaceDir.get())
             environment("ANDROID_NDK_HOME", ndkDir.get())
-            environment("CARGO_ENCODED_RUSTFLAGS", remap.joinToString("\u001f"))
+            // cargo reads this alone when it is set, so what mobile-env.sh exported goes in it too (on a Mac, the
+            // search path of the ggml-blas stand-in; everywhere, 16 KB pages)
+            val exported = System.getenv("RUSTFLAGS").orEmpty().split(' ').filter { it.isNotBlank() }
+            environment("CARGO_ENCODED_RUSTFLAGS", (remap + exported).joinToString("\u001f"))
             commandLine(
                 listOf(cargo.get(), "ndk") + targets +
                     listOf("--platform", apiLevel.get().toString(), "-o", out, "build", "--release", "-p", "capcraft-android", "--lib"),
@@ -120,6 +123,9 @@ abstract class UniffiBindgen : DefaultTask() {
         out.mkdirs()
         execOperations.exec {
             workingDir(workspaceDir.get())
+            // the generator runs on this machine: the phone's linker flags are not for it
+            environment.remove("RUSTFLAGS")
+            environment.remove("CARGO_ENCODED_RUSTFLAGS")
             commandLine(
                 cargo.get(), "run", "--quiet", "-p", "capcraft-android-bindgen", "--",
                 "generate", library.get().asFile.absolutePath, "--language", "kotlin", "--out-dir", out.absolutePath, "--no-format",
