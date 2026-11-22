@@ -40,7 +40,7 @@
 //! decoder the way the paced decoders beside it do. The two paths of one
 //! export then agree to the pixel.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -710,6 +710,8 @@ pub struct ReaderPool {
     /// The scrub copy for each file that has one; see
     /// [`ReaderPool::adopt_scrub`].
     scrubs: Mutex<HashMap<PathBuf, PathBuf>>,
+    /// Originals whose proxy is being written; see [`Self::await_proxy`].
+    awaiting: Mutex<HashSet<PathBuf>>,
     counters: Counters,
 }
 
@@ -743,6 +745,7 @@ impl ReaderPool {
             memory: Mutex::new((HashMap::new(), std::collections::VecDeque::new())),
             proxies: Mutex::new(HashMap::new()),
             scrubs: Mutex::new(HashMap::new()),
+            awaiting: Mutex::new(HashSet::new()),
             counters: Counters::default(),
         }
     }
@@ -921,8 +924,8 @@ impl ReaderPool {
     }
 
     /// The file a request reads: a scrubbing one its scrub copy, else its
-    /// proxy; one that asks for a proxy the proxy; the file itself when
-    /// it has neither.
+    /// proxy; one that asks for a proxy the proxy, or its scrub copy while
+    /// the proxy is being written; the file itself when it has neither.
     fn path_for(&self, request: &FrameRequest) -> PathBuf {
         if request.scrub
             && let Some(scrub) = self.scrub_of(&request.path)
@@ -934,7 +937,35 @@ impl ReaderPool {
         {
             return proxy;
         }
+        // the proxy is on its way: the scrub copy, written long before it,
+        // plays meanwhile - small, where the original barely moves
+        if request.proxy
+            && self.awaits_proxy(&request.path)
+            && let Some(scrub) = self.scrub_of(&request.path)
+        {
+            return scrub;
+        }
         request.path.clone()
+    }
+
+    /// Whether a proxy of `original` is queued or being written.
+    fn awaits_proxy(&self, original: &Path) -> bool {
+        self.awaiting
+            .lock()
+            .is_ok_and(|awaiting| awaiting.contains(original))
+    }
+
+    /// Says a proxy of `original` is on its way, or (`false`) that none is
+    /// any more: until it is adopted a request for it reads the scrub copy
+    /// where there is one.
+    pub fn await_proxy(&self, original: &Path, coming: bool) {
+        if let Ok(mut awaiting) = self.awaiting.lock() {
+            if coming {
+                awaiting.insert(original.to_path_buf());
+            } else {
+                awaiting.remove(original);
+            }
+        }
     }
 
     /// The source frame a request needs and where it sits: the file it
@@ -1998,6 +2029,30 @@ pub(crate) mod tests {
         assert!(Arc::ptr_eq(&first, &again), "the same remembered frame");
         assert_eq!(pool.stats().since(before).decoded, 0, "no second walk");
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A play that asks for a proxy still being written reads the scrub
+    /// copy, and the original or the proxy at any other time.
+    #[test]
+    fn a_scrub_copy_plays_until_the_proxy_is_written() {
+        let pool = ReaderPool::new(1024 * 1024, 1);
+        let original = Path::new("/footage/big.mp4");
+        let (scrub, proxy) = (PathBuf::from("/c/scrub.mov"), PathBuf::from("/c/proxy.mp4"));
+        let playing = FrameRequest::new(original, Rational::ZERO, 64, 36).from_proxy(true);
+        pool.adopt_scrub(original, scrub.clone());
+        assert_eq!(pool.path_for(&playing), original, "no proxy is coming");
+        pool.await_proxy(original, true);
+        assert_eq!(pool.path_for(&playing), scrub);
+        pool.adopt_proxy(original, proxy.clone());
+        assert_eq!(pool.path_for(&playing), proxy);
+        let rest = FrameRequest::new(original, Rational::ZERO, 64, 36);
+        pool.await_proxy(original, true);
+        assert_eq!(
+            pool.path_for(&rest),
+            original,
+            "a still picture is the file's"
+        );
+        pool.await_proxy(original, false);
     }
 
     /// A proxy that has gone from disk is forgotten on the first request

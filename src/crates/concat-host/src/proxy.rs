@@ -141,6 +141,7 @@ pub fn ensure(
     if let Ok(mut awaited) = awaited().lock() {
         awaited.insert(source.clone());
     }
+    pool.await_proxy(Path::new(media), true);
     crate::scheduler().submit(Priority::Proxy, move || {
         match write(&source, &target, size, range) {
             Ok(()) => {
@@ -154,6 +155,9 @@ pub fn ensure(
         if let Ok(mut awaited) = awaited().lock() {
             awaited.remove(&source);
         }
+        crate::scheduler()
+            .pool()
+            .await_proxy(Path::new(&source), false);
         writing
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
