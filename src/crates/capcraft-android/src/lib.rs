@@ -45,6 +45,7 @@ pub mod fillers;
 pub mod frames;
 pub mod gif;
 pub mod groups;
+pub mod highlights;
 pub mod history;
 pub mod lanes;
 pub mod library;

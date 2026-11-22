@@ -285,6 +285,7 @@ private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
     Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
     Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
     Tool("ratio", "Aspect ratio", LucideIcons.Square) { vm.panel = Panel.Ratio },
+    Tool("autohighlight", "Auto highlight", LucideIcons.Sparkles) { vm.panel = Panel.AutoHighlight },
     Tool("preview", "Preview quality", LucideIcons.Gauge) { vm.panel = Panel.PreviewQuality },
     Tool("background", "Background", MaterialIcons.Texture) { vm.dock = vm.dock + DockLevel.Group("background") },
 )

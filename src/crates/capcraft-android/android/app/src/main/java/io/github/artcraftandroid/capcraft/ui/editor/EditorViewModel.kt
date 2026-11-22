@@ -67,6 +67,7 @@ sealed interface Panel {
     data object SoundFx : Panel
     data object Transcript : Panel
     data object Fillers : Panel
+    data object AutoHighlight : Panel
     data object PreviewQuality : Panel
     data object Highlight : Panel
     data object Draw : Panel
@@ -491,6 +492,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
             "extract" -> mainClipAtPlayhead()?.let { extractAudio(it) }
             "enhance" -> mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.Quality }
             "transcript" -> panel = Panel.Transcript
+            "highlight" -> panel = Panel.AutoHighlight
             "soundfx" -> panel = Panel.SoundFx
             "retouch" -> mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.Retouch }
             // a photo to edit: the frame its own shape, and the export a picture

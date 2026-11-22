@@ -377,6 +377,10 @@ pub struct TranscribeRequest {
     /// "uh"), which whisper otherwise leaves out.
     #[serde(default)]
     pub words: bool,
+    /// What is said put into English, whatever it is said in; a model that
+    /// hears English alone has nothing to put.
+    #[serde(default)]
+    pub translate: bool,
 }
 
 /// What whisper is told came before, for a transcript that keeps hesitations:
@@ -608,6 +612,7 @@ impl Transcriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
+        params.set_translate(request.translate && context.is_multilingual());
         if request.words {
             params.set_token_timestamps(true);
             params.set_initial_prompt(HESITANT);
@@ -766,6 +771,7 @@ mod tests {
                     window,
                     model_id,
                     words: false,
+                    translate: false,
                 },
                 |_| {},
             )
@@ -881,6 +887,7 @@ mod real_audio {
             window: 30.0,
             model_id: "tiny.en".to_owned(),
             words: false,
+                    translate: false,
         };
         let segments = transcriber
             .transcribe(&dirs, &request, |stage| eprintln!("{stage:?}"))

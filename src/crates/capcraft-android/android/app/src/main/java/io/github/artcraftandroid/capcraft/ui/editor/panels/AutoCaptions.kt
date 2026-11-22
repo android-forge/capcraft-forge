@@ -168,6 +168,8 @@ fun AutoCaptionsSheet(vm: EditorViewModel, lyrics: Boolean = false) {
     var then by remember { mutableStateOf(false) }
     val existing = remember(vm.timeline?.revision) { runCatching { vm.session?.captionCount()?.toInt() }.getOrNull() ?: 0 }
     var replace by remember { mutableStateOf(true) }
+    // the captions in English too, under what is said
+    var english by remember { mutableStateOf(false) }
 
     LaunchedEffect(refresh) {
         models = withContext(Threads.thumbnails) {
@@ -233,7 +235,9 @@ fun AutoCaptionsSheet(vm: EditorViewModel, lyrics: Boolean = false) {
         job = "Reading the sound" to 0f
         scope.launch(Threads.commands) {
             runCatching {
-                if (lyrics) s.autoLyrics(m.id, replace && existing > 0, listener) else s.autoCaptions(m.id, replace && existing > 0, listener)
+                if (lyrics) s.autoLyrics(m.id, replace && existing > 0, listener)
+                else if (english && !m.id.endsWith(".en")) s.bilingualCaptions(m.id, replace && existing > 0, listener)
+                else s.autoCaptions(m.id, replace && existing > 0, listener)
             }
                 .onFailure { e -> launch(Dispatchers.Main) { job = null; vm.message = e.userMessage } }
         }
@@ -301,6 +305,20 @@ fun AutoCaptionsSheet(vm: EditorViewModel, lyrics: Boolean = false) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     CAPTION_LOOKS.forEachIndexed { i, l -> LookChip(l, i == look) { look = i } }
+                }
+            }
+            if (!lyrics && models.getOrNull(model)?.id?.endsWith(".en") == false) {
+                Spacer(Modifier.height(12.dp))
+                Card {
+                    Row(
+                        Modifier.fillMaxWidth().height(52.dp).clickable { english = !english }.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Glyph(LucideIcons.Languages, Palette.Text, size = 20.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Add English translation", style = Type.Body.copy(fontSize = 16.sp, color = Palette.Text), modifier = Modifier.weight(1f))
+                        Switch(english)
+                    }
                 }
             }
             if (existing > 0) {

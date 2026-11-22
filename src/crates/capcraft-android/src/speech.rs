@@ -101,6 +101,7 @@ pub(crate) fn heard(
                         window: clip.duration * clip.speed,
                         model_id: model_id.to_owned(),
                         words,
+                        translate: false,
                     },
                 ))
             })
@@ -310,7 +311,19 @@ impl MobileSession {
         replace: bool,
         listener: Arc<dyn SpeechListener>,
     ) -> Result<(), MobileError> {
-        self.caption(model_id, replace, false, listener)
+        self.caption(model_id, replace, false, false, listener)
+    }
+
+    /// Captions in two languages: [`MobileSession::auto_captions`], and under
+    /// each what it says in English, smaller. `model_id` hears more than
+    /// English.
+    pub fn bilingual_captions(
+        self: Arc<Self>,
+        model_id: String,
+        replace: bool,
+        listener: Arc<dyn SpeechListener>,
+    ) -> Result<(), MobileError> {
+        self.caption(model_id, replace, false, true, listener)
     }
 
     /// Lyrics: [`MobileSession::auto_captions`] of what is sung, each
@@ -322,7 +335,7 @@ impl MobileSession {
         replace: bool,
         listener: Arc<dyn SpeechListener>,
     ) -> Result<(), MobileError> {
-        self.caption(model_id, replace, true, listener)
+        self.caption(model_id, replace, true, false, listener)
     }
 }
 
@@ -334,6 +347,7 @@ impl MobileSession {
         model_id: String,
         replace: bool,
         lyrics: bool,
+        bilingual: bool,
         listener: Arc<dyn SpeechListener>,
     ) -> Result<(), MobileError> {
         let dirs = context()?.dirs.clone();
@@ -369,8 +383,23 @@ impl MobileSession {
                         }
                     }
                 }
+                // the same sound again for the English, after all of it as it is said
+                if bilingual {
+                    let again: Vec<_> = windows
+                        .iter()
+                        .map(|(start, speed, request)| {
+                            let request = TranscribeRequest {
+                                translate: true,
+                                ..request.clone()
+                            };
+                            (*start, *speed, request)
+                        })
+                        .collect();
+                    windows.extend(again);
+                }
                 let count = windows.len() as f32;
                 let mut captions: Vec<(f64, f64, String)> = Vec::new();
+                let mut english: Vec<(f64, f64, String)> = Vec::new();
                 for (index, (start, speed, request)) in windows.iter().enumerate() {
                     let listener_for_progress = Arc::clone(&listener);
                     let base = index as f32;
@@ -396,7 +425,11 @@ impl MobileSession {
                                 let from = start + segment.start / speed.max(1e-6);
                                 let to = start + segment.end / speed.max(1e-6);
                                 if to - from > 0.05 {
-                                    captions.extend(chunks(from, to, &text));
+                                    if request.translate {
+                                        english.extend(chunks(from, to, &text));
+                                    } else {
+                                        captions.extend(chunks(from, to, &text));
+                                    }
                                 }
                             }
                         }
@@ -410,14 +443,23 @@ impl MobileSession {
                     listener.on_failed("No speech was found.".to_owned());
                     return;
                 }
-                captions.sort_by(|a, b| a.0.total_cmp(&b.0));
                 // Phrases that overlap are trimmed to follow each other.
-                for i in 1..captions.len() {
-                    if captions[i].0 < captions[i - 1].1 {
-                        captions[i - 1].1 = captions[i].0;
+                for list in [&mut captions, &mut english] {
+                    list.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    for i in 1..list.len() {
+                        if list[i].0 < list[i - 1].1 {
+                            list[i - 1].1 = list[i].0;
+                        }
                     }
+                    list.retain(|(from, to, _)| to - from > 0.02);
                 }
-                match self.place_captions(&captions, replace) {
+                let placed = self.place_captions(&captions, replace).and_then(|view| {
+                    if english.is_empty() {
+                        return Ok(view);
+                    }
+                    self.place_translation(&english)
+                });
+                match placed {
                     Ok(view) => listener.on_done(Some(view)),
                     Err(error) => listener.on_failed(error.to_string()),
                 }
@@ -596,6 +638,32 @@ impl MobileSession {
         captions: &[(f64, f64, String)],
         replace: bool,
     ) -> Result<crate::session::TimelineView, MobileError> {
+        self.place_styled(captions, replace, &caption_style, 0.32)
+    }
+
+    /// The captions' English under them, on a text row of its own.
+    fn place_translation(
+        &self,
+        captions: &[(f64, f64, String)],
+    ) -> Result<crate::session::TimelineView, MobileError> {
+        let style = |text: &str| TextStyle {
+            font_size: 0.026,
+            font_weight: 600.0,
+            color: "#ffe9a8".to_owned(),
+            ..caption_style(text)
+        };
+        self.place_styled(captions, false, &style, 0.39)
+    }
+
+    /// [`MobileSession::place_captions`] in a style and at a height, down
+    /// from the frame's middle as a fraction of it.
+    fn place_styled(
+        &self,
+        captions: &[(f64, f64, String)],
+        replace: bool,
+        style: &dyn Fn(&str) -> TextStyle,
+        offset: f64,
+    ) -> Result<crate::session::TimelineView, MobileError> {
         let first = captions.first().map_or(0.0, |c| c.0);
         let last = captions.last().map_or(0.0, |c| c.1);
         let (known, before) = self.with_session(|session| {
@@ -625,9 +693,9 @@ impl MobileSession {
                         track_id: Some(track_id.clone()),
                         above: false,
                         start: *from,
-                        style: Some(caption_style(text)),
+                        style: Some(style(text)),
                         duration: Some((to - from).max(0.1)),
-                        offset_y: Some(0.32),
+                        offset_y: Some(offset),
                     }),
             );
             commands
