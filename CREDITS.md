@@ -18,6 +18,9 @@ espeak-ng (GPL-3.0-or-later) and piper-phonemize (MIT); UniFFI (MPL-2.0); JNA, K
 each, and its licence, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
 [NOTICE.md](src/crates/capcraft-android/NOTICE.md) and [licences/](licences).
 
+Remove objects uses YOLOX (Megvii, Apache-2.0), SlimSAM (Apache-2.0) and MI-GAN (Picsart AI Research, MIT), each downloaded
+when it is first used.
+
 ## Changes in this build
 
 4K playback from proxies, and ten-bit HEVC on the phone's video chip, are by egagofur

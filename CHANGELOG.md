@@ -29,4 +29,6 @@ dated, as the licence asks; `#` numbers are the original project's.
 - My voice: text read aloud in one's own voice, recorded saying it may be copied and checked to have said so.
 - Graphs shape a mask's keyframes (#50). Titles paint the emoji of newer phones. A video can take a photo's place.
 - Builds on a Mac as `mobile-env.sh` sets it up (#52). Photo is offered in every project's export.
+- Remove objects: the people and things in a photo found, removed with the picture filled in behind, or put over the video; on
+  main and overlay photos.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

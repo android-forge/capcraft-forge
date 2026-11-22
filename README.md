@@ -146,7 +146,7 @@ CapCraft Forge is in beta.
 | Stickers, labels, shapes and drawing | ✅ |
 | Captions made on the phone, typed captions, caption templates and imported subtitles | ✅ |
 | Sound effects, voiceover, extract audio, voice effects, noise reduction and isolate voice | ✅ |
-| Remove background (a model downloaded once, run on the phone) | ✅ |
+| Remove background; find people and things in a photo, remove them or put them in an overlay (models downloaded once, run on the phone) | ✅ |
 | Aspect ratios, backgrounds, cover, AutoCut, auto highlight, collage, projects as templates | ✅ |
 | Filler words removed, caption keywords and emojis, English under captions, one's own voice | ✅ |
 | Groups, compound clips, project files, screen recording, live photos, a Home widget, one's own sound folders | ✅ |

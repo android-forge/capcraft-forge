@@ -205,6 +205,7 @@ private val SHORTCUTS = listOf(
 /** Photo tools' list: each a tool, with what it does in a line. */
 private val PHOTO_TOOLS = listOf(
     Triple("collage", "Collage", "Lay two to nine photos or videos out together."),
+    Triple("objects", "Remove objects", "Take people or things out of a photo."),
     Triple("lighting", "Smart lighting", "Brighten a dark photo in one tap."),
     Triple("framecapture", "Frame capture", "Keep a still from a video as a photo."),
 )
@@ -539,7 +540,7 @@ fun HomeScreen(
                 photoTools = false
                 val kinds = when (id) {
                     "collage" -> io.github.artcraftandroid.capcraft.ui.common.MediaKinds.BOTH
-                    "lighting" -> io.github.artcraftandroid.capcraft.ui.common.MediaKinds.IMAGE
+                    "lighting", "objects" -> io.github.artcraftandroid.capcraft.ui.common.MediaKinds.IMAGE
                     else -> io.github.artcraftandroid.capcraft.ui.common.MediaKinds.VIDEO
                 }
                 io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(kinds, multiple = id == "collage", onCancel = {}) { uris ->

@@ -499,6 +499,8 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             add(Tool("retouch", "Retouch", LucideIcons.Smile) { vm.panel = Panel.Retouch })
             // a clearer copy, for photos and footage alike
             add(Tool("enhancequality", "Video quality", MaterialIcons.Hd) { vm.panel = Panel.Quality })
+            // people and things taken out of a photo, or put over the video
+            if (!video) add(Tool("eraseobjects", "Remove objects", LucideIcons.Eraser) { vm.panel = Panel.EraseObjects })
             add(Tool("removebg", "Remove BG", LucideIcons.UserRoundX) { vm.clipLevel = "removebg" })
             // the picture lit again, on the main track as the reference offers it
             if (main) add(Tool("relight", "Relight", LucideIcons.Lightbulb) { vm.panel = Panel.Relight })

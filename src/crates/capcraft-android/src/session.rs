@@ -2077,7 +2077,7 @@ impl MobileSession {
 }
 
 /// Writes a picture as a PNG.
-fn write_png(path: &std::path::Path, picture: &crate::Picture) -> Result<(), MobileError> {
+pub(crate) fn write_png(path: &std::path::Path, picture: &crate::Picture) -> Result<(), MobileError> {
     let file = std::fs::File::create(path)
         .map_err(|error| format!("could not write {}: {error}", path.display()))?;
     let mut encoder =
