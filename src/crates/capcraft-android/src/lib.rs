@@ -44,6 +44,7 @@ pub mod export;
 pub mod fillers;
 pub mod frames;
 pub mod gif;
+pub mod groups;
 pub mod history;
 pub mod lanes;
 pub mod library;

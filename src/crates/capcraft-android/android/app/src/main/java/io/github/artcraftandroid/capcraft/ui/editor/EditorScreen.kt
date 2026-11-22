@@ -279,7 +279,7 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
         val aspect = t.width.toFloat() / t.height.toFloat().coerceAtLeast(1f)
         val (shownW, shownH) = if (boxW / boxH > aspect) (boxH * aspect) to boxH else boxW to (boxW / aspect)
         // the frame the engine draws: the shown size, at most 1080 on its short side
-        val cap = min(1f, 1080f / min(shownW, shownH).coerceAtLeast(1f))
+        val cap = min(1f, 1080f / min(shownW, shownH).coerceAtLeast(1f)) * vm.previewScale
         val frameW = ((shownW * cap).roundToInt() / 2 * 2).coerceAtLeast(2)
         val frameH = ((shownH * cap).roundToInt() / 2 * 2).coerceAtLeast(2)
         val image = rememberFrames(vm, frameW, frameH)

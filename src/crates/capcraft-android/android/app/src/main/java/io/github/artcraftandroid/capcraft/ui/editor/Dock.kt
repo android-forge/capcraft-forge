@@ -86,6 +86,13 @@ private fun multiTools(vm: EditorViewModel): List<Tool> {
             vm.edit { delete(chosen.toList()) }
             vm.chosen = null
         },
+        // clips off the main track, to move and go together
+        Tool("group", "Group", LucideIcons.Link2, enabled = chosen.count { vm.rowOf(it)?.kind != RowKind.MAIN } >= 2) {
+            val ids = chosen.filter { vm.rowOf(it)?.kind != RowKind.MAIN }
+            vm.edit { group(ids) }
+            vm.chosen = null
+            vm.message = "Grouped"
+        },
         Tool("deselect", if (chosen.isEmpty()) "Deselect all" else "Deselect all (${chosen.size})", LucideIcons.SquareCheckBig) { vm.chosen = null },
     )
 }
@@ -278,6 +285,7 @@ private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
     Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
     Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
     Tool("ratio", "Aspect ratio", LucideIcons.Square) { vm.panel = Panel.Ratio },
+    Tool("preview", "Preview quality", LucideIcons.Gauge) { vm.panel = Panel.PreviewQuality },
     Tool("background", "Background", MaterialIcons.Texture) { vm.dock = vm.dock + DockLevel.Group("background") },
 )
 
@@ -359,6 +367,28 @@ private fun clipSubTools(vm: EditorViewModel, clip: ClipView, level: String): Li
 }
 
 private fun clipTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers: Pickers): List<Tool> {
+    val tools = ownTools(vm, clip, row, pickers)
+    if (row == RowKind.MAIN) return tools
+    // several clips off the main track go together: choose them, or take a group apart
+    val grouped = clip.id in vm.groupOf(clip.id)
+    return buildList {
+        addAll(tools)
+        if (none { it.id == "multiselect" }) {
+            add(Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {
+                vm.select(null)
+                vm.chosen = setOf(clip.id)
+            })
+        }
+        if (grouped) {
+            add(Tool("ungroup", "Ungroup", LucideIcons.Unlink2) {
+                vm.edit(select = { clip.id }) { ungroup(clip.id) }
+                vm.message = "Ungrouped"
+            })
+        }
+    }
+}
+
+private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers: Pickers): List<Tool> {
     val inside = vm.playhead > clip.startUs + 30_000 && vm.playhead < clip.startUs + clip.durationUs - 30_000
     // always offered, as the reference does; at a clip's very edge there is nothing to cut
     val split = Tool("split", "Split", LucideIcons.SquareSplitHorizontal) {

@@ -982,7 +982,8 @@ private fun DrawScope.drawClip(
         drawText(chip, topLeft = Offset(inner.left + 6 * dp, inner.bottom - chip.size.height - 3 * dp))
     }
     // one of several chosen together: outlined, with no handles to trim it by
-    if (vm.chosen?.contains(clip.id) == true) {
+    // or one grouped with the clip selected, so what goes together shows
+    if (vm.chosen?.contains(clip.id) == true || (!selected && vm.selected?.let { clip.id in vm.groupOf(it) } == true)) {
         drawRoundRect(Color.White, Offset(r.left, r.top), r.size, CornerRadius(radius), style = Stroke(1.5f * dp))
     }
     if (selected) {

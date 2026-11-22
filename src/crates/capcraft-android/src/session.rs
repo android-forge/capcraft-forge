@@ -806,6 +806,8 @@ impl MobileSession {
     /// other rows leave their space.
     pub fn delete(&self, clip_ids: Vec<String>) -> Result<TimelineView, MobileError> {
         let timeline = self.timeline();
+        // a clip of a group takes the rest with it
+        let clip_ids = crate::groups::with_groups(&timeline, clip_ids);
         let (main, other): (Vec<String>, Vec<String>) = clip_ids
             .into_iter()
             .partition(|id| lanes::on_main(&timeline, id));
@@ -1035,19 +1037,22 @@ impl MobileSession {
         } else {
             track_id
         };
+        // a group goes no further back than its first clip's way to the start
+        let least = crate::groups::earliest(&timeline, &clip_id)
+            .map_or(0.0, |first| (clip.start - first).max(0.0));
         let start = timeline.nearest_free_start(
             &track,
-            seconds(start_us).max(0.0),
+            seconds(start_us).max(least),
             clip.duration,
             &[clip_id.as_str()],
         );
-        self.run(vec![Command::MoveClips {
-            moves: vec![concat_project::commands::ClipMove {
-                clip_id,
-                track_id: track,
-                start,
-            }],
-        }])
+        let mut moves = crate::groups::along(&timeline, &clip_id, start - clip.start);
+        moves.push(concat_project::commands::ClipMove {
+            clip_id,
+            track_id: track,
+            start,
+        });
+        self.run(vec![Command::MoveClips { moves }])
     }
 
     /// Moves a main-track clip to position `index` among the main track's

@@ -67,6 +67,7 @@ sealed interface Panel {
     data object SoundFx : Panel
     data object Transcript : Panel
     data object Fillers : Panel
+    data object PreviewQuality : Panel
     data object Highlight : Panel
     data object Draw : Panel
     data object Tracking : Panel
@@ -122,6 +123,7 @@ internal const val KEY_NEAR_US = 1_000_000.0 / 30
 /** The app's settings file, and the linkage switch in it. */
 private const val SETTINGS = "capcraft-settings"
 private const val LINKAGE_KEY = "linkage"
+private const val PREVIEW_KEY = "preview-scale"
 
 /** Where the timeline keeps its linkage note (the bridge's `LINKAGE`). */
 private const val LINKAGE_EXTRA = "capcraftLinkage"
@@ -162,6 +164,15 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     }
     var panel: Panel? by mutableStateOf(null)
     var message: String? by mutableStateOf(null)
+    /** How sharp the preview is drawn: 1 as sharp as the screen shows, less for a slower phone. */
+    var previewScale by mutableStateOf(app.getSharedPreferences(SETTINGS, android.content.Context.MODE_PRIVATE).getFloat(PREVIEW_KEY, 1f))
+        private set
+
+    fun setPreview(scale: Float) {
+        previewScale = scale
+        getApplication<Application>().getSharedPreferences(SETTINGS, android.content.Context.MODE_PRIVATE).edit().putFloat(PREVIEW_KEY, scale).apply()
+    }
+
     /** A long operation in progress, shown over the editor ("Importing"). */
     var busy: String? by mutableStateOf(null)
     var fullscreen by mutableStateOf(false)
@@ -781,6 +792,21 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
             captionsRead = revision to read
             return read
         }
+
+    private var groupsRead: Pair<ULong?, List<Set<String>>> = null to emptyList()
+
+    /** The clips grouped with clip [id], itself included; none when it is in no group. */
+    fun groupOf(id: String): Set<String> {
+        val revision = timeline?.revision
+        if (groupsRead.first != revision || revision == null) {
+            val read = runCatching {
+                val all = session?.extra("capcraftGroups")?.takeIf { it.isNotBlank() }?.let { JSONArray(it) } ?: JSONArray()
+                (0 until all.length()).map { i -> all.getJSONArray(i).let { g -> (0 until g.length()).map { g.optString(it) }.filter { clip(it) != null }.toSet() } }.filter { it.size > 1 }
+            }.getOrDefault(emptyList())
+            groupsRead = revision to read
+        }
+        return groupsRead.second.firstOrNull { id in it }.orEmpty()
+    }
 
     /** Where [clip]'s beats fall on the timeline, those inside the clip. */
     fun beatTimes(clip: ClipView): List<Long> {

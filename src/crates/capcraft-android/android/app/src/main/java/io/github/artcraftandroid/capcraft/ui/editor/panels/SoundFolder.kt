@@ -89,9 +89,9 @@ internal fun soundName(file: String, category: String): String {
         .replace(Regex("^ES_"), "").replace(Regex("\\s*-\\s*SFX Producer.*$"), "")
         .replace(Regex("\\s*\\((MP3|HD|WAV|Copyright Free|Lossless)[^)]*\\)", RegexOption.IGNORE_CASE), "")
         .replace(Regex("\\s*-?\\s*\\bsound effects?\\b", RegexOption.IGNORE_CASE), "")
-    // a download's random tail: an underscore and eight letters and digits, some of them capitals or digits
-    s = s.replace(Regex("_(?=[A-Za-z0-9_]{8}$)(?=.*[A-Z0-9])[A-Za-z0-9_]{8}$"), "")
-    s = s.replace('-', ' ').replace('_', ' ').replace(Regex("\\s+"), " ").trim()
+    // a download's random tail: an underscore and eight letters and digits, capitals in the middle of them as no word has
+    s = s.trim('_', ' ').replace(Regex("_(?=[A-Za-z0-9_]{8}$)(?=.*([a-z0-9][A-Z]|[A-Z]{2}))[A-Za-z0-9_]{8}$"), "")
+    s = s.replace('-', ' ').replace('_', ' ').replace('.', ' ').replace(Regex("\\s+"), " ").trim()
     val only = Regex("^(?:sound ?)?0*(\\d+)?$", RegexOption.IGNORE_CASE).matchEntire(s)
     if (only != null) s = (category + " " + only.groupValues[1]).trim()
     // zeroes before a number are a sort order, not a name
