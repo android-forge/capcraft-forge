@@ -311,7 +311,11 @@ fun AutoCaptionsSheet(vm: EditorViewModel, lyrics: Boolean = false) {
                 Spacer(Modifier.height(12.dp))
                 Card {
                     Row(
-                        Modifier.fillMaxWidth().height(52.dp).clickable { english = !english }.padding(horizontal = 14.dp),
+                        Modifier.fillMaxWidth().height(52.dp).clickable {
+                                english = !english
+                                // the fast model mishears other languages too often to put them into English
+                                if (english && models.getOrNull(model)?.id == "tiny") models.indexOfFirst { it.id == "base" }.takeIf { it >= 0 }?.let { model = it }
+                            }.padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Glyph(LucideIcons.Languages, Palette.Text, size = 20.dp)

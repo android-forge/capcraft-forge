@@ -147,8 +147,10 @@ CapCraft Forge is in beta.
 | Captions made on the phone, typed captions, caption templates and imported subtitles | ✅ |
 | Sound effects, voiceover, extract audio, voice effects, noise reduction and isolate voice | ✅ |
 | Remove background (a model downloaded once, run on the phone) | ✅ |
-| Aspect ratios, backgrounds, cover, AutoCut, collage | ✅ |
-| Export at 480p to 4K, 24 to 60 fps, GIF and photo, saved to the gallery and shared | ✅ |
+| Aspect ratios, backgrounds, cover, AutoCut, auto highlight, collage, projects as templates | ✅ |
+| Filler words removed, caption keywords and emojis, English under captions, one's own voice | ✅ |
+| Groups, compound clips, project files, screen recording, live photos, a Home widget, one's own sound folders | ✅ |
+| Export at 480p to 4K, 24 to 60 fps, HDR, GIF, photo and live photo, saved to the gallery and shared | ✅ |
 | A music library, downloadable effects and templates | ⬜ |
 | Generative AI, cloud storage, accounts | 🚫 CapCraft is a local app |
 

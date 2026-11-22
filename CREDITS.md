@@ -22,7 +22,8 @@ each, and its licence, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
 
 4K playback from proxies, and ten-bit HEVC on the phone's video chip, are by egagofur
 (artcraft-android/capcraft-android#29), offered to the original project and not merged there yet; the commits are egagofur's.
-FFmpeg is built with that pull request's patch, in `src/scripts/ffmpeg-patches`.
+FFmpeg is built with that pull request's patch, `0001` in `src/scripts/ffmpeg-patches`; `0002` there, ten-bit encoding on the
+phone's video chip, is this build's own, under FFmpeg's licence (LGPL-2.1-or-later).
 
 The rest is by praveenkrishna16n-sys, with Claude Code, in November 2026; see [CHANGELOG.md](CHANGELOG.md). Most of the fixes are
 offered to the original project as pull requests.

@@ -19,4 +19,14 @@ dated, as the licence asks; `#` numbers are the original project's.
 - 4K and ten-bit video plays from a proxy (egagofur's pull request #29, with its FFmpeg patch), and from its scrub copy until the proxy is written.
 - Named CapCraft Forge, with an application id of its own. Exports go to folders of that name.
 - Credits, licence texts and the source link of this build.
+- My sounds in Sound FX: folders of sounds on the phone, by category.
+- Filler words found and cut (#53); caption keywords in color (#54) and caption emojis (#55); captions with their English under them.
+- Auto highlight keeps a video's liveliest moments.
+- A project exported as a file and opened again (#56); a project used as a template.
+- Preview quality (#57), clip groups (#59), compound clips of neighbouring videos (#60).
+- HDR export in ten-bit HEVC (#61), with `src/scripts/ffmpeg-patches/0002-mediacodecenc-p010.patch`.
+- A Home screen widget (#62), screen recording (#63), live photos in and out (#64).
+- My voice: text read aloud in one's own voice, recorded saying it may be copied and checked to have said so.
+- Graphs shape a mask's keyframes (#50). Titles paint the emoji of newer phones. A video can take a photo's place.
+- Builds on a Mac as `mobile-env.sh` sets it up (#52). Photo is offered in every project's export.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.
