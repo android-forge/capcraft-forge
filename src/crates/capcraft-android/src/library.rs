@@ -152,6 +152,46 @@ pub fn duplicate_project(path: String, name: String) -> Result<ProjectSummary, M
     summary(&to)
 }
 
+/// Takes in a project unpacked at `from` (a folder of the app's cache, which
+/// is used up): its folder becomes a new project's, and the paths in its
+/// document, which name `old_root`, the folder it was made in, name the new
+/// one. Errs when there is no project in it.
+#[uniffi::export]
+pub fn adopt_project(from: String, old_root: String) -> Result<ProjectSummary, MobileError> {
+    let context = context()?;
+    let from = std::fs::canonicalize(&from)
+        .map_err(|error| format!("could not read the project: {error}"))?;
+    let cache = std::fs::canonicalize(&context.cache)
+        .map_err(|error| format!("could not read the cache: {error}"))?;
+    if !from.starts_with(&cache) {
+        return Err(MobileError::Failed(
+            "That folder is not one of this app's.".to_owned(),
+        ));
+    }
+    let Some(mut document) = projects::read_document(&from.to_string_lossy())? else {
+        return Err(MobileError::Failed(
+            "That file has no project in it.".to_owned(),
+        ));
+    };
+    let to = fresh_folder(&context.projects)?;
+    let placed = (|| {
+        copy_tree(&from, &to, &from.join("no-such"))
+            .map_err(|error| format!("could not copy the project: {error}"))?;
+        let new = to.to_string_lossy().into_owned();
+        let old = old_root.trim_end_matches('/');
+        if !old.is_empty() {
+            repoint(&mut document, old, &new);
+        }
+        projects::save(&new, &document)?;
+        summary(&to)
+    })();
+    if placed.is_err() {
+        let _ = std::fs::remove_dir_all(&to);
+    }
+    let _ = std::fs::remove_dir_all(&from);
+    placed
+}
+
 /// Deletes a project folder and everything in it.
 #[uniffi::export]
 pub fn delete_project(path: String) -> Result<(), MobileError> {

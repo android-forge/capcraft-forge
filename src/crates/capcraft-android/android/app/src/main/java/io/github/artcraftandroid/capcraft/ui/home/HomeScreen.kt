@@ -228,6 +228,44 @@ fun HomeScreen(
     var renaming by remember { mutableStateOf<ProjectSummary?>(null) }
     var deleting by remember { mutableStateOf<ProjectSummary?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    // a project file being written, or opened, and how far along it is
+    var exporting by remember { mutableStateOf<ProjectSummary?>(null) }
+    val appContext = LocalContext.current.applicationContext
+    val saveZip = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        val p = exporting
+        exporting = null
+        if (uri != null && p != null) {
+            scope.launch {
+                var said = -1
+                runCatching {
+                    withContext(Threads.commands) {
+                        io.github.artcraftandroid.capcraft.engine.ProjectZip.write(appContext, p.path, uri) { f ->
+                            val tenth = (f * 10).toInt()
+                            if (tenth != said) {
+                                said = tenth
+                                scope.launch { message = "Exporting project ${tenth * 10}%" }
+                            }
+                        }
+                    }
+                }.onSuccess { message = "Project file saved" }.onFailure { message = it.userMessage }
+            }
+        }
+    }
+    val openZip = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                message = "Opening the project file"
+                runCatching { withContext(Threads.commands) { io.github.artcraftandroid.capcraft.engine.ProjectZip.read(appContext, uri) } }
+                    .onSuccess { message = "Added ${it.name.ifBlank { "Untitled" }}" }
+                    .onFailure { message = it.userMessage }
+                refresh++
+            }
+        }
+    }
     var licences by remember { mutableStateOf(false) }
     var about by remember { mutableStateOf(false) }
     /** 0 Edit, 1 Projects, 2 Me. */
@@ -399,6 +437,7 @@ fun HomeScreen(
                         showingTrash = showingTrash,
                         onShowTrash = { showingTrash = it; managing = null },
                         onTrashMenu = { trashMenu = it },
+                        onImport = { openZip.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed")) },
                     )
                     else -> MeTab(onLicences = { licences = true }, onAbout = { about = true }, onCleared = { message = it })
                 }
@@ -467,6 +506,11 @@ fun HomeScreen(
                             .onFailure { message = it.userMessage }
                         refresh++
                     }
+                },
+                onExport = {
+                    menuFor = null
+                    exporting = p
+                    saveZip.launch(io.github.artcraftandroid.capcraft.engine.Media.safeName(p.name.ifBlank { "Project" }) + ".zip")
                 },
                 onDelete = { menuFor = null; deleting = p },
             )
@@ -777,6 +821,7 @@ private fun ProjectsTab(
     showingTrash: Boolean,
     onShowTrash: (Boolean) -> Unit,
     onTrashMenu: (ProjectSummary) -> Unit,
+    onImport: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     // All, Video and Photo, as the reference's chips sort its projects
@@ -820,6 +865,9 @@ private fun ProjectsTab(
                     )
                 } else {
                     Text("Projects", style = ink(22f, FontWeight.Bold), modifier = Modifier.weight(1f))
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable(onClick = onImport), contentAlignment = Alignment.Center) {
+                        Glyph(LucideIcons.FolderOpen, Home.Ink, size = 22.dp, description = "Open a project file")
+                    }
                     Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable { onSearching(true) }, contentAlignment = Alignment.Center) {
                         Glyph(LucideIcons.Search, Home.Ink, size = 24.dp, description = "Search projects")
                     }
@@ -1313,7 +1361,7 @@ private fun TrashSheet(p: ProjectSummary, onDismiss: () -> Unit, onRestore: () -
 
 /** A project's menu: its cover and name at the top, then one row an action. */
 @Composable
-private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () -> Unit, onDuplicate: () -> Unit, onDelete: () -> Unit) {
+private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () -> Unit, onDuplicate: () -> Unit, onExport: () -> Unit, onDelete: () -> Unit) {
     val cover = rememberCover(p)
     Scrim(onDismiss, Alignment.BottomCenter) {
         Column(
@@ -1335,6 +1383,7 @@ private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () 
             Box(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp).height(1.dp).background(Home.Hairline))
             SheetRow(LucideIcons.Pencil, "Rename", onRename)
             SheetRow(LucideIcons.Copy, "Duplicate", onDuplicate)
+            SheetRow(LucideIcons.Share2, "Export project file", onExport)
             SheetRow(LucideIcons.Trash2, "Delete", onDelete)
         }
     }
