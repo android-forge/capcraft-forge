@@ -1034,7 +1034,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
             val result = withContext(Threads.commands) { runCatching { s.captionsSrt() } }
             result.onSuccess { text ->
                 captionsOut = text
-                save("CapCraft_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".srt")
+                save("CapCraftForge_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".srt")
             }.onFailure { fail(it) }
         }
     }

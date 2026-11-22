@@ -253,7 +253,8 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "io.github.artcraftandroid.capcraft"
+        // the code keeps the original's package; the app is its own, so both can be installed
+        applicationId = "io.github.praveenkrishna16nsys.capcraftforge"
         minSdk = minApi
         targetSdk = 36
         versionCode = appVersionCode

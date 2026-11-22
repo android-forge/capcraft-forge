@@ -4,8 +4,9 @@ Not legal advice. Work through this for every release.
 
 ## Before the first release
 - [ ] Ask the original authors (see the issue this build's maintainer opens there).
-- [ ] A name and an icon of its own, and no use of CapCut's. Until then this is still called CapCraft.
-- [ ] An application id of its own in `app/build.gradle.kts`: another key cannot update the original's app.
+- [x] A name: CapCraft Forge. It still has CapCraft in it: ask the original authors, or change it.
+- [ ] An icon of its own, and no use of CapCut's.
+- [x] An application id of its own in `app/build.gradle.kts`: another key cannot update the original's app.
 - [ ] A signing key of its own, backed up, never committed; its values as the release workflow's secrets.
 - [ ] README images and links that are this build's, and not the original's store badges.
 - [ ] Ask Concat whether its model mirror may be used by this build.

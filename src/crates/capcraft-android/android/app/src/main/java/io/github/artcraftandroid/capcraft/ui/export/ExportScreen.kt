@@ -142,7 +142,7 @@ fun ExportScreen(vm: EditorViewModel, onClose: () -> Unit, onHome: () -> Unit) {
         val size = exportSize(t.width, t.height, res.toUInt())
         val kbps = exportKbps(vm, size[0].toInt(), size[1].toInt())
         val gif = vm.exportGif
-        val name = "CapCraft_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + if (gif) ".gif" else ".mp4"
+        val name = "CapCraftForge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + if (gif) ".gif" else ".mp4"
         val out = withContext(Threads.commands) { exportPath(name) }
         val appContext = context.applicationContext
         val listener = object : ExportListener {
@@ -265,7 +265,7 @@ fun ExportScreen(vm: EditorViewModel, onClose: () -> Unit, onHome: () -> Unit) {
                         Box(Modifier.weight(1f).height(1.dp).background(Color(0x33FFFFFF)))
                         Glyph(LucideIcons.Lightbulb, Palette.TextSecondary, size = 16.dp, modifier = Modifier.padding(horizontal = 8.dp))
                         Text(
-                            "You can leave CapCraft while the video saves",
+                            "You can leave CapCraft Forge while the video saves",
                             style = Type.Small.copy(textAlign = TextAlign.Center),
                             modifier = Modifier.width(240.dp),
                         )
@@ -332,11 +332,11 @@ private fun open(context: Context, uri: Uri, gif: Boolean, photo: Boolean = fals
 
 /** Saves a still as a JPEG in Pictures/CapCraft. */
 private fun publishPhoto(context: Context, picture: Bitmap): Uri? = runCatching {
-    val name = "CapCraft_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg"
+    val name = "CapCraftForge_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg"
     val values = ContentValues().apply {
         put(MediaStore.Images.Media.DISPLAY_NAME, name)
         put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CapCraft")
+        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CapCraft Forge")
         put(MediaStore.Images.Media.IS_PENDING, 1)
     }
     val resolver = context.contentResolver
@@ -354,7 +354,7 @@ private fun publishGif(context: Context, file: File): Uri? = runCatching {
     val values = ContentValues().apply {
         put(MediaStore.Images.Media.DISPLAY_NAME, file.name)
         put(MediaStore.Images.Media.MIME_TYPE, "image/gif")
-        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CapCraft")
+        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/CapCraft Forge")
         put(MediaStore.Images.Media.IS_PENDING, 1)
     }
     val resolver = context.contentResolver
@@ -373,7 +373,7 @@ private fun publish(context: Context, file: File): Uri? = runCatching {
     val values = ContentValues().apply {
         put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CapCraft")
+        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CapCraft Forge")
         put(MediaStore.Video.Media.IS_PENDING, 1)
     }
     val resolver = context.contentResolver

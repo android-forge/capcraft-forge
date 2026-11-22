@@ -1,4 +1,4 @@
-> **This is an unofficial, modified build of [CapCraft for Android](https://github.com/artcraft-android/capcraft-android)**
+> **CapCraft Forge is an unofficial, modified build of [CapCraft for Android](https://github.com/artcraft-android/capcraft-android)**
 > by the ArtCraft Team, built on [Concat](https://github.com/jub0t/Concat) by Jareer Abdullah and the Concat contributors.
 > All credit for the original work goes to them. They do not maintain or endorse this build; please report its problems here.
 > See [CREDITS.md](CREDITS.md) and [CHANGELOG.md](CHANGELOG.md). Not affiliated with ByteDance or CapCut.
@@ -7,7 +7,7 @@
   <img src="docs/images/capcraft-512.png" alt="CapCraft's app icon" width="128">
 </p>
 
-<h1 align="center">CapCraft for Android</h1>
+<h1 align="center">CapCraft Forge</h1>
 
 <p align="center">
   <b>An open-source video editor for Android.</b><br>
@@ -121,7 +121,7 @@
 
 ## Planned features
 
-CapCraft for Android is in beta.
+CapCraft Forge is in beta.
 
 | Area | Status |
 |---|---|
@@ -179,7 +179,7 @@ Build time dependencies:
 
 ## License
 
-[AGPL-3.0-or-later](LICENSE), CapCraft for Android is not affiliated with, endorsed by or connected to ByteDance or CapCut.
+[AGPL-3.0-or-later](LICENSE). CapCraft Forge is not affiliated with, endorsed by or connected to ByteDance or CapCut.
 
 <br>
 

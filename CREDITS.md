@@ -1,6 +1,6 @@
 # Credits
 
-This is an unofficial, modified build of [CapCraft for Android](https://github.com/artcraft-android/capcraft-android).
+CapCraft Forge is an unofficial, modified build of [CapCraft for Android](https://github.com/artcraft-android/capcraft-android).
 Its authors do not maintain or endorse this build. Please report its problems in this repository, not in theirs.
 
 ## The original work
@@ -20,9 +20,13 @@ each, and its licence, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
 
 ## Changes in this build
 
-By praveenkrishna16n-sys, with Claude Code, in November 2026; see [CHANGELOG.md](CHANGELOG.md). The fixes are offered to the
+4K playback from proxies, and ten-bit HEVC on the phone's video chip, are by egagofur
+(artcraft-android/capcraft-android#29), offered to the original project and not merged there yet; the commits are egagofur's.
+FFmpeg is built with that pull request's patch, in `src/scripts/ffmpeg-patches`.
+
+The rest is by praveenkrishna16n-sys, with Claude Code, in November 2026; see [CHANGELOG.md](CHANGELOG.md). The fixes are offered to the
 original project as pull requests.
 
 Thanks to those who reported what they fix: Class9123 (artcraft-android/capcraft-android#45) and XPERTER-sysnand (#41).
 
-CapCraft is not affiliated with, endorsed by or connected to ByteDance or CapCut.
+Neither CapCraft nor CapCraft Forge is affiliated with, endorsed by or connected to ByteDance or CapCut.

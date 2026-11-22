@@ -1,6 +1,6 @@
 # Changes from the original
 
-This build is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
+CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
 ## Unreleased
@@ -16,4 +16,6 @@ dated, as the licence asks; `#` numbers are the original project's.
 ### 23 November 2026
 - A duplicate keeps every change, and stickers can be duplicated (#41; #70).
 - The preview follows a picture being moved (#41; #71).
+- 4K and ten-bit video plays from a proxy (egagofur's pull request #29, with its FFmpeg patch), and from its scrub copy until the proxy is written.
+- Named CapCraft Forge, with an application id of its own. Exports go to folders of that name.
 - Credits, licence texts and the source link of this build.

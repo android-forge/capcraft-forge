@@ -1042,7 +1042,7 @@ private fun MeTab(onLicences: () -> Unit, onAbout: () -> Unit, onCleared: (Strin
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             SettingRow("Clear cache", cache?.let(::size) ?: "") { clearing = true }
             SettingRow("Licences", null, onLicences)
-            SettingRow("About CapCraft", null, onAbout)
+            SettingRow("About CapCraft Forge", null, onAbout)
             SettingRow("Version", version, null)
         }
     }
@@ -1105,10 +1105,10 @@ private const val ENGINE_URL = "https://github.com/jub0t/Concat"
 private fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val version = remember { appVersion(context) }
-    Page("About CapCraft", onBack) {
+    Page("About CapCraft Forge", onBack) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(24.dp))
-            Text("CapCraft", style = ink(26f, FontWeight.Bold))
+            Text("CapCraft Forge", style = ink(26f, FontWeight.Bold))
             Spacer(Modifier.height(6.dp))
             Text("Version $version", style = ink(13f, color = Home.Muted))
             Spacer(Modifier.height(28.dp))
@@ -1126,7 +1126,7 @@ private fun AboutScreen(onBack: () -> Unit) {
             // the notices the licence asks an app to show: whose it is, that it comes with no warranty, and where its terms are
             Text(
                 "Copyright © 2026 ArtCraft Team and the CapCraft contributors. Engine © 2026 Jareer Abdullah and the Concat contributors. " +
-                    "Changes in this build © 2026 praveenkrishna16n-sys. It comes with no warranty; you may share it under the licence in Settings, Licences.",
+                    "Changes in this build © 2026 praveenkrishna16n-sys and egagofur. It comes with no warranty; you may share it under the licence in Settings, Licences.",
                 style = ink(13f, color = Home.Muted).copy(textAlign = androidx.compose.ui.text.style.TextAlign.Center),
             )
             Spacer(Modifier.height(16.dp))
@@ -1179,7 +1179,7 @@ private fun clearCaches(context: android.content.Context): Long {
 private fun LicencesScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val files = listOf(
-        "NOTICE.md" to "CapCraft",
+        "NOTICE.md" to "CapCraft Forge and CapCraft",
         "CREDITS.md" to "Credits and changes in this build",
         "LICENSE.txt" to "GNU Affero General Public License",
         "THIRD_PARTY_NOTICES.md" to "Engine third-party notices",
