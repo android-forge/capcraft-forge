@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.artcraftandroid.capcraft.core.ClipView
 import io.github.artcraftandroid.capcraft.core.RowKind
+import io.github.artcraftandroid.capcraft.core.clipVolumeAt
 import io.github.artcraftandroid.capcraft.engine.Threads
 import io.github.artcraftandroid.capcraft.ui.Glyph
 import io.github.artcraftandroid.capcraft.ui.LucideIcons
@@ -775,7 +776,11 @@ private fun opacityHere(vm: EditorViewModel, clip: ClipView): Float {
 private fun VolumePanel(vm: EditorViewModel) {
     val clip = vm.selectedClip ?: run { vm.panel = null; return }
     // the slider's middle is 100%: the left half runs to silence, the right half up to 1000%
-    var at by remember(clip.id) { mutableFloatStateOf(volumeToSlider((clip.volume * 100).toFloat())) }
+    val volume = volumeHere(vm, clip)
+    var held by remember(clip.id) { mutableStateOf<Float?>(null) }
+    var dragging by remember(clip.id) { mutableStateOf(false) }
+    // the finger's value stays up until the engine's catches up with it
+    LaunchedEffect(volume, vm.playhead) { if (!dragging) held = null }
     val chain = remember(clip.json) {
         vm.clipJson(clip.id)?.optJSONArray("filters")?.let { c -> (0 until c.length()).map { c.getJSONObject(it).optString("id") } }.orEmpty()
     }
@@ -808,14 +813,19 @@ private fun VolumePanel(vm: EditorViewModel) {
             Text("0", style = Type.Body.copy(color = Palette.TextSecondary), modifier = Modifier.padding(bottom = 6.dp))
             Spacer(Modifier.width(12.dp))
             CapSlider(
-                value = at,
+                value = held ?: volumeToSlider((volume * 100).toFloat()),
                 range = 0f..1000f,
                 label = { "${sliderToVolume(it).roundToInt()}" },
                 onChange = {
-                    at = if (abs(it - 500f) < 15f) 500f else it
-                    vm.patch(clip.id, JSONObject().put("volume", sliderToVolume(at) / 100.0), gesture = "volume")
+                    val at = if (abs(it - 500f) < 15f) 500f else it
+                    dragging = true
+                    held = at
+                    vm.setVolume(clip, sliderToVolume(at) / 100.0, gesture = "volume")
                 },
-                onDone = { vm.endGesture() },
+                onDone = {
+                    dragging = false
+                    vm.endGesture()
+                },
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(12.dp))
@@ -839,6 +849,13 @@ private fun VolumePanel(vm: EditorViewModel) {
             }
         }
     }
+}
+
+/** The volume [clip] plays at under the playhead: its keys' where it has them, and its own otherwise. */
+@Composable
+private fun volumeHere(vm: EditorViewModel, clip: ClipView): Double {
+    val at = ((vm.playhead - clip.startUs).toDouble() / clip.durationUs.coerceAtLeast(1)).coerceIn(0.0, 1.0)
+    return remember(clip.json, at) { runCatching { clipVolumeAt(clip.json, at) }.getOrDefault(clip.volume) }
 }
 
 /** An option with a line saying what it does, and a switch for it. */

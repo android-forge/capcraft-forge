@@ -652,16 +652,22 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         command(JSONObject().put("op", "updateClip").put("clipId", clipId).put("patch", patch), gesture)
     }
 
+    /** Sets [clip]'s opacity, 0 to 1: on its key under the playhead where it is keyframed. */
+    fun setOpacity(clip: ClipView, value: Double, gesture: String? = null) = setKeyed(clip, "opacity", value, gesture)
+
+    /** Sets [clip]'s volume, 1 as recorded: on its key under the playhead where it is keyframed. */
+    fun setVolume(clip: ClipView, value: Double, gesture: String? = null) = setKeyed(clip, "volume", value, gesture)
+
     /**
-     * Sets [clip]'s opacity, 0 to 1. Where it is keyframed the keys are what shows, so the value goes
-     * on the key under the playhead (a frame either side counts, as the keyframe button has it), added
-     * there if missing; that key keeps its curve.
+     * Sets [clip]'s [property]. Where it is keyframed the keys are what shows (or sounds), so the value
+     * goes on the key under the playhead (a frame either side counts, as the keyframe button has it),
+     * added there if missing; that key keeps its curve.
      */
-    fun setOpacity(clip: ClipView, value: Double, gesture: String? = null) {
+    private fun setKeyed(clip: ClipView, property: String, value: Double, gesture: String?) {
         val keys = clipJson(clip.id)?.optJSONArray("keys")?.let { k -> (0 until k.length()).map { k.getJSONObject(it) } }.orEmpty()
-            .filter { it.optString("property") == "opacity" }
+            .filter { it.optString("property") == property }
         if (keys.isEmpty()) {
-            patch(clip.id, JSONObject().put("opacity", value), gesture)
+            patch(clip.id, JSONObject().put(property, value), gesture)
             return
         }
         // the key is set where the playhead stands: it must not run on during the drag
@@ -669,7 +675,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         val length = clip.durationUs.coerceAtLeast(1).toDouble()
         val at = ((playhead - clip.startUs) / length).coerceIn(0.0, 1.0)
         val here = keys.minByOrNull { kotlin.math.abs(it.optDouble("at") - at) }?.takeIf { kotlin.math.abs(it.optDouble("at") - at) <= KEY_NEAR_US / length }
-        val set = JSONObject().put("op", "setClipKey").put("clipId", clip.id).put("property", "opacity")
+        val set = JSONObject().put("op", "setClipKey").put("clipId", clip.id).put("property", property)
             .put("at", here?.optDouble("at") ?: at).put("value", value)
         here?.opt("ease")?.let { set.put("ease", it) }
         command(set, gesture)

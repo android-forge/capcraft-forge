@@ -71,6 +71,17 @@ pub fn waveform(
         .collect())
 }
 
+/// The volume `clip` (as JSON, see `ClipView::json`) plays at at `at`, a
+/// fraction of its length: its keys' where it is keyed, and its own where it
+/// is not.
+#[uniffi::export]
+pub fn clip_volume_at(clip: String, at: f64) -> Result<f64, MobileError> {
+    use concat_project::model::{Clip, KeyProperty};
+    let clip: Clip = serde_json::from_str(&clip)
+        .map_err(|error| MobileError::Failed(format!("not a clip: {error}")))?;
+    Ok(clip.value_at(KeyProperty::Volume, at.clamp(0.0, 1.0)))
+}
+
 /// One package of the engine's catalogue.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PackageInfo {
