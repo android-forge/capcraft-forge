@@ -512,7 +512,8 @@ fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) ->
     // 6: a canvas grows past the frame to hold ink that runs past it, and
     // the sidecar says how big it is. 7: bubbles - an oval with the same
     // margin all round, a tail that meets it without a gap - grow it too.
-    bytes.extend_from_slice(&7u32.to_le_bytes());
+    // 8: version 1 colour glyphs, the emoji of newer phones, are painted.
+    bytes.extend_from_slice(&8u32.to_le_bytes());
     crate::media::fnv1a(&bytes)
 }
 
