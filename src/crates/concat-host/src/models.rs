@@ -270,6 +270,23 @@ fn take_supplied(file: &str) -> Option<PathBuf> {
     Some(held.remove(at).1)
 }
 
+/// Fetches `url` into `partial` and checks it, as [`fetch`] does, from that
+/// one place: a file that is no model of Concat's.
+pub fn fetch_one(
+    url: &str,
+    partial: &Path,
+    estimate: u64,
+    sha256: &str,
+    cancel: &AtomicBool,
+    cancelled: &str,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<(), String> {
+    attempt(url, partial, estimate, cancel, cancelled, progress).map_err(|miss| miss.message)?;
+    verify(partial, sha256).inspect_err(|_| {
+        let _ = std::fs::remove_file(partial);
+    })
+}
+
 /// Fetches the model file `file` into `partial` and checks it: from the
 /// copy the person chose with [`supply`], when there is one, or else from
 /// each of [`sources`] in turn, taking up from whatever of `partial` an

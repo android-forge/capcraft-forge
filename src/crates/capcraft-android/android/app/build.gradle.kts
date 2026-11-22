@@ -298,8 +298,9 @@ android {
         includeInBundle = false
     }
     packaging {
-        // the native libraries stay uncompressed and page-aligned, so they load in place
-        jniLibs { useLegacyPackaging = false }
+        // the native libraries packed, most of the app's size: a third of it to download, and unpacked by the
+        // phone as it installs
+        jniLibs { useLegacyPackaging = true }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -379,10 +380,8 @@ androidComponents {
     }
 }
 
-// reproducible builds: no baseline profile in the APK (its bytes vary from one build to the next)
-tasks.configureEach {
-    if (name.contains("ArtProfile")) enabled = false
-}
+// The baseline profile stays in, which the original leaves out to build the same bytes every time: with it the
+// phone has the interface's code compiled before it first runs, and a new install starts and scrolls smoothly.
 
 dependencies {
     implementation(libs.androidx.core.ktx)

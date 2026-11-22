@@ -208,6 +208,21 @@ impl Titles {
         }
     }
 
+    /// Starts over with the fonts there are now - some were downloaded -
+    /// and paints every title again: those painted before may be in a face
+    /// that stood in.
+    pub fn renew(&self) {
+        *self.fonts.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.loaded_files
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.memo.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        *self.live.lock().unwrap_or_else(|e| e.into_inner()) =
+            LivePaintings::new(LIVE_BYTES, LIVE_CEILING);
+        sweep(&self.dir, 0);
+    }
+
     /// Every text and shape clip on the active timeline, as an image clip
     /// each, for a `width` × `height` frame. One that fails to paint is left
     /// out and said once on stderr; the rest of the edit still renders.

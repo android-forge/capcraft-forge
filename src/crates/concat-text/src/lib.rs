@@ -535,7 +535,10 @@ const BUNDLED: [&[u8]; 5] = [
 /// (regular) weight: fontdb sets no variation axes. Kosugi Maru carries
 /// Japanese, Secular One and Rubik Scribble Hebrew. The window registers the
 /// same bytes for its preset cards (concat's fonts.rs).
-pub const BASE_FONTS: [&[u8]; 41] = [
+///
+/// A phone's build carries the ones in everyday use; the rest are
+/// downloaded when they are wanted, and found in [`more_folder`].
+pub const BASE_FONTS: &[&[u8]] = &[
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
     include_bytes!("../fonts/Inter-Bold.ttf"),
@@ -557,25 +560,45 @@ pub const BASE_FONTS: [&[u8]; 41] = [
     include_bytes!("../fonts/Bangers-Regular.ttf"),
     include_bytes!("../fonts/PermanentMarker-Regular.ttf"),
     include_bytes!("../fonts/Pacifico-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/Lobster-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/CaveatBrush-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/Staatliches-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/BlackOpsOne-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/GermaniaOne-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/AtomicAge-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/HammersmithOne-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/SecularOne-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/LondrinaSolid-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/LondrinaSolid-Black.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/BungeeHairline-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/RubikScribble-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/ShadowsIntoLightTwo-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/PixelifySans-Variable.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/GoogleSansCode-Variable.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/KosugiMaru-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/Frijole-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/EmilysCandy-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/MysteryQuest-Regular.ttf"),
+    #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/ZenTokyoZoo-Regular.ttf"),
 ];
 
@@ -633,7 +656,10 @@ pub const NOTO_SANS_THAI: &[u8] = include_bytes!("../fonts/NotoSansThai-Concat.t
 ///
 /// The licences are `fonts/LICENSE-<face>.txt`. The window registers the
 /// same bytes as its interface's fallbacks (concat's fonts.rs).
-pub const SCRIPT_FALLBACKS: [&[u8]; 6] = [
+///
+/// Not on Android, which has a face for each of these scripts itself.
+#[cfg(not(target_os = "android"))]
+pub const SCRIPT_FALLBACKS: &[&[u8]] = &[
     NOTO_SANS_CJK_SC,
     NOTO_SANS_ARABIC_UI,
     NOTO_SANS_HEBREW,
@@ -641,6 +667,24 @@ pub const SCRIPT_FALLBACKS: [&[u8]; 6] = [
     NOTO_SANS_BENGALI,
     NOTO_SANS_THAI,
 ];
+
+/// See the other: Android has a face for each script itself.
+#[cfg(target_os = "android")]
+pub const SCRIPT_FALLBACKS: &[&[u8]] = &[];
+
+static MORE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Where the fonts downloaded beside the bundled ones are, for every
+/// [`Fonts`] made after. Set once, at the start.
+pub fn set_more_folder(folder: std::path::PathBuf) {
+    let _ = MORE.set(folder);
+}
+
+/// The folder [`set_more_folder`] set, or none.
+pub fn more_folder() -> Option<&'static std::path::Path> {
+    MORE.get().map(std::path::PathBuf::as_path)
+}
+
 
 /// Faces that used to be bundled and no longer are: a document that names
 /// one is painted in the bundled face, not in whatever the system offers
@@ -675,7 +719,10 @@ impl Fonts {
             db.load_font_data(face.to_vec());
         }
         for face in SCRIPT_FALLBACKS {
-            db.load_font_source(fontdb::Source::Binary(Arc::new(face)));
+            db.load_font_source(fontdb::Source::Binary(Arc::new(*face)));
+        }
+        if let Some(folder) = more_folder() {
+            db.load_fonts_dir(folder);
         }
         Fonts {
             db,

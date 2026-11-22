@@ -106,7 +106,8 @@ private val FONT_KIND = mapOf(
 /** The engine's font families, each with a Compose font made from its file (null until loaded). */
 @Composable
 fun rememberFontFaces(): List<Pair<String, androidx.compose.ui.text.font.FontFamily?>> {
-    val faces by androidx.compose.runtime.produceState(FontFaceCache.list) {
+    val version = FontFaceCache.version.intValue
+    val faces by androidx.compose.runtime.produceState(FontFaceCache.list, version) {
         if (FontFaceCache.list.isNotEmpty()) return@produceState
         value = withContext(Threads.thumbnails) {
             runCatching {
@@ -139,6 +140,44 @@ private fun projectFaces(vm: EditorViewModel): List<Pair<String, androidx.compos
 
 private object FontFaceCache {
     @Volatile var list: List<Pair<String, androidx.compose.ui.text.font.FontFamily?>> = emptyList()
+
+    /** Bumped when fonts are downloaded, so what shows them reads them again. */
+    val version = mutableIntStateOf(0)
+}
+
+/** The fonts not in the app, downloaded together when they are wanted: the button, or nothing when all are here. */
+@Composable
+private fun MoreFonts(vm: EditorViewModel) {
+    val scope = rememberCoroutineScope()
+    var left by remember { mutableStateOf(runCatching { io.github.artcraftandroid.capcraft.core.moreFontsDownload().toLong() }.getOrDefault(0L)) }
+    var job by remember { mutableStateOf<Float?>(null) }
+    if (left <= 0L) return
+    val listener = remember {
+        object : io.github.artcraftandroid.capcraft.core.SpeechListener {
+            override fun onProgress(fraction: Float, stage: String) {
+                scope.launch(kotlinx.coroutines.Dispatchers.Main) { job = fraction }
+            }
+
+            private fun over(message: String) {
+                scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    job = null
+                    left = runCatching { io.github.artcraftandroid.capcraft.core.moreFontsDownload().toLong() }.getOrDefault(0L)
+                    FontFaceCache.list = emptyList()
+                    FontFaceCache.version.intValue++
+                    vm.message = message
+                }
+            }
+
+            override fun onDone(result: io.github.artcraftandroid.capcraft.core.TimelineView?) = over("More fonts added")
+
+            override fun onFailed(message: String) = over(message)
+        }
+    }
+    val p = job
+    WideButton(if (p != null) "Downloading ${(p * 100).toInt()}%" else "More fonts (%.0f MB)".format(left / 1_048_576.0), p == null) {
+        job = 0f
+        runCatching { io.github.artcraftandroid.capcraft.core.downloadMoreFonts(listener) }.onFailure { job = null; vm.message = it.message ?: "Could not download the fonts" }
+    }
 }
 
 /**
@@ -396,6 +435,7 @@ fun TextPanel(vm: EditorViewModel, clipId: String?, startTab: Int = 3) {
                             fontKind == 0 -> listOf<Pair<String, androidx.compose.ui.text.font.FontFamily?>>("" to null) + own + everyone
                             else -> everyone.filter { FONT_KIND[it.first] == FONT_KINDS[fontKind] }
                         }
+                        if (fontKind == 0 && fontWords.isEmpty() && !keptFonts) MoreFonts(vm)
                         faces.chunked(4).forEach { row ->
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 row.forEach { (f, typeface) ->

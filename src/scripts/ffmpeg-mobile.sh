@@ -71,6 +71,19 @@ common=(
   --enable-zlib --disable-bzlib --disable-lzma
   --disable-iconv --disable-sdl2 --disable-xlib --disable-libxcb
   --disable-vulkan --disable-opencl --disable-vaapi --disable-vdpau
+  # What an editor of files never asks for: the network, capture devices,
+  # and encoders and muxers of formats it does not write. Every decoder,
+  # demuxer and filter stays - people bring all sorts of files, and effects
+  # are made of filters.
+  --disable-network --disable-indevs --disable-outdevs
+  --disable-encoders
+  --enable-encoder=h264_mediacodec,hevc_mediacodec,av1_mediacodec,vp9_mediacodec,vp8_mediacodec,mpeg4_mediacodec
+  --enable-encoder=h264_videotoolbox,hevc_videotoolbox,prores_videotoolbox
+  --enable-encoder=mpeg4,mjpeg,png,gif,bmp,tiff,ffv1,prores_ks,prores_aw,rawvideo,wrapped_avframe
+  --enable-encoder=aac,aac_at,opus,flac,alac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_s16be,pcm_u8,ac3,mp2
+  --enable-encoder=srt,subrip,webvtt,mov_text,ass
+  --disable-muxers
+  --enable-muxer=mp4,mov,ipod,matroska,webm,mpegts,wav,flac,adts,ogg,opus,mp3,gif,image2,image2pipe,mjpeg,rawvideo,null,srt,webvtt,ass,nut,avi,caf,pcm_s16le,pcm_f32le,tgp
 )
 
 case "$target" in

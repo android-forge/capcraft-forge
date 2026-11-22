@@ -56,6 +56,7 @@ pub mod linkage;
 pub mod looks;
 pub mod loudness;
 pub mod mask;
+pub mod morefonts;
 pub mod motionblur;
 pub mod myvoice;
 pub mod objects;
@@ -167,6 +168,8 @@ pub fn init(files_dir: String, cache_dir: String) -> Result<(), MobileError> {
         });
     // the looks imported before, beside the built-in filters
     looks::install(&dirs);
+    // the fonts downloaded before, for every title
+    concat_text::set_more_folder(morefonts::folder(&dirs.data));
     let titles = Titles::new(&dirs);
     let _ = CONTEXT.set(Context {
         dirs,

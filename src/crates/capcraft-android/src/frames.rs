@@ -201,10 +201,10 @@ pub fn font_faces() -> Result<Vec<FontFace>, MobileError> {
         .map_err(|error| format!("could not create {}: {error}", folder.display()))?;
     let mut faces: Vec<FontFace> = Vec::new();
     for (index, bytes) in concat_text::BASE_FONTS.iter().enumerate() {
-        let file = folder.join(format!("face-{index}.ttf"));
+        let file = folder.join(format!("face2-{index}.ttf"));
         let fresh = std::fs::metadata(&file).is_ok_and(|meta| meta.len() == bytes.len() as u64);
         if !fresh {
-            let part = folder.join(format!("face-{index}.ttf.part"));
+            let part = folder.join(format!("face2-{index}.ttf.part"));
             std::fs::write(&part, bytes)
                 .and_then(|()| std::fs::rename(&part, &file))
                 .map_err(|error| format!("could not write {}: {error}", file.display()))?;
@@ -218,6 +218,34 @@ pub fn font_faces() -> Result<Vec<FontFace>, MobileError> {
             }
         }
     }
+    // and those downloaded
+    if let Some(folder) = concat_text::more_folder()
+        && let Ok(entries) = std::fs::read_dir(folder)
+    {
+        let mut files: Vec<_> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "ttf" || ext == "otf"))
+            .collect();
+        files.sort();
+        for file in files {
+            for family in concat_text::families_in(&file) {
+                if !faces.iter().any(|face| face.family == family) {
+                    faces.push(FontFace {
+                        family,
+                        path: file.to_string_lossy().into_owned(),
+                    });
+                }
+            }
+        }
+    }
     *found = Some(faces.clone());
     Ok(faces)
+}
+
+/// Has the faces worked out again: some were downloaded.
+pub(crate) fn forget_faces() {
+    *FACES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
