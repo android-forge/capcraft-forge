@@ -56,6 +56,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sun.jna.Native
+import com.sun.jna.Pointer
 import io.github.artcraftandroid.capcraft.core.Motion
 import io.github.artcraftandroid.capcraft.engine.Media
 import io.github.artcraftandroid.capcraft.engine.Threads
@@ -69,6 +71,7 @@ import io.github.artcraftandroid.capcraft.ui.Type
 import io.github.artcraftandroid.capcraft.ui.common.Toast
 import io.github.artcraftandroid.capcraft.ui.editor.panels.PanelHost
 import io.github.artcraftandroid.capcraft.ui.export.ExportScreen
+import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedDeque
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -345,6 +348,11 @@ private const val MADE_AHEAD = 3
 private class FrameBuffers(count: Int) {
     private val bitmaps = arrayOfNulls<Bitmap>(count)
     private var next = 0
+    private var pixels: ByteBuffer? = null
+
+    /** The memory the engine puts a frame of [size] bytes in, one frame at a time. */
+    fun pixels(size: Int): ByteBuffer = pixels?.takeIf { it.capacity() == size } ?: ByteBuffer.allocateDirect(size).also { pixels = it }
+
     fun take(): Bitmap? = bitmaps[next]
     fun put(b: Bitmap) {
         bitmaps[next] = b
@@ -372,8 +380,18 @@ private fun rememberFrames(vm: EditorViewModel, width: Int, height: Int): ImageB
             fun frameAt(us: Long) = us * num / (den * 1_000_000L)
             fun timeOf(frame: Long) = (4 * frame + 1) * den * 1_000_000L / (4 * num)
             suspend fun make(frame: Long): Bitmap? = withContext(Threads.preview) {
-                runCatching { s.frame(timeOf(frame), width.toUInt(), height.toUInt(), Motion.PLAYING) }.getOrNull()
-                    ?.intoBitmap(playBuffers.take())?.also { playBuffers.put(it) }
+                // the engine's sizes are even
+                val w = width / 2 * 2
+                val h = height / 2 * 2
+                val into = playBuffers.pixels(w * h * 4)
+                val address = Pointer.nativeValue(Native.getDirectBufferPointer(into)).toULong()
+                runCatching { s.frameInto(timeOf(frame), w.toUInt(), h.toUInt(), Motion.PLAYING, address, into.capacity().toULong()) }.getOrElse { return@withContext null }
+                val b = playBuffers.take()?.takeIf { it.width == w && it.height == h && it.isMutable && !it.isRecycled }
+                    ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                into.rewind()
+                b.copyPixelsFromBuffer(into)
+                playBuffers.put(b)
+                b
             }
             var shown = -1L
             // frames made and not yet shown, the soonest first: made one after another on the preview's thread while

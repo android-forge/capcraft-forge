@@ -51,6 +51,7 @@ pub mod loudness;
 pub mod mask;
 pub mod motionblur;
 pub mod pauses;
+mod pixels;
 pub mod playback;
 pub mod reframe;
 mod scrubs;
