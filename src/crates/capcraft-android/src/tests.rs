@@ -1793,3 +1793,33 @@ fn the_keyframe_button_keys_the_mask_too() {
         "one undo step: {json}"
     );
 }
+
+#[test]
+fn a_volume_key_plays_where_it_is_set() {
+    start();
+    let made = create_project("Loud".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opens");
+    let id = session
+        .add_text(0, 4_000_000, String::new())
+        .expect("a clip lands")
+        .created_id;
+    let set = |command: serde_json::Value| {
+        session.apply(command.to_string(), None).expect("applied");
+    };
+    let volume = |at: f64| {
+        crate::frames::clip_volume_at(clip_json(&session, &id).to_string(), at).expect("read")
+    };
+    set(serde_json::json!({"op": "updateClip", "clipId": id, "patch": {"volume": 0.5}}));
+    assert_eq!(volume(0.5), 0.5, "its own without keys");
+    for (at, value) in [(0.0, 1.0), (0.5, 0.0)] {
+        set(
+            serde_json::json!({"op": "setClipKey", "clipId": id, "property": "volume", "at": at, "value": value}),
+        );
+    }
+    // the clip's own value is not what a keyed clip plays at
+    set(serde_json::json!({"op": "updateClip", "clipId": id, "patch": {"volume": 3.0}}));
+    assert_eq!(volume(0.0), 1.0);
+    assert!((volume(0.25) - 0.5).abs() < 1e-6);
+    assert_eq!(volume(0.5), 0.0);
+    assert_eq!(volume(1.0), 0.0);
+}
