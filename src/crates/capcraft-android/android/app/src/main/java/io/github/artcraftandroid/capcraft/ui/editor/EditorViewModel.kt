@@ -67,6 +67,9 @@ sealed interface Panel {
     data object SoundFx : Panel
     data object Transcript : Panel
     data object Fillers : Panel
+    data object LightPeople : Panel
+    data object FineCutout : Panel
+    data object Atmosphere : Panel
     data object EraseObjects : Panel
     data object MyVoice : Panel
     data object AutoHighlight : Panel
@@ -499,6 +502,14 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
             "retouch" -> mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.Retouch }
             // a photo to edit: the frame its own shape, and the export a picture
             "photo" -> photoFrame()
+            "finecut" -> {
+                photoFrame()
+                mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.FineCutout }
+            }
+            "lightpeople" -> {
+                photoFrame()
+                mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.LightPeople }
+            }
             "objects" -> {
                 photoFrame()
                 mainClipAtPlayhead()?.let { selected = it.id; panel = Panel.EraseObjects }

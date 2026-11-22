@@ -64,6 +64,9 @@ internal class FolderSound(val uri: Uri, val name: String, val category: String)
 
 private val AUDIO = setOf("mp3", "wav", "flac", "m4a", "aac", "ogg", "opus")
 
+/** Where the system's folder picker starts: the phone's own [folder]. */
+internal fun shelf(folder: String): Uri = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$folder")
+
 /** More than this many sounds in the folders are left out: the list is kept in memory. */
 private const val MOST_SOUNDS = 5000
 
@@ -252,7 +255,7 @@ internal fun FolderSounds(vm: EditorViewModel, query: String, modifier: Modifier
                 )
                 Spacer(Modifier.height(18.dp))
                 Box(
-                    Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(8.dp)).background(Palette.Accent).clickable { choose.launch(null) },
+                    Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(8.dp)).background(Palette.Accent).clickable { choose.launch(shelf("Music")) },
                     contentAlignment = Alignment.Center,
                 ) { Text("Choose folder", style = Type.BodyStrong.copy(fontSize = 16.sp, color = Palette.OnAccent)) }
             }
@@ -275,7 +278,7 @@ internal fun FolderSounds(vm: EditorViewModel, query: String, modifier: Modifier
                     if (shown.isEmpty()) item { Text("No sounds here", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.padding(20.dp)) }
                     item {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-                            FolderAction("Add folder", Modifier.weight(1f)) { choose.launch(null) }
+                            FolderAction("Add folder", Modifier.weight(1f)) { choose.launch(shelf("Music")) }
                             Spacer(Modifier.width(8.dp))
                             FolderAction("Read again", Modifier.weight(1f)) {
                                 sounds = null

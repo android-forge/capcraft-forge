@@ -326,6 +326,7 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
     "effects" -> listOf(
         Tool("videoeffects", "Video effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Layer) },
         Tool("bodyeffects", "Body effects", LucideIcons.UserRound) { vm.panel = Panel.BodyEffects },
+        Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere },
     )
     "background" -> listOf(
         Tool("bgcolor", "Color", LucideIcons.Palette) { vm.panel = Panel.Background(0) },
@@ -365,6 +366,8 @@ private fun clipSubTools(vm: EditorViewModel, clip: ClipView, level: String): Li
     "removebg" -> listOf(
         Tool("autoremove", "Auto removal", LucideIcons.UserRoundX) { vm.panel = Panel.RemoveBg },
         Tool("customremove", "Custom removal", LucideIcons.Paintbrush) { vm.panel = Panel.CustomCutout },
+        // branches, wires and other fine things, by colour rather than by a model
+        Tool("finecut", "Fine cutout", LucideIcons.Leaf, enabled = clip.kind == "image") { vm.panel = Panel.FineCutout },
         Tool("chroma", "Chroma key", LucideIcons.Pipette) { vm.panel = Panel.Chroma },
         Tool("changebg", "Change BG", LucideIcons.ImagePlus, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
             vm.panel = Panel.Background(0)
@@ -504,6 +507,9 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             add(Tool("removebg", "Remove BG", LucideIcons.UserRoundX) { vm.clipLevel = "removebg" })
             // the picture lit again, on the main track as the reference offers it
             if (main) add(Tool("relight", "Relight", LucideIcons.Lightbulb) { vm.panel = Panel.Relight })
+            // the light people want, the rest left alone
+            if (main) add(Tool("lightpeople", "Light people", LucideIcons.SunMedium) { vm.panel = Panel.LightPeople })
+            add(Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere })
             add(Tool("opacity", "Opacity", LucideIcons.Droplet) { vm.panel = Panel.Opacity })
             if (video) add(Tool("motionblur", "Motion blur", LucideIcons.Wind) { vm.panel = Panel.MotionBlur })
             add(divider("d-shape"))

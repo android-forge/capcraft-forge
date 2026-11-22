@@ -214,7 +214,7 @@ impl Models {
 }
 
 /// The picture in `path` at its own size, eight bits a channel.
-fn photo(path: &str) -> Result<Frame, String> {
+pub(crate) fn photo(path: &str) -> Result<Frame, String> {
     let info = concat_media::probe(path).map_err(|error| error.to_string())?;
     let video = info.require_video().map_err(|error| error.to_string())?;
     let frame = concat_host::media::still_at(path, 0.0, video.width.max(2))?;
@@ -246,13 +246,13 @@ fn outline_of(patch: Patch) -> Option<Outline> {
 }
 
 /// A photo clip and its file.
-struct Shown {
-    clip: Clip,
-    path: String,
-    project: String,
+pub(crate) struct Shown {
+    pub clip: Clip,
+    pub path: String,
+    pub project: String,
 }
 
-fn shown(session: &MobileSession, clip_id: &str) -> Result<Shown, MobileError> {
+pub(crate) fn shown(session: &MobileSession, clip_id: &str) -> Result<Shown, MobileError> {
     session.with_session(|session| {
         let project = session.project();
         let clip = project
@@ -511,7 +511,7 @@ impl MobileSession {
 }
 
 /// Writes `frame` in the project's media, named for the photo it is of.
-fn keep(shown: &Shown, what: &str, frame: Frame) -> Result<String, String> {
+pub(crate) fn keep(shown: &Shown, what: &str, frame: Frame) -> Result<String, String> {
     let folder = Path::new(&shown.project).join("media");
     std::fs::create_dir_all(&folder)
         .map_err(|error| format!("could not create {}: {error}", folder.display()))?;

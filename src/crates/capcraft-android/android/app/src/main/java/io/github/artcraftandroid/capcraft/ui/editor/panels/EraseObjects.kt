@@ -386,7 +386,7 @@ private fun Pill(label: String, on: Boolean, dim: Boolean = false, onClick: () -
 }
 
 /** Where a picture's own fractions lie on the preview, as [sourcePoint] reads them back: the clip's place, crop and flips. */
-private class OnScreen(val box: ClipBox, val shape: FloatArray, val flipH: Boolean, val flipV: Boolean, w: Float, h: Float) {
+internal class OnScreen(val box: ClipBox, val shape: FloatArray, val flipH: Boolean, val flipV: Boolean, w: Float, h: Float) {
     val bw = (box.width * w).toFloat()
     val bh = (box.height * h).toFloat()
     val centre = Offset((box.cx * w).toFloat(), (box.cy * h).toFloat())

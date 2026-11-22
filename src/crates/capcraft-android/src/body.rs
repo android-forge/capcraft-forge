@@ -26,7 +26,24 @@ pub const BODY: &str = "capcraftBody";
 /// A body effect's links: those the clip under the person gets, and those
 /// the person's copy gets.
 fn looks(kind: &str) -> Option<(Vec<Value>, Vec<Value>)> {
+    // the people lit: how many stops, how far their shadows are lifted and
+    // their highlights eased
+    if let Some(asked) = kind.strip_prefix("light:") {
+        let mut asked = asked.split(':').map(|n| n.parse::<f64>().unwrap_or(0.0));
+        let mut next = || asked.next().unwrap_or(0.0);
+        let (exposure, shadows, highlights) = (next(), next(), next());
+        return Some((
+            Vec::new(),
+            vec![json!({"id": "concat.adjust", "params": {
+                "exposure": exposure.clamp(-3.0, 3.0),
+                "shadows": shadows.clamp(-100.0, 100.0),
+                "highlights": highlights.clamp(-100.0, 100.0),
+            }})],
+        ));
+    }
     Some(match kind {
+        // the people alone, in front of whatever is laid over the clip
+        "front" => (Vec::new(), Vec::new()),
         "blur" => (
             vec![json!({"id": "concat.gaussian-blur", "params": {"radius": 18}})],
             Vec::new(),
@@ -268,7 +285,8 @@ impl MobileSession {
                     cutout: Some(Cutout {
                         mode: CutoutMode::Auto,
                         subject: Subject::Auto,
-                        feather: 0.002,
+                        // light fades off at their edge rather than stopping
+                        feather: if kind.starts_with("light:") { 0.006 } else { 0.002 },
                         strokes: Vec::new(),
                     }),
                 },

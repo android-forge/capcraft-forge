@@ -301,6 +301,8 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.MaskSurface(vm, Modifier.fillMaxSize())
             } else if (vm.panel == Panel.CustomCutout) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.CutoutSurface(vm, Modifier.fillMaxSize())
+            } else if (vm.panel == Panel.FineCutout) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.FineCutSurface(vm, Modifier.fillMaxSize())
             } else if (vm.panel == Panel.EraseObjects) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.EraseSurface(vm, Modifier.fillMaxSize())
             } else if (!vm.fullscreen) {

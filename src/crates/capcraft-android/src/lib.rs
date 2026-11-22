@@ -33,6 +33,7 @@ use concat_host::{AppDirs, Titles};
 
 #[cfg(target_os = "android")]
 pub mod android;
+pub mod atmosphere;
 pub mod background;
 pub mod beats;
 pub mod body;
@@ -43,6 +44,7 @@ pub mod deflicker;
 pub mod enhance;
 pub mod export;
 pub mod fillers;
+pub mod finecut;
 pub mod frames;
 pub mod gif;
 pub mod groups;
@@ -58,6 +60,7 @@ pub mod motionblur;
 pub mod myvoice;
 pub mod objects;
 pub mod pauses;
+pub mod peoplelight;
 mod pixels;
 pub mod playback;
 pub mod reframe;

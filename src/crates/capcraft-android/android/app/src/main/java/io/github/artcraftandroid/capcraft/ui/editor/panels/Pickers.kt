@@ -504,6 +504,8 @@ private const val WHEELS = "wheels"
 
 /** The knobs in the reference's order. Its Hue is the green-to-magenta tint the engine calls tint. */
 private val KNOBS = listOf(
+    // in stops of light, as a camera has it
+    Knob("exposure", "Exposure", -3f, 3f, 0f),
     Knob("brightness", "Brightness", -100f, 100f, 0f),
     Knob("contrast", "Contrast", -100f, 100f, 0f),
     Knob("saturation", "Saturation", -100f, 100f, 0f),
@@ -932,7 +934,7 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
             ValueSlider(
                 value = value,
                 range = knob.min..knob.max,
-                label = { v -> "${v.roundToInt()}" },
+                label = { v -> if (knob.max <= 5f) "%+.2f".format(v).let { if (it == "+0.00" || it == "-0.00") "0" else it } else "${v.roundToInt()}" },
                 onChange = { v ->
                     value = if (abs(v - knob.default) < (knob.max - knob.min) * 0.02f) knob.default else v
                     setKeys(knob.pkg, mapOf(knob.key to value.toDouble()), "adjust-${knob.key}")
@@ -993,6 +995,7 @@ private fun AdjustTool(label: String, selected: Boolean, changed: Boolean, onCli
 }
 
 private fun knobIcon(key: String) = when (key) {
+    "exposure" -> LucideIcons.Aperture
     "brightness" -> LucideIcons.Sun
     "contrast" -> LucideIcons.Contrast
     "saturation" -> LucideIcons.Droplet
