@@ -1,0 +1,77 @@
+format = 2
+
+# CapCraft's colour match: a picture's light and its two colour differences,
+# each scaled and shifted so their average and spread are a reference's. The
+# numbers are worked out from the two pictures (capcraft-android's
+# colormatch.rs). Written for CapCraft for Android (AGPL-3.0-or-later).
+
+[effect]
+id = "capcraft.color-match"
+name = "Color match"
+version = 1
+kind = "effect"
+category = "Color"
+order = 63
+intensity = "strength"
+description = "Gives the picture the colours of a reference: its light, and how warm and how colourful it is."
+
+[[param]]
+key = "strength"
+label = "Strength"
+min = 0
+max = 100
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "light_gain"
+label = "Light"
+min = 0
+max = 3
+default = 1
+step = 0.001
+
+[[param]]
+key = "light_shift"
+label = "Light shift"
+min = -2
+max = 2
+default = 0
+step = 0.001
+
+[[param]]
+key = "blue_gain"
+label = "Blue"
+min = 0
+max = 3
+default = 1
+step = 0.001
+
+[[param]]
+key = "blue_shift"
+label = "Blue shift"
+min = -2
+max = 2
+default = 0
+step = 0.001
+
+[[param]]
+key = "red_gain"
+label = "Red"
+min = 0
+max = 3
+default = 1
+step = 0.001
+
+[[param]]
+key = "red_shift"
+label = "Red shift"
+min = -2
+max = 2
+default = 0
+step = 0.001
+
+[wgsl]
+entry = "effect.wgsl"
+space = "display"

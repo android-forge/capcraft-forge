@@ -36,6 +36,7 @@ pub mod android;
 pub mod background;
 pub mod beats;
 pub mod body;
+pub mod colormatch;
 pub mod cutout;
 pub mod deflicker;
 pub mod enhance;

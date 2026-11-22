@@ -47,7 +47,7 @@ import kotlin.math.roundToInt
 
 /** A sheet of the Adjust tab's own: Reset at the left, its name in the middle, a button to fold it away. */
 @Composable
-private fun SheetHead(title: String, onReset: () -> Unit, onClose: () -> Unit) {
+internal fun SheetHead(title: String, onReset: () -> Unit, onClose: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 6.dp)) {
         Row(Modifier.align(Alignment.CenterStart).clickable(onClick = onReset).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Glyph(LucideIcons.RotateCcw, Palette.TextSecondary, size = 16.dp)
