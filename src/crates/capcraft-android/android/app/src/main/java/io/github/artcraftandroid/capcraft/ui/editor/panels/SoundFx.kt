@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -408,7 +409,7 @@ internal fun addSoundFx(vm: EditorViewModel, name: String, scope: kotlinx.corout
 }
 
 /** A sound effect's file put at the playhead, its clip named for the sound rather than the file. */
-private fun placeFx(vm: EditorViewModel, file: File, name: String) {
+internal fun placeFx(vm: EditorViewModel, file: File, name: String) {
     vm.addRecording(file, vm.playhead) { id -> vm.patch(id, org.json.JSONObject().put("name", name)) }
 }
 
@@ -450,6 +451,8 @@ fun SoundFxPanel(vm: EditorViewModel) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var category by remember { mutableIntStateOf(0) }
+    // the app's own sounds, or the folders of sounds the user chose
+    var mine by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf<String?>(null) }
     val track = remember { arrayOfNulls<AudioTrack>(1) }
     DisposableEffect(Unit) { onDispose { track[0]?.release(); track[0] = null } }
@@ -490,6 +493,21 @@ fun SoundFxPanel(vm: EditorViewModel) {
     }
 
     PanelFrame("Sound FX", vm, tall = true, titleOnTop = true, header = { SearchField(query, { query = it }, "Search sound effects") }) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
+            listOf("Built in", "My sounds").forEachIndexed { i, label ->
+                val on = mine == (i == 1)
+                Box(
+                    Modifier.padding(end = 8.dp).height(30.dp).clip(CircleShape).background(if (on) Color(0xFF4A4A4A) else Color.Transparent)
+                        .clickable { mine = i == 1 }.padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(label, style = Type.Small.copy(fontSize = 13.sp, color = if (on) Palette.Text else Palette.TextSecondary)) }
+            }
+        }
+        if (mine) {
+            LaunchedEffect(Unit) { track[0]?.release(); track[0] = null; playing = null }
+            FolderSounds(vm, query, Modifier.weight(1f))
+            return@PanelFrame
+        }
         Tabs(categories, if (query.isBlank()) category else -1) {
             category = it
             query = ""
