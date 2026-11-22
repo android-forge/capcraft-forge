@@ -525,11 +525,13 @@ private val KNOBS = listOf(
 )
 
 /** A smart tool before the knobs: worked out from the picture under the playhead, then set on them. */
-private class SmartTool(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val colourOnly: Boolean)
+private class SmartTool(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val colourOnly: Boolean, val sheet: String? = null)
 
 private val SMART = listOf(
     SmartTool("Auto adjust", LucideIcons.WandSparkles, colourOnly = false),
     SmartTool("Color correction", LucideIcons.Leaf, colourOnly = true),
+    // worked out against a reference, which its own sheet has chosen
+    SmartTool("Color match", LucideIcons.Pipette, colourOnly = true, sheet = COLOR_MATCH),
 )
 
 /** What Color correction keeps of the worked-out adjustments: the colour, not the light. */
@@ -708,6 +710,9 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
     val target = if (visual) clip else null
     val adjust = remember(target?.json) { linkParams(vm, target?.id, ADJUST) }
     val plus = remember(target?.json) { linkParams(vm, target?.id, PLUS) }
+    val matched = remember(target?.json) { colorMatchOn(vm, target?.id) != null }
+    // its sheet goes with the clip it was opened on
+    LaunchedEffect(target?.id) { if (sheet == COLOR_MATCH) sheet = null }
     val knob = KNOBS[which.coerceAtLeast(0)]
     val smart = SMART.getOrNull(-1 - which)
     val scope = rememberCoroutineScope()
@@ -849,11 +854,15 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
             LazyRow(Modifier.fillMaxWidth(), state = row, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp), verticalAlignment = Alignment.Top) {
                 items(SMART.size) { i ->
                     val tool = SMART[i]
-                    AdjustTool(tool.label, which == -1 - i, changed = false, onClick = {
+                    AdjustTool(tool.label, which == -1 - i, changed = tool.sheet != null && matched, onClick = {
                         which = -1 - i
                         section = 0
                         sheet = null
-                        runSmart(tool)
+                        when {
+                            tool.sheet == null -> runSmart(tool)
+                            matchable(target) -> sheet = tool.sheet
+                            else -> vm.message = "Choose a video or photo first"
+                        }
                     }) { tint -> Glyph(tool.icon, tint, size = 22.dp) }
                 }
                 item {
@@ -892,6 +901,10 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
             }
             WHEELS -> {
                 WheelsSheet(adjust, { values, gesture -> setKeys(ADJUST, values, gesture) }, { vm.endGesture() }) { sheet = null }
+                return@run
+            }
+            COLOR_MATCH -> target?.takeIf(::matchable)?.let { c ->
+                ColorMatchSheet(vm, c) { sheet = null }
                 return@run
             }
         }

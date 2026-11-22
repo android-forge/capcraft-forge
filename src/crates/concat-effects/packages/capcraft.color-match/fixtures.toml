@@ -1,0 +1,39 @@
+# Nothing set is the picture as it was, and so is any match at no strength,
+# which is every knob at its lowest. At the highest, black is lifted by the
+# shifts alone: light 2 and either colour difference 2 in the display
+# encoding, taken back into light.
+
+[[probe]]
+name = "default, a grey"
+input = [0.18, 0.18, 0.18, 1]
+expect = [0.18, 0.18, 0.18, 1]
+
+[[probe]]
+name = "default, a colour"
+input = [0.6, 0.2, 0.05, 1]
+expect = [0.6, 0.2, 0.05, 1]
+
+[[probe]]
+name = "default, half transparent"
+input = [0.5, 0.2, 0.1, 0.5]
+expect = [0.5, 0.2, 0.1, 0.5]
+
+[[probe]]
+name = "minimum, a colour"
+at = "min"
+input = [0.6, 0.2, 0.05, 1]
+expect = [0.6, 0.2, 0.05, 1]
+
+[[probe]]
+name = "maximum, black"
+at = "max"
+input = [0, 0, 0, 1]
+expect = [27.8576, 1.56006, 27.8576, 1]
+tolerance = 0.02
+
+[[probe]]
+name = "half as light, a white"
+params = { light_gain = 0.5 }
+input = [1, 1, 1, 1]
+expect = [0.18946, 0.18946, 0.18946, 1]
+tolerance = 0.02
