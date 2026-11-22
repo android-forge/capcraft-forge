@@ -39,6 +39,9 @@ class MainActivity : ComponentActivity() {
     /** Files shared to the app while it runs, for the home screen to turn into a project. */
     private val shared = mutableStateOf<List<Uri>>(emptyList())
 
+    /** What a button of the widget asked to start. */
+    private val start = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.BLACK),
@@ -46,6 +49,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         shared.value = sharedUris(intent)
+        if (savedInstanceState == null) start.value = intent?.getStringExtra(io.github.artcraftandroid.capcraft.engine.StartWidget.START)
         val app = application as CapCraftApplication
         setContent {
             CapCraftTheme {
@@ -54,7 +58,7 @@ class MainActivity : ComponentActivity() {
                 when (val r = ready) {
                     null -> Loading()
                     else -> r.fold(
-                        onSuccess = { App(shared.value) { shared.value = emptyList() } },
+                        onSuccess = { App(shared.value, { shared.value = emptyList() }, start.value) { start.value = null } },
                         onFailure = { Failed(it.userMessage) },
                     )
                 }
@@ -65,6 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         shared.value = sharedUris(intent)
+        start.value = intent.getStringExtra(io.github.artcraftandroid.capcraft.engine.StartWidget.START)
     }
 
     private fun sharedUris(intent: Intent?): List<Uri> {
@@ -79,13 +84,15 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun App(shared: List<Uri>, consumeShared: () -> Unit) {
+private fun App(shared: List<Uri>, consumeShared: () -> Unit, start: String?, consumeStart: () -> Unit) {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     Box(Modifier.fillMaxSize()) {
         when (val s = screen) {
             Screen.Home -> HomeScreen(
                 shared = shared,
                 consumeShared = consumeShared,
+                start = start,
+                consumeStart = consumeStart,
                 open = { path, incoming, then -> screen = Screen.Editor(path, incoming, then) },
             )
             is Screen.Editor -> EditorScreen(

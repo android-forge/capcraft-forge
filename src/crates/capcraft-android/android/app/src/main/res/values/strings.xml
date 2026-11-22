@@ -2,4 +2,9 @@
 <resources>
     <string name="app_name">CapCraft Forge</string>
     <string name="share_label">Edit in CapCraft Forge</string>
+    <string name="widget_description">Start a video, a photo or a recording</string>
+    <string name="widget_new">New video</string>
+    <string name="widget_photo">Edit photo</string>
+    <string name="widget_shoot">Shoot</string>
+    <string name="widget_record">Screen record</string>
 </resources>

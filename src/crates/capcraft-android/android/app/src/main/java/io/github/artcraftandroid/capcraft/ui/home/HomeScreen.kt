@@ -198,6 +198,8 @@ private val SHORTCUTS = listOf(
     Shortcut("removebg", "Remove background", LucideIcons.UserRoundX, videoOnly = false),
     Shortcut("speed", "Adjust speed", LucideIcons.Gauge),
     Shortcut("audiotools", "Audio tools", LucideIcons.AudioLines),
+    Shortcut("highlight", "Auto highlight", LucideIcons.Sparkles),
+    Shortcut("screen", "Screen record", LucideIcons.Film),
 )
 
 /** Photo tools' list: each a tool, with what it does in a line. */
@@ -219,6 +221,9 @@ private val AUDIO_TOOLS = listOf(
 fun HomeScreen(
     shared: List<Uri>,
     consumeShared: () -> Unit,
+    /** What a button of the widget asked to start, or null. */
+    start: String?,
+    consumeStart: () -> Unit,
     open: (path: String, incoming: List<Uri>, then: String?) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -380,6 +385,86 @@ fun HomeScreen(
         }
     }
 
+    // Screen record: the system asks to let the screen be read, then the phone is used as it always is
+    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { answer ->
+        val data = answer.data
+        if (answer.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            runCatching { io.github.artcraftandroid.capcraft.engine.ScreenRecordService.start(homeContext, answer.resultCode, data, mic = true) }
+                .onSuccess { message = "Recording. Stop it in the notification" }
+                .onFailure { message = it.userMessage }
+        }
+    }
+    fun askScreen() {
+        val manager = homeContext.getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        runCatching { consent.launch(manager.createScreenCaptureIntent()) }.onFailure { message = "This phone cannot record its screen" }
+    }
+    // the microphone and the notification its Stop is on, asked for first; refused, it records without sound
+    val recordAllowed = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { askScreen() }
+    fun recordScreen() {
+        val wanted = buildList {
+            add(android.Manifest.permission.RECORD_AUDIO)
+            if (android.os.Build.VERSION.SDK_INT >= 33) add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }.filter { androidx.core.content.ContextCompat.checkSelfPermission(homeContext, it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (wanted.isEmpty()) askScreen() else recordAllowed.launch(wanted.toTypedArray())
+    }
+    // coming back to the app after one, it opens as a project
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val watch = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val recorded = io.github.artcraftandroid.capcraft.engine.ScreenRecordService.pending
+                io.github.artcraftandroid.capcraft.engine.ScreenRecordService.pending = null
+                if (recorded != null) startProject(listOf(recorded), null)
+            }
+        }
+        owner.lifecycle.addObserver(watch)
+        onDispose { owner.lifecycle.removeObserver(watch) }
+    }
+
+    /** A copy of [p] with media picked now in its clips' places, in order; what is left over keeps the project's own. */
+    fun useTemplate(p: ProjectSummary) {
+        tool = null
+        io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(io.github.artcraftandroid.capcraft.ui.common.MediaKinds.BOTH, multiple = true) { uris ->
+            scope.launch {
+                message = "Filling the template"
+                runCatching {
+                    withContext(Threads.commands) { io.github.artcraftandroid.capcraft.engine.Templates.fill(homeContext.applicationContext, p, uris) }
+                }.onSuccess { path -> edit(path, emptyList(), null) }.onFailure { message = it.userMessage; refresh++ }
+            }
+        }
+    }
+
+    /** Edit photo: a photo of the phone's, opened as the editor's picture. */
+    fun editPhoto() {
+        tool = "photo"
+        io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
+            io.github.artcraftandroid.capcraft.ui.common.MediaKinds.IMAGE,
+            multiple = false,
+            onCancel = { tool = null },
+            // the picker's second tab, as the reference's photo editor has it
+            onCollage = { uris ->
+                tool = null
+                startProject(uris, "collage")
+            },
+        ) { uris ->
+            tool = null
+            startProject(uris, "photo")
+        }
+    }
+
+    // a button of the widget, once the list of projects is in
+    LaunchedEffect(start, projects != null) {
+        if (start == null || projects == null) return@LaunchedEffect
+        val asked = start
+        consumeStart()
+        when (asked) {
+            "new" -> newVideo()
+            "photo" -> editPhoto()
+            "shoot" -> shoot()
+            "record" -> recordScreen()
+        }
+    }
+
     androidx.activity.compose.BackHandler(enabled = tab != 0 || managing != null || searching) {
         when {
             managing != null -> managing = null
@@ -395,26 +480,11 @@ fun HomeScreen(
                     0 -> EditTab(
                         projects = projects.orEmpty(),
                         onNewVideo = ::newVideo,
-                        onCaptions = {
-                            // Edit photo: a photo of the phone's, opened as the editor's picture
-                            tool = "photo"
-                            io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
-                                io.github.artcraftandroid.capcraft.ui.common.MediaKinds.IMAGE,
-                                multiple = false,
-                                onCancel = { tool = null },
-                                // the picker's second tab, as the reference's photo editor has it
-                                onCollage = { uris ->
-                                    tool = null
-                                    startProject(uris, "collage")
-                                },
-                            ) { uris ->
-                                tool = null
-                                startProject(uris, "photo")
-                            }
-                        },
+                        onCaptions = ::editPhoto,
                         onShortcut = {
                             when (it.id) {
                                 "camera" -> shoot()
+                                "screen" -> recordScreen()
                                 "audiotools" -> audioTools = true
                                 "phototools" -> photoTools = true
                                 else -> shortcut(it.id, it.videoOnly)
@@ -506,6 +576,10 @@ fun HomeScreen(
                             .onFailure { message = it.userMessage }
                         refresh++
                     }
+                },
+                onTemplate = {
+                    menuFor = null
+                    useTemplate(p)
                 },
                 onExport = {
                     menuFor = null
@@ -1361,7 +1435,7 @@ private fun TrashSheet(p: ProjectSummary, onDismiss: () -> Unit, onRestore: () -
 
 /** A project's menu: its cover and name at the top, then one row an action. */
 @Composable
-private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () -> Unit, onDuplicate: () -> Unit, onExport: () -> Unit, onDelete: () -> Unit) {
+private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () -> Unit, onDuplicate: () -> Unit, onTemplate: () -> Unit, onExport: () -> Unit, onDelete: () -> Unit) {
     val cover = rememberCover(p)
     Scrim(onDismiss, Alignment.BottomCenter) {
         Column(
@@ -1383,6 +1457,7 @@ private fun ProjectSheet(p: ProjectSummary, onDismiss: () -> Unit, onRename: () 
             Box(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp).height(1.dp).background(Home.Hairline))
             SheetRow(LucideIcons.Pencil, "Rename", onRename)
             SheetRow(LucideIcons.Copy, "Duplicate", onDuplicate)
+            SheetRow(LucideIcons.LayoutTemplate, "Use as template", onTemplate)
             SheetRow(LucideIcons.Share2, "Export project file", onExport)
             SheetRow(LucideIcons.Trash2, "Delete", onDelete)
         }
