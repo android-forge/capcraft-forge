@@ -21,6 +21,7 @@ CapCraft is not affiliated with, endorsed by or connected to ByteDance or CapCut
 | Material icons' camera glyph (Google) | Apache-2.0 (`LICENSE-material-symbols.txt`) | the launcher icon, redrawn with its body hollow |
 | Kotlin standard library and coroutines (JetBrains) | Apache-2.0 | the app's code |
 | AndroidX, Jetpack Compose, Material 3 (Google) | Apache-2.0 | the app's interface |
+| Eight photographs from Wikimedia Commons (named in `CREDITS.md`) | CC0-1.0 | the Home screen's header |
 | JNA (Java Native Access) | Apache-2.0 | calling the engine from Kotlin |
 | UniFFI (Mozilla) | MPL-2.0 | the engine's Kotlin bindings |
 | `gif` and `png` crates (image-rs contributors) | MIT OR Apache-2.0 | writing GIF exports and freeze-frame stills |

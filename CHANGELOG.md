@@ -19,3 +19,4 @@ dated, as the licence asks; `#` numbers are the original project's.
 - 4K and ten-bit video plays from a proxy (egagofur's pull request #29, with its FFmpeg patch), and from its scrub copy until the proxy is written.
 - Named CapCraft Forge, with an application id of its own. Exports go to folders of that name.
 - Credits, licence texts and the source link of this build.
+- Photographs (CC0) in the Home screen's header, and README screenshots of this build.

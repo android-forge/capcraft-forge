@@ -24,9 +24,27 @@ each, and its licence, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
 (artcraft-android/capcraft-android#29), offered to the original project and not merged there yet; the commits are egagofur's.
 FFmpeg is built with that pull request's patch, in `src/scripts/ffmpeg-patches`.
 
-The rest is by praveenkrishna16n-sys, with Claude Code, in November 2026; see [CHANGELOG.md](CHANGELOG.md). The fixes are offered to the
-original project as pull requests.
+The rest is by praveenkrishna16n-sys, with Claude Code, in November 2026; see [CHANGELOG.md](CHANGELOG.md). Most of the fixes are
+offered to the original project as pull requests.
 
 Thanks to those who reported what they fix: Class9123 (artcraft-android/capcraft-android#45) and XPERTER-sysnand (#41).
+
+## Photographs and film
+
+The photographs on the Home screen and in the README's screenshots come from Wikimedia Commons and are
+[CC0](https://creativecommons.org/publicdomain/zero/1.0/), made smaller and cropped here. CC0 asks for no credit; their
+photographers deserve it:
+
+- [Lofoten, Norway (Unsplash)](https://commons.wikimedia.org/wiki/File:Lofoten,_Norway_(Unsplash).jpg): Johannes Groll
+- [Alone in the unspoilt wilderness (Unsplash)](https://commons.wikimedia.org/wiki/File:Alone_in_the_unspoilt_wilderness_(Unsplash).jpg): David Marcu
+- [Juan Griego Sunset](https://commons.wikimedia.org/wiki/File:Juan_Griego_Sunset.jpg): Wilfredor
+- [Hong Kong skyscrapers in a night of typhoon](https://commons.wikimedia.org/wiki/File:Hong_Kong_skyscrapers_in_a_night_of_typhoon.jpg): Wilfredor
+- [Lotus flower (978659)](https://commons.wikimedia.org/wiki/File:Lotus_flower_(978659).jpg): Hong Zhang (jennyzhh2008)
+- [Eisvogel kingfisher](https://commons.wikimedia.org/wiki/File:Eisvogel_kingfisher.jpg): Frank-2.0
+- [Price Building illuminated at night in Quebec City](https://commons.wikimedia.org/wiki/File:Price_Building_illuminated_at_night_in_Quebec_City.jpg): Wilfredor
+- [Common Jezebel Delias eucharis by kadavoor 3](https://commons.wikimedia.org/wiki/File:Common_Jezebel_Delias_eucharis_by_kadavoor_3.jpg): Jeevan Jose
+
+Two of the README's screenshots (the film clip, and its project on Home) show a frame of [Big Buck Bunny](https://peach.blender.org), © 2008 Blender Foundation,
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), as the app shows it. The film is not part of this app.
 
 Neither CapCraft nor CapCraft Forge is affiliated with, endorsed by or connected to ByteDance or CapCut.

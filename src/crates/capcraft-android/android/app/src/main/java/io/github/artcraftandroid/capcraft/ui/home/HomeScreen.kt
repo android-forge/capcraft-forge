@@ -61,15 +61,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.artcraftandroid.capcraft.R
 import io.github.artcraftandroid.capcraft.core.ProjectSummary
 import io.github.artcraftandroid.capcraft.core.createProject
 import io.github.artcraftandroid.capcraft.core.deleteProject
@@ -91,6 +94,7 @@ import io.github.artcraftandroid.capcraft.ui.common.Toast
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -663,13 +667,27 @@ private fun ToolsSheet(title: String, tools: List<Triple<String, String, String>
     }
 }
 
+/** The photographs in the frames at the top of Edit. */
+private val HERO_PHOTOS = intArrayOf(
+    R.drawable.hero_lofoten,
+    R.drawable.hero_sunset,
+    R.drawable.hero_kingfisher,
+    R.drawable.hero_hongkong,
+    R.drawable.hero_lotus,
+    R.drawable.hero_wilderness,
+    R.drawable.hero_quebec,
+    R.drawable.hero_jezebel,
+).toList()
+
 /**
  * The picture at the top of Edit, our own: a cyan-to-violet wash with a few tilted frames, as of
- * clips on a timeline, fading to the page's colour at the bottom.
+ * clips on a timeline, fading to the page's colour at the bottom. The frames hold public domain
+ * photographs (CREDITS.md).
  */
 @Composable
 private fun HeroArt(modifier: Modifier) {
     val page = Home.Background
+    val photos = HERO_PHOTOS.map { androidx.compose.ui.graphics.ImageBitmap.imageResource(it) }
     Canvas(modifier) {
         val w = size.width
         val h = size.height
@@ -684,7 +702,16 @@ private fun HeroArt(modifier: Modifier) {
                 for (i in -1 until 6) {
                     val x = i * (fw + w * 0.025f) + row * fw * 0.5f
                     val y = h * 0.16f + row * (fh + w * 0.03f)
-                    drawRoundRect(Color.White.copy(alpha = if ((i + row) % 3 == 0) 0.34f else 0.16f), Offset(x, y), Size(fw, fh), CornerRadius(fw * 0.08f))
+                    val photo = photos[(i + 1 + row * 5) % photos.size]
+                    val frame = androidx.compose.ui.geometry.RoundRect(x, y, x + fw, y + fh, CornerRadius(fw * 0.08f))
+                    clipPath(androidx.compose.ui.graphics.Path().apply { addRoundRect(frame) }) {
+                        drawImage(
+                            photo,
+                            dstOffset = androidx.compose.ui.unit.IntOffset(x.roundToInt(), y.roundToInt()),
+                            dstSize = androidx.compose.ui.unit.IntSize(fw.roundToInt(), fh.roundToInt()),
+                            alpha = 0.92f,
+                        )
+                    }
                 }
             }
         }
@@ -1094,7 +1121,7 @@ private fun Page(title: String, onBack: () -> Unit, content: @Composable () -> U
 }
 
 /** Where the source of this build lives. */
-private const val SOURCE_URL = "https://github.com/praveenkrishna16n-sys/capcraft-android"
+private const val SOURCE_URL = "https://github.com/praveenkrishna16n-sys/capcraft-forge"
 
 /** The project this build is a modified version of, and the engine under it. */
 private const val ORIGINAL_URL = "https://github.com/artcraft-android/capcraft-android"

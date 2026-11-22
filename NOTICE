@@ -42,3 +42,6 @@ This build
 CapCraft Forge is an unofficial build, modified from CapCraft for Android at 31b4109 in November 2026. Changes are copyright (c) 2026
 praveenkrishna16n-sys and egagofur, each their own, under the same licence; CHANGELOG.md lists them and their dates. The original authors do not maintain
 or endorse it. The licence texts it carries are in licences/ and shown in the app.
+
+The photographs in res/drawable-nodpi/hero_* and docs/images are CC0, and docs/images/film.png and home.png show Big Buck Bunny (© 2008 Blender
+Foundation, CC BY 3.0); CREDITS.md names each.

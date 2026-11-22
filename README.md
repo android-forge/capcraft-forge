@@ -25,21 +25,26 @@
 
 <p align="center">
   <a href="#editing">Editing</a> ·
+  <a href="#color">Color</a> ·
   <a href="#filters-effects-and-transitions">Filters, effects &amp; transitions</a> ·
   <a href="#text-and-stickers">Text &amp; stickers</a> ·
-  <a href="#captions-and-sound">Captions &amp; sound</a> ·
-  <a href="#export-and-home">Export &amp; Home</a> ·
+  <a href="#sound-and-export">Sound &amp; export</a> ·
   <a href="#planned-features">Planned features</a> ·
   <a href="#building-instructions">Building</a>
 </p>
 
 <br>
 
-<p align="center">
-  <img src="docs/images/editor.png" alt="The editor: a moving gradient test clip with the title Made with CapCraft on a pink plate and a yellow WOW sticker, the transport row, and the timeline with the main track, a sticker row, a Rainbow effect row and Add audio, over the tools Edit, Audio, Text, Effects, Overlay, Captions, Filters, Adjust and Stickers" width="250">
-  <br>
-  <sub>The editor: the preview, the transport row, a timeline with rows for text, stickers, effects and sound, and the tools.</sub>
-</p>
+<table align="center">
+<tr>
+<td align="center"><img src="docs/images/home.png" alt="Home: photographs drifting in the header, New video and Edit photo, three recent projects, and the tools AutoCut, Retouch, Photo tools, Shoot and record, Auto enhance and Cover maker" width="250"></td>
+<td align="center"><img src="docs/images/editor.png" alt="The editor: a photograph of northern lights with the title Northern Nights, the transport row, and a timeline with a main track, a transition at the cut and a text row, over the tools Edit, Audio, Text, Effects, Overlay and Captions" width="250"></td>
+</tr>
+<tr>
+<td align="center"><sub>Home: start a video or a photo, then your projects</sub></td>
+<td align="center"><sub>The editor: preview, timeline and tools</sub></td>
+</tr>
+</table>
 
 <br>
 
@@ -47,12 +52,29 @@
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/images/clip-tools.png" alt="A clip selected on the main track with its trim handles and length, and the clip tools: Split, Volume, Animations, Effects, Delete, Speed, Beats and Crop" width="250"></td>
-<td align="center"><img src="docs/images/sounds.png" alt="The Sound FX panel: a search field, the kinds Swooshes, Pops, Bells, Booms, Game, Cartoon and Transition, and the sounds Whoosh, Swoosh down, Whip, Riser, Fall and Pop, each with its length and an add button" width="250"></td>
+<td align="center"><img src="docs/images/clip-tools.png" alt="A clip selected on the main track with its trim handles and length, and clip tools such as Duplicate, Replace, Overlay, Adjust and Filters" width="250"></td>
+<td align="center"><img src="docs/images/mask.png" alt="The Mask panel with Circle chosen: the photograph shown through a circle on the preview, with handles to size it, and None, Horizontal, Mirror, Circle and Rectangle" width="250"></td>
+<td align="center"><img src="docs/images/film.png" alt="The editor with a frame of the film Big Buck Bunny on the preview and its clip on the timeline" width="250"></td>
 </tr>
 <tr>
-<td align="center"><sub>A clip selected: split, volume, animations, speed, crop and more</sub></td>
-<td align="center"><sub>Sound effects, made by the app</sub></td>
+<td align="center"><sub>A clip selected: trim, duplicate, replace, adjust and more</sub></td>
+<td align="center"><sub>Masks, moved and sized on the preview</sub></td>
+<td align="center"><sub>Video clips on the timeline</sub></td>
+</tr>
+</table>
+
+<br>
+
+## Color
+
+<table align="center">
+<tr>
+<td align="center"><img src="docs/images/adjust.png" alt="Adjust, Customize: the smart tools Auto adjust, Color correction and Color match, then Brightness, Contrast and Saturation, with a slider" width="250"></td>
+<td align="center"><img src="docs/images/color-match.png" alt="Color match: the aurora photograph taking the warm colors of a sunset frame, with the frame chosen by a slider, Match this frame, Photo, and a Strength slider" width="250"></td>
+</tr>
+<tr>
+<td align="center"><sub>Adjust: smart tools and sliders</sub></td>
+<td align="center"><sub>Color match: take the colors of another frame or a photo</sub></td>
 </tr>
 </table>
 
@@ -62,20 +84,16 @@
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/images/filters.png" alt="The Filters panel on the Cinematic shelf: None, Teal &amp; Orange, Moody (chosen) and Cool Blue, each a preview of the clip itself, and an intensity slider with Apply to all" width="250"></td>
-<td align="center"><img src="docs/images/effects.png" alt="The Video effects panel: the shelves Motion, Light, Distort, Retro, Stylize, Split and Blur, and the effects Shake, Flash, Pulse, Glitch, VHS, Old Film and Rainbow, each previewed on the frame" width="250"></td>
+<td align="center"><img src="docs/images/filters.png" alt="The Filters panel: None, Fresh, Vivid and Clean, each a preview of the clip itself, on shelves such as Everyday, Portrait and Cinematic" width="250"></td>
+<td align="center"><img src="docs/images/effects.png" alt="The Video effects panel: shelves such as Motion, Light, Distort, Retro and Stylize, and effects such as Shake, Flash, Pulse, Glitch, VHS, Old Film and Rainbow, each previewed on the frame" width="250"></td>
+<td align="center"><img src="docs/images/transitions.png" alt="The Transitions panel at a cut: None, Dissolve, Blur Dissolve, Fade to Black, Fade to White, Film Burn, Zoom, Slide, Push, Spin, Swirl and Glitch, each tile drawn with the clips" width="250"></td>
 </tr>
 <tr>
 <td align="center"><sub>80+ filters, previewed on the clip</sub></td>
 <td align="center"><sub>Video effects, on a clip or on a row of their own</sub></td>
+<td align="center"><sub>Transitions, shown on your own clips</sub></td>
 </tr>
 </table>
-
-<p align="center">
-  <img src="docs/images/transitions.png" alt="The Transitions panel at a cut: None, Dissolve, Blur Dissolve, Film Burn, Zoom, Slide, Push, Spin, Swirl, Glitch, RGB Split, Linear Wipe, Iris, Shape Wipe, Light Leak and Cube, every tile animating with the two clips" width="250">
-  <br>
-  <sub>Transitions, every tile animated with your own clips.</sub>
-</p>
 
 <br>
 
@@ -83,39 +101,33 @@
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/images/text.png" alt="The text sheet for Made with CapCraft: the Templates, Fonts, Styles, Effects, Animations and Bubbles tabs, and templates such as BIG NEWS, Weekend, SALE, Day One, WOW!, ROAD TRIP, Cheers, LIVE, TOP 5, Sunday, Oh no!, Ready?, vibes, Chapter 1 and THE END" width="250"></td>
-<td align="center"><img src="docs/images/stickers.png" alt="The Stickers panel on its Labels shelf: NEW, SALE, LIVE, WOW, OMG, LOL, HOT and TOP 10, with the WOW label placed on the preview" width="250"></td>
+<td align="center"><img src="docs/images/text.png" alt="The text sheet for Northern Nights on its Styles tab, beside Templates, Fonts, Effects, Animations and Bubbles, with colors, size and opacity" width="250"></td>
+<td align="center"><img src="docs/images/stickers.png" alt="The Stickers panel on its shapes shelf: square, circle, triangle, line, arrow, star, heart and hexagon" width="250"></td>
 </tr>
 <tr>
-<td align="center"><sub>Text: templates, fonts, styles, word art, animations and bubbles</sub></td>
-<td align="center"><sub>Stickers, labels and doodles, drawn by the app</sub></td>
+<td align="center"><sub>Text: templates, fonts, styles, effects, animations and bubbles</sub></td>
+<td align="center"><sub>Stickers, labels, shapes and doodles</sub></td>
 </tr>
 </table>
 
 <br>
 
-## Captions and sound
-
-<p align="center">
-  <img src="docs/images/captions.png" alt="Captions made on the phone from a speech test clip: The quick brown fox jumps over on a black plate, a row of caption clips on the timeline, and the tools Enter captions, Auto Captions, Caption templates, Auto lyrics and Import captions" width="250">
-  <br>
-  <sub>Captions, made on the phone from what is said.</sub>
-</p>
-
-<br>
-
-## Export and Home
+## Sound and export
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/images/export.png" alt="The export settings: Video, GIF and Photo tabs, and sliders for resolution (480p to 4k, set at 1080p), frame rate (24 to 60, set at 30) and bitrate, with the estimated file size" width="250"></td>
-<td align="center"><img src="docs/images/home.png" alt="Home: New video and Edit photo, a row of recent projects, and the tools AutoCut, Retouch, Photo tools, Shoot and record, Auto enhance, Cover maker, Auto captions, Remove background, Adjust speed and Audio tools" width="250"></td>
+<td align="center"><img src="docs/images/sounds.png" alt="The Sound FX panel: a search field, the kinds Swooshes, Pops, Bells, Booms and Game, and sounds such as Whoosh, Swoosh down, Whip and Riser, each with its length and an add button" width="250"></td>
+<td align="center"><img src="docs/images/export.png" alt="The export settings: Video and GIF tabs, and sliders for resolution (480p to 4k, set at 1080p), frame rate (24 to 60, set at 30) and bitrate, with the estimated file size" width="250"></td>
 </tr>
 <tr>
+<td align="center"><sub>Sound effects, made by the app</sub></td>
 <td align="center"><sub>Export at 480p to 4K, 24 to 60 fps, or as a GIF or photo</sub></td>
-<td align="center"><sub>Home: start a video or a photo, then your projects</sub></td>
 </tr>
 </table>
+
+<br>
+
+<p align="center"><sub>Every picture here is a screenshot of the app. The photographs in them are CC0; Big Buck Bunny is © Blender Foundation, CC BY 3.0. See <a href="CREDITS.md#photographs-and-film">CREDITS.md</a>.</sub></p>
 
 <br>
 
@@ -129,7 +141,7 @@ CapCraft Forge is in beta.
 | The timeline: trim, move, split, delete, duplicate, replace, multi-select, undo and redo; pinch to zoom | ✅ |
 | Speed and curves, freeze frame, reverse, volume and fades, crop, mask, chroma key, keyframes | ✅ |
 | Overlays and layers with blend modes, opacity, transform and animations | ✅ |
-| Filters, adjustments (HSL, curves, colour wheels), video effects, body effects and transitions | ✅ |
+| Filters, adjustments (HSL, curves, colour wheels), color match, video effects, body effects and transitions | ✅ |
 | Text: templates, fonts, styles, word art, bubbles, animations and text to speech | ✅ |
 | Stickers, labels, shapes and drawing | ✅ |
 | Captions made on the phone, typed captions, caption templates and imported subtitles | ✅ |
