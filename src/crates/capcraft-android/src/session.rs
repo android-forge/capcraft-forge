@@ -1185,6 +1185,22 @@ impl MobileSession {
         })
     }
 
+    /// [`MobileSession::frame`] put straight into the direct buffer of
+    /// `capacity` bytes the app holds at `address`, for a picture made many
+    /// times a second. The buffer must outlive the call, untouched.
+    pub fn frame_into(
+        &self,
+        time_us: i64,
+        width: u32,
+        height: u32,
+        motion: Motion,
+        address: u64,
+        capacity: u64,
+    ) -> Result<(), MobileError> {
+        let picture = self.frame(time_us, width, height, motion)?;
+        crate::pixels::put(&picture, address, capacity)
+    }
+
     /// The keyframe button: a key at `time_us` on every property the clip
     /// can key (its place, size, turn and opacity, and its volume when it
     /// has sound), holding the values it shows there; or, when there is a
