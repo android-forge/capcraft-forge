@@ -1,11 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- CapCraft's icon: a black tile. -->
+<!-- CapCraft Forge's icon, behind: a forge's glow, plum running to ember, warmest beside the spark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M0,0h108v108h-108z" />
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108">
+                <item android:offset="0" android:color="#FF1E0B36" />
+                <item android:offset="0.55" android:color="#FF6E1740" />
+                <item android:offset="1" android:color="#FFF0561E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="79.9"
+                android:centerY="49.7"
+                android:gradientRadius="36.7">
+                <item android:offset="0" android:color="#8CFFB547" />
+                <item android:offset="1" android:color="#00FFB547" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>

@@ -3,6 +3,12 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## Unreleased
+
+### 23 November 2026
+- An icon of its own: a white CF, the C's top running on into the F, and a spark struck off it, on a plum-to-ember
+  tile; one colour for themed icons. Its source is `docs/images/forge-icon.svg`. CapCraft's camera is gone.
+
 ## 0.0.5 (23 November 2026)
 
 The first release of CapCraft Forge.

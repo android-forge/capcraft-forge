@@ -1,15 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- CapCraft's icon: a camera (after Google's Material icons, Apache-2.0), its body hollow. -->
+<!-- CapCraft Forge's icon: CF, the C's top running into the F, and a spark struck off it. Its own design. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M37,37.25 H63 A4,4 0 0,1 67,41.25 V66.75 A4,4 0 0,1 63,70.75 H37 A4,4 0 0,1 33,66.75 V41.25 A4,4 0 0,1 37,37.25 Z M38.5,41.75 H61.5 A1,1 0 0,1 62.5,42.75 V65.25 A1,1 0 0,1 61.5,66.25 H38.5 A1,1 0 0,1 37.5,65.25 V42.75 A1,1 0 0,1 38.5,41.75 Z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M66.5,50.25 L75,42.25 L75,65.75 L66.5,57.75 Z" />
+    <!-- drawn on a 108 grid, then scaled 0.86 about (55,54) and moved 1 left, to sit in the 66dp safe zone -->
+    <group
+        android:pivotX="55"
+        android:pivotY="54"
+        android:scaleX="0.86"
+        android:scaleY="0.86"
+        android:translateX="-1">
+        <!-- the C, its top running on into the F's top bar -->
+        <path
+            android:pathData="M78,36 L46,36 A18,18 0 0,0 46,72 L56,72"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="9" />
+        <!-- the F's stem and middle bar -->
+        <path
+            android:pathData="M66,36 V76.5"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="9" />
+        <path
+            android:pathData="M66,55 H77"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="8" />
+        <!-- the spark struck off the F -->
+        <path android:pathData="M87,48 Q87,55 94,55 Q87,55 87,62 Q87,55 80,55 Q87,55 87,48 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="80"
+                    android:startY="48"
+                    android:endX="94"
+                    android:endY="62">
+                    <item android:offset="0" android:color="#FFFFF1C4" />
+                    <item android:offset="1" android:color="#FFFF9A2E" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
 </vector>

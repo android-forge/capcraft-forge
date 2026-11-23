@@ -4,7 +4,7 @@
 > See [CREDITS.md](CREDITS.md) and [CHANGELOG.md](CHANGELOG.md). Not affiliated with ByteDance or CapCut.
 
 <p align="center">
-  <img src="docs/images/capcraft-512.png" alt="CapCraft's app icon" width="128">
+  <img src="docs/images/forge-512.png" alt="CapCraft Forge's app icon: a white CF and an ember spark on a plum-to-orange tile" width="128">
 </p>
 
 <h1 align="center">CapCraft Forge</h1>

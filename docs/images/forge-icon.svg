@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <!-- CapCraft Forge's icon, the source of its adaptive icon (res/drawable/ic_launcher_*): a 108 grid, the
+       mark in the 66 safe zone. Rendered on a rounded tile as docs/images/forge-512.png. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1E0B36"/><stop offset="0.55" stop-color="#6E1740"/><stop offset="1" stop-color="#F0561E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.74" cy="0.46" r="0.34">
+      <stop offset="0" stop-color="#FFB547" stop-opacity="0.55"/><stop offset="1" stop-color="#FFB547" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF1C4"/><stop offset="1" stop-color="#FF9A2E"/>
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" fill="url(#bg)"/>
+  <rect width="108" height="108" fill="url(#glow)"/>
+  <g transform="translate(54 54) scale(0.86) translate(-55 -54)">
+    <g fill="none" stroke="#FFFFFF">
+      <path d="M78,36 L46,36 A18,18 0 0 0 46,72 L56,72" stroke-width="9"/>
+      <path d="M66,36 V76.5" stroke-width="9"/>
+      <path d="M66,55 H77" stroke-width="8"/>
+    </g>
+    <path fill="url(#spark)" d="M87,48 Q87,55 94,55 Q87,55 87,62 Q87,55 80,55 Q87,55 87,48 Z"/>
+  </g>
+</svg>
