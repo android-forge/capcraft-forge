@@ -33,6 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
@@ -67,11 +71,11 @@ object CutoutBrush {
     var reading by mutableStateOf<Pair<String, Float>?>(null)
 }
 
-/** The four brushes, in the reference's order: by the name the engine keeps, what the tile says, its icon. */
+/** UI names describe the quick/model-assisted and manual tools; engine tool IDs stay stable. */
 private val BRUSHES = listOf(
-    Triple("smartBrush", "Smart brush", LucideIcons.WandSparkles),
+    Triple("smartBrush", "Quick brush", LucideIcons.WandSparkles),
     Triple("brush", "Brush", LucideIcons.Paintbrush),
-    Triple("smartEraser", "Smart eraser", LucideIcons.Sparkles),
+    Triple("smartEraser", "Quick erase", LucideIcons.Sparkles),
     Triple("eraser", "Eraser", LucideIcons.Eraser),
 )
 
@@ -177,8 +181,8 @@ fun CustomCutoutPanel(vm: EditorViewModel) {
         }
         ValueSlider(
             value = CutoutBrush.size * 100f,
-            range = 1f..30f,
-            label = { "${it.roundToInt()}" },
+            range = 1f..50f,
+            label = { "${it.roundToInt()}%" },
             onChange = { CutoutBrush.size = it / 100f },
             onDone = {},
             title = "Size",
@@ -252,6 +256,18 @@ fun CutoutSurface(vm: EditorViewModel, modifier: Modifier) {
         val b = box ?: return@Canvas
         val radius = (CutoutBrush.size * b.width * size.width).toFloat() / 2f
         val colour = if (CutoutBrush.erasing) Color(0x88FF3B30) else Color(0x8834C759)
-        live.forEach { drawCircle(colour, radius, it) }
+        if (live.size == 1) {
+            drawCircle(colour, radius, live.first())
+        } else if (live.size > 1) {
+            val path = Path().apply {
+                moveTo(live.first().x, live.first().y)
+                live.drop(1).forEach { lineTo(it.x, it.y) }
+            }
+            drawPath(
+                path = path,
+                color = colour,
+                style = Stroke(width = radius * 2f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
+        }
     }
 }

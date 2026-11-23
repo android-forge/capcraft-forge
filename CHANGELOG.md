@@ -5,6 +5,11 @@ dated, as the licence asks; `#` numbers are the original project's.
 
 ## 0.0.6 (23 November 2026)
 
+### 24 November 2026
+- Custom background removal tools are labelled Quick brush, Brush, Quick erase and Eraser.
+- Brush size is adjustable from 1% to 50%, with the selected percentage shown on the slider.
+- The live brush preview follows a continuous stroke with rounded ends and joins.
+
 ### 23 November 2026
 - An icon of its own: a white CF, the C's top running on into the F, and a spark struck off it, on a plum-to-ember
   tile; one colour for themed icons. Its source is `docs/images/forge-icon.svg`. CapCraft's camera is gone.
