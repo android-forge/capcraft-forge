@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 CapCraft Forge contributors
+//
+// One decoded picture, sampled straight from the decoder's buffer through the
+// Y'CbCr conversion its immutable sampler carries, drawn into an RGBA picture
+// of the preview's size. The conversion and the scaling are the GPU's.
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) uniform sampler2D decoded;
+layout(binding = 1, rgba8) uniform writeonly image2D picture;
+
+void main() {
+    ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(picture);
+    if (at.x >= size.x || at.y >= size.y) {
+        return;
+    }
+    vec2 uv = (vec2(at) + 0.5) / vec2(size);
+    imageStore(picture, at, texture(decoded, uv));
+}

@@ -769,14 +769,20 @@ impl Decoder {
                 // scrub copy being written - which the CPU makes in no time:
                 // on the chip it held a seat the picture a person watches
                 // needed, and the preview decoded on the CPU.
-                // Unless the stream is a deep one being copied in eight
-                // bits: that the CPU does not make in no time - a 4K
-                // ten-bit frame took it four times what it takes the chip -
-                // and the copies are written one at a time, so they hold
-                // one seat between them.
+                // Unless the stream is a deep or a large one being copied in
+                // eight bits: that the CPU does not make in no time - a 4K
+                // ten-bit frame took it four times what it takes the chip,
+                // and a 4K eight-bit scrub copy written on every core took
+                // 98 seconds for a minute of video and left the play beside
+                // it one or two frames a second - and the copies are written
+                // one at a time, so they hold one seat between them.
+                let copied_large = options.squeezed()
+                    && (hardware::deep(format)
+                        || u64::from(coded.0) * u64::from(coded.1)
+                            > hardware::MEDIACODEC_COPY_FROM);
                 let small = options.size.is_some_and(|(width, height)| {
                     u64::from(width) * u64::from(height) < hardware::MEDIACODEC_SMALLEST
-                }) && !(options.squeezed() && hardware::deep(format));
+                }) && !copied_large;
                 let wrapped = hardware::mediacodec_decoder(codec, format)
                     .filter(|_| !options.keyframes_only && !small)
                     .filter(|&name| {

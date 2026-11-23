@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use concat_core::frame::Signal;
+use concat_core::time::Rational;
 use concat_media::decode::{DecodeOptions, Decoder, FrameSource};
 use concat_media::{ColorRange, EncodeOptions, Encoder, FrameSink, Priority, RateMode, VideoCodec};
 
@@ -256,7 +257,14 @@ pub fn write(
     if !cfg!(target_os = "android") {
         options = options.in_software();
     }
-    let mut decoder = Decoder::open(source, &options).map_err(|error| error.to_string())?;
+    let open = |from: Option<Rational>| {
+        let options = match from {
+            Some(at) => options.clone().starting_at(at),
+            None => options.clone(),
+        };
+        Decoder::open(source, &options).map_err(|error| error.to_string())
+    };
+    let mut decoder = Some(open(None)?);
     let encoding = EncodeOptions {
         codec: if hdr {
             VideoCodec::Hevc
@@ -285,11 +293,30 @@ pub fn write(
     }
     .map_err(|error| error.to_string())?;
     let result = (|| {
-        while let Some(frame) = decoder.next_frame().map_err(|error| error.to_string())? {
+        // Half a frame past the last one read: where a reader opened again
+        // picks up, at the frame after it, so none is written twice or lost.
+        let next = rate.frame_duration() / Rational::from_int(2);
+        let mut last: Option<Rational> = None;
+        loop {
+            if crate::preview::held()
+                && let Some(at) = last
+            {
+                // A play is on: the decoder and its seat on the chip go until
+                // it stops (see `crate::preview::give_way`).
+                drop(decoder.take());
+                crate::preview::give_way();
+                decoder = Some(open(Some(at + next))?);
+            }
+            let Some(reader) = decoder.as_mut() else {
+                break;
+            };
+            let Some(frame) = reader.next_frame().map_err(|error| error.to_string())? else {
+                break;
+            };
+            last = reader.position();
             encoder
                 .write_frame(&frame)
                 .map_err(|error| error.to_string())?;
-            crate::preview::give_way();
         }
         encoder.finish().map_err(|error| error.to_string())
     })();

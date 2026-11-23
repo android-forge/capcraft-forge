@@ -119,13 +119,25 @@ pub fn ensure(
         }
     }
     let source = media.to_owned();
+    let project = project.to_path_buf();
     let size = size_for(width, height);
     if let Ok(mut awaited) = awaited().lock() {
         awaited.insert(source.clone());
     }
     crate::scheduler().submit(concat_media::Priority::Proxy, move || {
         let started = std::time::Instant::now();
-        match write(&source, &target, size, range) {
+        // Read from the file's proxy where it has one by now - asked for
+        // first, on the same lane - rather than the file: the copy is a
+        // fraction of either's size, and a 4K file read twice at full size,
+        // once for each copy, was most of what preparing a clip cost. The
+        // proxy is written in video range and read as it is.
+        let (read, read_as) = match crate::proxy::path_for(&project, &source, range, false)
+            .filter(|proxy| proxy.is_file())
+        {
+            Some(proxy) => (proxy.to_string_lossy().into_owned(), None),
+            None => (source.clone(), range),
+        };
+        match write(&read, &target, size, read_as) {
             Ok(frames) => {
                 crate::scheduler()
                     .pool()
@@ -197,12 +209,12 @@ pub fn sweep(project: &Path, keep: &HashSet<PathBuf>) -> usize {
 /// `target`, through a temporary name moved into place only when whole.
 /// Each slot of the copy's rate takes the file's frame nearest it, so a
 /// sixty-frame file comes out at thirty and a variable-rate one at an
-/// even pace. In software: on a phone on every core, as its pictures are too
-/// small to be given one of the chip's few decoders (see
-/// `concat_media::hardware`) - but for a ten-bit file, which the chip reads,
-/// in eight bits, several times faster than the cores do; elsewhere on two
-/// threads, as a proxy is, so the machine stays usable. Returns the frames
-/// written.
+/// even pace. On a phone the chip decodes a file larger than 720p or in ten
+/// bits, several times faster than the cores do (see
+/// `concat_media::hardware::MEDIACODEC_COPY_FROM`), and a smaller one is read
+/// in software; on two threads either way, so a play or an edit beside it
+/// keeps the rest of the cores. Elsewhere in software on two threads, as a
+/// proxy is. Returns the frames written.
 pub fn write(
     source: &str,
     target: &Path,
@@ -224,23 +236,51 @@ pub fn write(
     let mut options = DecodeOptions::default()
         .scaled_to(width, height)
         .in_range(range)
-        .eight_bit(true);
+        .eight_bit(true)
+        .threaded(2);
     if !cfg!(target_os = "android") {
-        options = options.in_software().threaded(2);
+        options = options.in_software();
     }
-    let mut decoder = Decoder::open(source, &options).map_err(|error| error.to_string())?;
+    let open = |from: Option<Rational>| {
+        let options = match from {
+            Some(at) => options.clone().starting_at(at),
+            None => options.clone(),
+        };
+        Decoder::open(source, &options).map_err(|error| error.to_string())
+    };
+    let mut decoder = Some(open(None)?);
     let mut writer = ScrubWriter::create(&partial, width, height, copy_rate, QUALITY)
         .map_err(|error| error.to_string())?;
     let result = (|| {
         let slot = copy_rate.frame_duration();
         let half = slot / Rational::from_int(2);
+        // Half a frame of the file's past the last one read: where a reader
+        // opened again picks up, at the frame after it.
+        let next = rate.frame_duration() / Rational::from_int(2);
         let mut decoded: i64 = 0;
-        while let Some(frame) = decoder.next_frame().map_err(|error| error.to_string())? {
-            let at = decoder
+        let mut last: Option<Rational> = None;
+        loop {
+            if crate::preview::held()
+                && let Some(at) = last
+            {
+                // A play is on: the decoder goes, and the chip's seat with
+                // it, until the play stops; then the file is opened again
+                // past the last frame read.
+                drop(decoder.take());
+                crate::preview::give_way();
+                decoder = Some(open(Some(at + next))?);
+            }
+            let Some(reader) = decoder.as_mut() else {
+                break;
+            };
+            let Some(frame) = reader.next_frame().map_err(|error| error.to_string())? else {
+                break;
+            };
+            let at = reader
                 .position()
                 .unwrap_or_else(|| rate.time_of_frame(decoded));
             decoded += 1;
-            crate::preview::give_way();
+            last = Some(at);
             // Every slot up to this frame's instant, and half a slot past
             // it, shows this frame: the nearest one to each.
             while copy_rate.time_of_frame(writer.written() as i64) <= at + half {

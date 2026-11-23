@@ -1,0 +1,23 @@
+[package]
+name = "zerocopy-proto"
+description = "A prototype: a phone's decoded video frames into wgpu on Vulkan with no CPU copy, timed against the path the editor takes today."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Built for a phone only; on any other machine the binary says so and stops.
+[target.'cfg(target_os = "android")'.dependencies]
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
+ndk-sys = { version = "0.6", features = ["media"] }
+ash = "0.38"
+wgpu.workspace = true
+pollster.workspace = true
+# The CPU path converts and scales with FFmpeg's swscale, bilinear, as the
+# editor's decoder does.
+ffmpeg-the-third = { version = "6", default-features = false, features = [
+    "codec",
+    "format",
+    "software-scaling",
+] }
+libc = "0.2"

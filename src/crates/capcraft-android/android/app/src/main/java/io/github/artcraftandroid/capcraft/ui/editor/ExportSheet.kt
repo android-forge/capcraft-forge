@@ -55,11 +55,17 @@ private val MBPS = listOf(5, 10, 20, 50, 100)
 private val GIF_SIZES = listOf(240, 320, 480)
 private val GIF_RATES = listOf(8, 10, 15)
 
-/** The resolution an export uses: the one chosen, or the canvas's own up to 4K. */
+/**
+ * The resolution an export uses: the one chosen, or else the sharpest of the canvas and its videos and photos, up to
+ * 4K. The canvas is 1080 at most, since the preview composites in it, so 4K clips would otherwise leave as 1080p.
+ */
 fun exportResolutionOf(vm: EditorViewModel): Int {
     val t = vm.timeline
     val short = t?.let { min(it.width.toInt(), it.height.toInt()) } ?: 1080
-    return vm.exportResolution ?: RESOLUTIONS.lastOrNull { it <= max(short, 480) } ?: 1080
+    val sharpest = t?.rows.orEmpty().flatMap { it.clips }
+        .filter { (it.kind == "video" || it.kind == "image") && it.mediaWidth > 0u && it.mediaHeight > 0u }
+        .maxOfOrNull { min(it.mediaWidth.toInt(), it.mediaHeight.toInt()) } ?: 0
+    return vm.exportResolution ?: RESOLUTIONS.lastOrNull { it <= max(max(short, sharpest), 480) } ?: 1080
 }
 
 /** The bitrate an export uses, kilobits a second: the one chosen, or the one suggested for its size. */
