@@ -131,7 +131,7 @@ jobs:
           cd crates/capcraft-android/android
           ./gradlew assembleRelease "-Pcapcraft.abis=arm64-v8a" "-Pcapcraft.version=$VERSION" --no-daemon
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/dist/capcraft-android-$VERSION.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/dist/capcraft-forge-$VERSION.apk"
 
       - name: APK
         run: |
@@ -177,5 +177,11 @@ jobs:
 
       - name: Draft the release
         run: |
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "## What's Changed" -- dist/*
-          echo "Draft **$GITHUB_REF_NAME** is ready: fill in What's Changed and publish it." >>"$GITHUB_STEP_SUMMARY"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # the release is there already (a re-run): its APK is replaced, its notes kept
+            gh release upload "$GITHUB_REF_NAME" --clobber -- dist/*
+            echo "**$GITHUB_REF_NAME** already existed: its APK was replaced." >>"$GITHUB_STEP_SUMMARY"
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "$GITHUB_REF_NAME" --notes "## What's Changed" -- dist/*
+            echo "Draft **$GITHUB_REF_NAME** is ready: fill in What's Changed and publish it." >>"$GITHUB_STEP_SUMMARY"
+          fi
