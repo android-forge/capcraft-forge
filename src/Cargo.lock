@@ -4753,6 +4753,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zerocopy-proto"
+version = "0.2.8"
+dependencies = [
+ "ash",
+ "ffmpeg-the-third",
+ "libc",
+ "ndk",
+ "ndk-sys",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "zerofrom"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
