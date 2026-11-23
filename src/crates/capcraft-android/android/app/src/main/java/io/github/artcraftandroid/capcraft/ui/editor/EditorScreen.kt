@@ -312,6 +312,41 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
         if (t.rows.all { it.clips.isEmpty() }) {
             Text("Add media to start editing", style = Type.Small)
         }
+        if (!vm.fullscreen) PreparingBadge(vm, Modifier.align(Alignment.TopStart))
+    }
+}
+
+/** How often the editor asks how far the copies written after an import are, milliseconds. */
+private const val PREPARING_POLL_MS = 1000L
+
+/**
+ * "Preparing clips · 3 of 11 ready" over the preview's corner while the copies made after an import are written: the
+ * scrub copy that makes a drag of the playhead smooth, and the proxy of a large video. Playing never waits for them;
+ * they wait while it plays.
+ */
+@Composable
+private fun PreparingBadge(vm: EditorViewModel, modifier: Modifier) {
+    var state by remember { mutableStateOf<io.github.artcraftandroid.capcraft.core.Preparing?>(null) }
+    LaunchedEffect(vm.session) {
+        val session = vm.session ?: run { state = null; return@LaunchedEffect }
+        while (isActive) {
+            state = withContext(Dispatchers.IO) { runCatching { session.preparing() }.getOrNull() }
+            delay(PREPARING_POLL_MS)
+        }
+    }
+    val s = state ?: return
+    if (s.total == 0u || s.ready >= s.total) return
+    Row(
+        modifier
+            .padding(10.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xD9222222))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(color = Palette.Accent, modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp)
+        Spacer(Modifier.width(7.dp))
+        Text("Preparing clips · ${s.ready} of ${s.total} ready", style = Type.Small.copy(fontSize = 11.sp, color = Palette.Text))
     }
 }
 

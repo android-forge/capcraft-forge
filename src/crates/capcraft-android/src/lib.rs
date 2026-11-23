@@ -184,6 +184,8 @@ pub fn init(files_dir: String, cache_dir: String) -> Result<(), MobileError> {
         exporter: concat_host::export::Exporter::new(),
         playback: Mutex::new(None),
     });
+    // The copies written after an import hold back while the player plays.
+    concat_host::preview::set_player_probe(playback::is_playing);
     log::info!(
         "CapCraft engine {} started in {files_dir}",
         env!("CARGO_PKG_VERSION")

@@ -294,6 +294,12 @@ pub const MEDIACODEC_READERS: usize = 3;
 /// no particular pace, and on the chip took the seats from the picture the
 /// editor plays when a project opened. About 640 by 360.
 pub const MEDIACODEC_SMALLEST: u64 = 640 * 360;
+/// A source with more pixels than this is decoded on the chip even for a
+/// small picture, when the reader is writing a copy in eight bits (a scrub
+/// copy, a proxy): the picture is small but every frame of the file is
+/// decoded at its full size, which on the cores is a minute's work and more
+/// for a minute of 1080p or 4K, while a play beside it starves. About 720p.
+pub const MEDIACODEC_COPY_FROM: u64 = 1280 * 720;
 
 /// A bounded count of readers holding something scarce.
 pub(crate) struct Seats {

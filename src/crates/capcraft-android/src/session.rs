@@ -121,6 +121,16 @@ pub struct MediaInfo {
     pub has_audio: bool,
 }
 
+/// How far the project's videos are with the copies written after an
+/// import: the scrub copy every video gets and the proxy a large one does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct Preparing {
+    /// Videos with every copy they want written.
+    pub ready: u32,
+    /// The project's videos.
+    pub total: u32,
+}
+
 /// The engine session for one open project.
 #[derive(uniffi::Object)]
 pub struct MobileSession {
@@ -600,7 +610,16 @@ impl MobileSession {
                 && let (Some(width), Some(height)) = (item.width, item.height)
             {
                 let mut video = project.active().video;
-                let (w, h) = fit_frame(width, height);
+                // The first picture's shape, as sharp as the sharpest one
+                // put on with it, 1080 at most: a phone's 1080p clip after a
+                // messaging app's 480p one made a 480p project.
+                let sharpest = media_ids
+                    .iter()
+                    .filter_map(|id| project.media.iter().find(|item| &item.id == id))
+                    .filter_map(|item| Some(item.width?.min(item.height?)))
+                    .max()
+                    .unwrap_or(0);
+                let (w, h) = fit_frame(width, height, sharpest);
                 video.width = w;
                 video.height = h;
                 if item.kind == MediaKind::Video
@@ -1232,6 +1251,13 @@ impl MobileSession {
         motion: Motion,
     ) -> Result<Picture, MobileError> {
         self.frame_reading(time_us, width, height, motion, motion == Motion::Playing)
+    }
+
+    /// How many of the project's videos have their copies written: the
+    /// editor shows "Preparing clips" until they all have. Each copy waits
+    /// while a play runs, so playing never waits for them.
+    pub fn preparing(&self) -> Preparing {
+        crate::scrubs::preparing(&self.lock().session)
     }
 
     /// [`MobileSession::frame`] put straight into the direct buffer of
@@ -2133,14 +2159,24 @@ pub(crate) fn project_rate(rate: f64) -> u32 {
         .unwrap_or(30)
 }
 
-/// A frame for a picture `width` by `height`: its shape, 1080 on the short
-/// side at most, even sides.
-fn fit_frame(width: u32, height: u32) -> (u32, u32) {
-    let short = width.min(height).max(1);
-    if short <= 1080 {
+/// The short side a new project's frame is at most: 1080. The frame is what
+/// the preview composites in, and a 4K one left a phone playing eleven 4K
+/// clips at a frame a second on six cores where a 1080 one played them at
+/// sixty. The export is drawn at the size it is asked for, and asks by
+/// default for the sharpest clip's (see the app's export sheet), so a 4K
+/// clip still leaves as 4K.
+const LARGEST_SHORT_SIDE: u32 = 1080;
+
+/// A frame for a picture `width` by `height`: its shape, its short side the
+/// sharper of its own and `sharpest` (the short side of the sharpest picture
+/// put on with it), [`LARGEST_SHORT_SIDE`] at most, even sides.
+pub(crate) fn fit_frame(width: u32, height: u32, sharpest: u32) -> (u32, u32) {
+    let own = width.min(height).max(1);
+    let short = own.max(sharpest).min(LARGEST_SHORT_SIDE);
+    if short == own {
         return (even(width), even(height));
     }
-    let scale = 1080.0 / f64::from(short);
+    let scale = f64::from(short) / f64::from(own);
     (
         even((f64::from(width) * scale).round() as u32),
         even((f64::from(height) * scale).round() as u32),

@@ -2320,3 +2320,21 @@ fn depth_shadows_are_traced_from_a_photo() {
         Err(error) => panic!("no depth: {error}"),
     }
 }
+
+#[test]
+fn a_new_project_is_as_sharp_as_its_sharpest_picture() {
+    use crate::session::fit_frame;
+    // A picture alone keeps its own size, 1080 on the short side at most.
+    assert_eq!(fit_frame(1080, 1920, 0), (1080, 1920));
+    assert_eq!(fit_frame(720, 1280, 720), (720, 1280));
+    assert_eq!(fit_frame(2160, 3840, 2160), (1080, 1920));
+    // A 480p clip first, a sharper one with it: the first one's shape, as
+    // sharp as the other, 1080 at most.
+    assert_eq!(fit_frame(478, 850, 720), (720, 1280));
+    assert_eq!(fit_frame(478, 850, 2160), (1080, 1920));
+    // A sharper first picture is never made smaller by the others.
+    assert_eq!(fit_frame(1080, 1920, 478), (1080, 1920));
+    // Sides stay even.
+    let (w, h) = fit_frame(479, 851, 1080);
+    assert!(w % 2 == 0 && h % 2 == 0);
+}

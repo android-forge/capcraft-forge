@@ -4,8 +4,9 @@
 //! Each video's scrub copy, read while the playhead is dragged: written in
 //! the background into the project's cache, one at a time, from the moment
 //! the video is added or the project opens. Playback reads each video's
-//! proxy, a quarter-size H.264 copy written on the same lane after the scrub
-//! copies; the playhead at rest and the export read the files themselves.
+//! proxy, a quarter-size H.264 copy written on the same lane just before its
+//! scrub copy, which is then read from the proxy; the playhead at rest and the
+//! export read the files themselves.
 //! See `concat_host::scrub` and `concat_host::proxy`.
 
 use std::collections::HashSet;
@@ -53,14 +54,8 @@ pub(crate) fn see_to(session: &Session, seen: &mut HashSet<String>) {
     let project = Path::new(session.path());
     for (id, video) in videos(session) {
         if seen.insert(id) {
-            concat_host::scrub::ensure(
-                project,
-                &video.path,
-                video.width,
-                video.height,
-                video.range,
-                video.hdr,
-            );
+            // The proxy first: the lane runs in order, and the scrub copy
+            // is then made from the proxy rather than from the file again.
             concat_host::proxy::ensure(
                 project,
                 &video.path,
@@ -69,7 +64,31 @@ pub(crate) fn see_to(session: &Session, seen: &mut HashSet<String>) {
                 video.range,
                 video.hdr,
             );
+            concat_host::scrub::ensure(
+                project,
+                &video.path,
+                video.width,
+                video.height,
+                video.range,
+                video.hdr,
+            );
         }
+    }
+}
+
+/// How many of the project's videos have no copy queued or being written.
+pub(crate) fn preparing(session: &Session) -> crate::session::Preparing {
+    let all = videos(session);
+    let waiting = all
+        .iter()
+        .filter(|(_, video)| {
+            concat_host::scrub::pending(&video.path) || concat_host::proxy::pending(&video.path)
+        })
+        .count();
+    let total = u32::try_from(all.len()).unwrap_or(u32::MAX);
+    crate::session::Preparing {
+        ready: total.saturating_sub(u32::try_from(waiting).unwrap_or(u32::MAX)),
+        total,
     }
 }
 

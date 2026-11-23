@@ -35,11 +35,13 @@ const NEXT_CUT: f64 = 1.0;
 static MOVED: AtomicU64 = AtomicU64::new(0);
 /// A picture counts as moving for this long after its last frame.
 const MOVING_FOR: Duration = Duration::from_millis(500);
-/// How long a writer of copies waits after each frame while a picture is
-/// moving: the copies and the picture are read off the same chip, and three
-/// 4K decoders at once left the one that was playing a third of its frames.
-/// At this the writers go at something under half their pace.
-const GIVEN_WAY: Duration = Duration::from_millis(25);
+/// How often a writer of copies looks again whether the picture has stopped.
+/// The copies and the picture are read off the same chip and the same cores:
+/// three 4K decoders at once left the one that was playing a third of its
+/// frames, and a 4K scrub copy written beside a play (CapCraft Forge, on a
+/// Snapdragon phone) left it one or two frames a second where it played sixty
+/// alone. So a writer does not slow down while a picture plays: it stops.
+const GIVEN_WAY: Duration = Duration::from_millis(50);
 
 fn clock() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
@@ -53,10 +55,32 @@ pub fn moving() -> bool {
     last != 0 && clock().saturating_sub(last) < MOVING_FOR.as_millis() as u64
 }
 
-/// For a writer of scrub copies or proxies, between its frames: a short
-/// wait while a picture is playing, and none otherwise.
+/// The app's own word on whether its player is playing, where it has one.
+static PLAYING: OnceLock<fn() -> bool> = OnceLock::new();
+
+/// Lets the copies ask the app's player whether it is playing: `playing`
+/// answers from the player itself, so a play counts from the moment it starts
+/// to the moment it stops however slowly its pictures come. A play starved to
+/// a picture a second counted as stopped between its pictures on
+/// [`moving`] alone, and the copy it waited for went on taking the chip and
+/// the cores it was starved of. Set once; a second call changes nothing.
+pub fn set_player_probe(playing: fn() -> bool) {
+    let _ = PLAYING.set(playing);
+}
+
+/// Whether a writer of copies holds back now: a play is on, by the player's
+/// word or by a moving picture made within the last half second.
+pub(crate) fn held() -> bool {
+    PLAYING.get().is_some_and(|playing| playing()) || moving()
+}
+
+/// For a writer of scrub copies or proxies, between its frames: a wait for as
+/// long as a play is on, and none otherwise. See [`held`]; a writer that holds
+/// one of the chip's decoders gives it back before it waits (see
+/// [`crate::scrub::write`]), since a play reaching a cut needs one for the
+/// next clip, and without it read a 4K clip on the cores at a frame a second.
 pub(crate) fn give_way() {
-    if moving() {
+    while held() {
         std::thread::sleep(GIVEN_WAY);
     }
 }
