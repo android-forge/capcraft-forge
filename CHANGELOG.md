@@ -6,9 +6,11 @@ dated, as the licence asks; `#` numbers are the original project's.
 ## 0.0.7 (24 November 2026)
 
 ### 24 November 2026
-- Android preview can decode supported SDR H.264 and HEVC proxy frames directly into GPU buffers and import them into Vulkan/wgpu without a CPU pixel round trip. Unsupported clips and frames that need CPU effects keep using the existing decoder path.
-- Android SDR H.264/HEVC export can render to a MediaCodec input surface, avoiding GPU readback before encoding; HDR, 10-bit and alpha exports keep their existing path.
+- Android preview can decode supported SDR H.264 and HEVC proxy frames directly into GPU buffers and import them into Vulkan/wgpu without a CPU pixel round trip. Cutouts use a separate cached GPU matte, including crop and flips; stabilized cutouts and the brush-highlight preview keep their CPU pixel path.
+- Android export can render SDR AVC/HEVC and capability-supported 10-bit HEVC SDR/HDR (PQ/HLG) directly to a MediaCodec input surface, avoiding GPU readback before encoding. Unsupported devices and alpha codecs retain the existing encoder fallback.
 - Decoder seats are managed during playback and scrub work yields so background reads do not crowd out the playing clip.
+- Ninety locally generated atmosphere overlays across fifteen categories, with search, favorites, recent items, side-by-side comparison and a gentle motion action. No bundle artwork is embedded.
+- Custom speed curves can add any number of interior points by tapping the graph, then dragging each point to shape time and speed.
 
 ## 0.0.6 (23 November 2026)
 

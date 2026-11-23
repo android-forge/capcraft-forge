@@ -118,8 +118,27 @@ fun SpeedCurveEditor(vm: EditorViewModel, clip: ClipView, start: List<Pair<Doubl
                     detectTapGestures { tap ->
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
-                        chosen = latest.indexOfFirst { (at, s) ->
+                        val hit = latest.indexOfFirst { (at, s) ->
                             Offset((at * w).toFloat(), ((1 - speedToY(s)) * h).toFloat()).minus(tap).getDistance() < 28.dp.toPx()
+                        }
+                        if (hit >= 0) {
+                            chosen = hit
+                        } else {
+                            // Tap any empty place on the graph to add a knot there. This avoids
+                            // requiring a timeline seek for every point and has no fixed point cap.
+                            val at = (tap.x / w).toDouble().coerceIn(0.0, 1.0)
+                            val insertion = latest.indexOfFirst { it.first > at }.let { if (it < 0) latest.size else it }
+                            if (insertion in 1 until latest.size) {
+                                val left = latest[insertion - 1].first
+                                val right = latest[insertion].first
+                                val minGap = 1.0 / w
+                                if (at - left >= minGap && right - at >= minGap) {
+                                    val speed = yToSpeed(1.0 - tap.y / h)
+                                    val next = latest.toMutableList().apply { add(insertion, at to speed) }
+                                    send(next, null)
+                                    chosen = insertion
+                                }
+                            }
                         }
                     }
                 }

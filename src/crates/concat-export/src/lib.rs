@@ -1745,12 +1745,18 @@ fn render_picture(
     reporter: &mut Reporter<'_>,
 ) -> Result<(), String> {
     let effect_offset = quantise(request.effect_time_offset, rate);
+    let signal = output_of(request.color_space);
+    let hdr = request.hdr && signal != Signal::Sdr && !request.codec.keeps_alpha();
     #[cfg(target_os = "android")]
     let mut surface_video = None;
-    let surface_eligible = !request.hdr
-        && !request.ten_bit
-        && !request.codec.keeps_alpha()
-        && matches!(request.codec, VideoCodec::H264 | VideoCodec::Hevc);
+    #[cfg(target_os = "android")]
+    let surface_signal = if hdr { signal } else { Signal::Sdr };
+    #[cfg(target_os = "android")]
+    let surface_ten_bit = request.codec == VideoCodec::Hevc && (request.ten_bit || hdr);
+    #[cfg(target_os = "android")]
+    let surface_eligible = !request.codec.keeps_alpha()
+        && matches!(request.codec, VideoCodec::H264 | VideoCodec::Hevc)
+        && (request.codec == VideoCodec::Hevc || (!request.ten_bit && !hdr));
     let mut compositor = match compositor {
         Some(lent) => lent,
         None => {
@@ -1770,11 +1776,15 @@ fn render_picture(
                     bitrate,
                     mime,
                     request.color_range,
+                    surface_ten_bit,
+                    surface_signal,
                 ) {
                     Ok(encoder) => match WgpuCompositor::with_android_surface(
                         encoder.native_window(),
                         request.width,
                         request.height,
+                        surface_ten_bit,
+                        surface_signal,
                     ) {
                         Ok((gpu, target)) => {
                             log::info!(
@@ -1855,13 +1865,8 @@ fn render_picture(
         software_only: false,
         keyframe_seconds: 0,
     };
-    // An HDR file comes out of the compositor as its signal, sixteen bits a
-    // channel; anything else, SDR - an HDR timeline's tone-mapped.
-    let signal = output_of(request.color_space);
-    // The alpha codecs are written SDR alone (see `Encoder::create_hdr`):
-    // an HDR timeline is tone-mapped into one, as it is on a phone that
-    // cannot write ten bits, rather than the export failing.
-    let hdr = request.hdr && signal != Signal::Sdr && !request.codec.keeps_alpha();
+    // An HDR file comes out of the compositor as its signal; any other
+    // output is SDR, with an HDR timeline tone-mapped to it.
     compositor.deliver_hdr(hdr);
 
     // How many devices have died under this export so far; see `recovered`.
@@ -2698,22 +2703,22 @@ fn frame_request(
     still: bool,
     reading: concat_media::Reading,
 ) -> concat_media::FrameRequest {
+    let needs_cpu_pixels = plan.built.highlight == Some(layer.clip)
+        || (plan.built.cutouts.contains_key(&layer.clip)
+            && plan.built.stabilized.contains_key(&layer.clip));
     concat_media::FrameRequest::new(&layer.media, layer.source_time, width, height)
         .covering(plan.width.max(width), plan.height.max(height))
         .as_still(still)
         .reading(reading)
         .in_range(plan.built.ranges.get(&layer.clip).copied())
         // The compositor fits the picture into its place, so an untreated
-        // frame is drawn at the level it was decoded at - deep, for an HDR
-        // clip, unless a cutout has to cut it in eight bits.
+        // frame is drawn at the level it was decoded at, including HDR.
         .at_any_size(true)
-        .deep_when_untreated(!plan.built.cutouts.contains_key(&layer.clip))
-        // A playing picture may come straight from a phone's decoder on the
-        // GPU: everything but a cutout, which cuts the pixels on the CPU, is
-        // drawn there anyway.
-        .on_gpu_when(
-            reading == concat_media::Reading::Proxy && !plan.built.cutouts.contains_key(&layer.clip),
-        )
+        .deep_when_untreated(!needs_cpu_pixels)
+        // The cutout mask is a separate compositor texture, so a playing
+        // picture can stay zero-copy on the GPU. The brush-highlight view
+        // still needs CPU pixels for its tinted preview.
+        .on_gpu_when(reading == concat_media::Reading::Proxy && !needs_cpu_pixels)
 }
 
 /// [`preview_sources`] for one instant of a plan already built, each file
@@ -2764,17 +2769,25 @@ pub fn preview_sources_of(
         )) {
             Ok(frame) => {
                 let highlighted = highlight == Some(layer.clip);
-                let frame = match cutouts.get(&layer.clip).and_then(|job| {
-                    if highlighted {
-                        job.highlight(&frame, layer.source_time)
-                    } else {
-                        job.cut(&frame, layer.source_time)
-                    }
-                }) {
-                    Some(drawn) => std::sync::Arc::new(drawn),
-                    None => frame,
+                let cpu_cut = cutouts.get(&layer.clip).filter(|_| {
+                    plan.built.stabilized.contains_key(&layer.clip) && !highlighted
+                }).and_then(|job| job.cut(&frame, layer.source_time));
+                let matte = if highlighted || cpu_cut.is_some() {
+                    None
+                } else {
+                    cutouts.get(&layer.clip).and_then(|job| job.matte_frame(layer.source_time))
                 };
-                layers.push(filled(
+                let frame = if highlighted {
+                    cutouts.get(&layer.clip)
+                        .and_then(|job| job.highlight(&frame, layer.source_time))
+                        .map(std::sync::Arc::new)
+                        .unwrap_or(frame)
+                } else if let Some(cut) = cpu_cut {
+                    std::sync::Arc::new(cut)
+                } else {
+                    frame
+                };
+                let mut planned = filled(
                     layer,
                     frame,
                     tracks.get(&layer.clip).copied().unwrap_or(0),
@@ -2782,7 +2795,9 @@ pub fn preview_sources_of(
                     geometry.get(&layer.clip),
                     shapes_at(shapes, layer, time, rate),
                     stabilized.get(&layer.clip),
-                ))
+                );
+                planned.mask = matte;
+                layers.push(planned)
             }
             Err(error) => failures.push(format!("{}: {error}", layer.media.display())),
         }

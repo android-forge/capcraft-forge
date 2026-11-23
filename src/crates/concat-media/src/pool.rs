@@ -1629,7 +1629,7 @@ impl ReaderPool {
         match readers.warm.iter().position(idle) {
             Some(at) => {
                 let warm = readers.warm.remove(at);
-                log::info!(
+                log::debug!(
                     "decoder seat freed: {} idle {:.1} s",
                     warm.key.0.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
                     warm.touched.elapsed().as_secs_f64()
@@ -1637,7 +1637,7 @@ impl ReaderPool {
                 true
             }
             None => {
-                // Diagnostic: why no reader could give its seat up.
+                // Why no reader could give its seat up, for a debug log.
                 let chip: Vec<String> = readers
                     .warm
                     .iter()
@@ -1656,7 +1656,7 @@ impl ReaderPool {
                         })
                     })
                     .collect();
-                log::info!("decoder seats full, none free: {} warm, on the chip: {chip:?}", readers.warm.len());
+                log::debug!("decoder seats full, none free: {} warm, on the chip: {chip:?}", readers.warm.len());
                 false
             }
         }

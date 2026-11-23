@@ -24,8 +24,14 @@ pub(crate) struct CutoutJob {
     pub(crate) store: MaskStore,
     pub(crate) cutout: Cutout,
     pub(crate) mapping: Mapping,
+    /// The source mapping in the frame-plan path, where crop and flips are
+    /// drawn by the compositor instead of baked into decoded pixels.
+    matte_mapping: Mapping,
     /// The source's width over its height, for round brushes.
     pub(crate) aspect: f32,
+    /// A short cache of alpha mattes ready for the compositor's mask input.
+    matte_frames:
+        std::sync::Mutex<std::collections::VecDeque<(Arc<concat_vision::Mask>, Arc<Frame>)>>,
 }
 
 impl CutoutJob {
@@ -56,25 +62,72 @@ impl CutoutJob {
                 flip_h: clip.flip_h && treated,
                 flip_v: clip.flip_v && treated,
             },
+            matte_mapping: Mapping {
+                crop: clip
+                    .crop
+                    .map(|edges| edges.map(|edge| edge as f32))
+                    .unwrap_or([0.0; 4]),
+                flip_h: clip.flip_h,
+                flip_v: clip.flip_v,
+            },
             aspect,
+            matte_frames: std::sync::Mutex::new(std::collections::VecDeque::new()),
         })
+    }
+
+    fn resolved_mask(&self, source_time: Rational) -> Option<Arc<concat_vision::Mask>> {
+        let mask = self
+            .store
+            .resolved(source_time.as_f64(), &self.cutout, self.aspect)?;
+        if !self.cutout.invert {
+            return Some(mask);
+        }
+        let mut turned = (*mask).clone();
+        turned.invert();
+        Some(Arc::new(turned))
+    }
+
+    /// Builds a small alpha texture for the GPU. The decoded video remains
+    /// on its imported GPU texture; only the cutout matte is resampled.
+    pub(crate) fn matte_frame(&self, source_time: Rational) -> Option<Arc<Frame>> {
+        let mask = self
+            .store
+            .resolved(source_time.as_f64(), &self.cutout, self.aspect)?;
+        if let Ok(cache) = self.matte_frames.lock()
+            && let Some((_, frame)) = cache.iter().find(|(cached, _)| Arc::ptr_eq(cached, &mask))
+        {
+            return Some(Arc::clone(frame));
+        }
+        let (width, height) = (mask.width(), mask.height());
+        let mut rgba = vec![0; Frame::byte_len(width, height)];
+        for y in 0..height {
+            for x in 0..width {
+                let (u, v) = self.matte_mapping.source_of(
+                    (x as f32 + 0.5) / width as f32,
+                    (y as f32 + 0.5) / height as f32,
+                );
+                let keep = mask.sample(u, v);
+                let alpha =
+                    ((if self.cutout.invert { 1.0 - keep } else { keep }) * 255.0 + 0.5) as u8;
+                let at = ((y * width + x) * 4) as usize;
+                rgba[at..at + 4].copy_from_slice(&[255, 255, 255, alpha]);
+            }
+        }
+        let frame = Arc::new(Frame::from_rgba(width, height, rgba)?);
+        if let Ok(mut cache) = self.matte_frames.lock() {
+            cache.push_back((mask, Arc::clone(&frame)));
+            while cache.len() > 3 {
+                cache.pop_front();
+            }
+        }
+        Some(frame)
     }
 
     /// The frame with its background gone, when the instant has a mask.
     /// `None` leaves the picture whole: an instant not analysed yet is
     /// shown as shot rather than not at all.
     pub(crate) fn cut(&self, frame: &Frame, source_time: Rational) -> Option<Frame> {
-        let mask = self
-            .store
-            .resolved(source_time.as_f64(), &self.cutout, self.aspect)?;
-        // an inverted cutout keeps what is around the subject
-        let mask = if self.cutout.invert {
-            let mut turned = (*mask).clone();
-            turned.invert();
-            std::sync::Arc::new(turned)
-        } else {
-            mask
-        };
+        let mask = self.resolved_mask(source_time)?;
         let mut out = frame.clone();
         concat_vision::cut(&mut out, &mask, &self.mapping);
         Some(out)
@@ -83,9 +136,7 @@ impl CutoutJob {
     /// The frame whole, with what the cutout keeps tinted over it: the
     /// painting view. `None` as for `cut`.
     pub(crate) fn highlight(&self, frame: &Frame, source_time: Rational) -> Option<Frame> {
-        let mask = self
-            .store
-            .resolved(source_time.as_f64(), &self.cutout, self.aspect)?;
+        let mask = self.resolved_mask(source_time)?;
         let mut out = frame.clone();
         concat_vision::highlight(&mut out, &mask, &self.mapping, HIGHLIGHT);
         Some(out)

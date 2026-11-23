@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.artcraftandroid.capcraft.core.ClipView
@@ -76,6 +78,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.json.JSONArray
 
 /** An overlay picture of the user's own, in a folder they chose. */
 internal class OverlayFile(val uri: Uri, val name: String, val category: String)
@@ -364,6 +367,11 @@ internal object OverlayFolders {
         prefs(context).edit().putString("folder", tree?.toString()).apply()
     }
 
+    fun favorites(context: Context): Set<String> = prefs(context).getStringSet("favorites", emptySet())?.toSet() ?: emptySet()
+    fun setFavorites(context: Context, values: Set<String>) = prefs(context).edit().putStringSet("favorites", values).apply()
+    fun recent(context: Context): List<String> = prefs(context).getString("recent", "").orEmpty().split('\n').filter(String::isNotBlank)
+    fun setRecent(context: Context, values: List<String>) = prefs(context).edit().putString("recent", values.joinToString("\n")).apply()
+
     /** The colour light of the sun's kind is laid in: one of [TINTS] by name, or "Original" as the overlay has it. */
     fun tint(context: Context): String = prefs(context).getString("tint", null) ?: if (prefs(context).getBoolean("golden", true)) TINTS[0].name else "Original"
 
@@ -385,8 +393,9 @@ internal object OverlayFolders {
     private val PICTURES = setOf("jpg", "jpeg", "png", "webp")
 
     fun read(context: Context): List<OverlayFile> {
-        val tree = folder(context) ?: return emptyList()
-        val root = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return emptyList()
+        val original = OriginalAtmosphere.files(context)
+        val tree = folder(context) ?: return original
+        val root = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return original
         val found = ArrayList<OverlayFile>()
         val todo = ArrayDeque(listOf(Triple(root, "Overlays", 0)))
         while (todo.isNotEmpty() && found.size < 4000) {
@@ -408,7 +417,7 @@ internal object OverlayFolders {
                 }
             }
         }
-        return found.sortedWith(compareBy({ it.category.lowercase() }, { it.name.lowercase() }))
+        return (original + found).sortedWith(compareBy({ it.category.lowercase() }, { it.name.lowercase() }))
     }
 
     private val small = LruCache<String, Bitmap>(220)
@@ -615,6 +624,11 @@ fun AtmospherePanel(vm: EditorViewModel) {
     var all by remember { mutableStateOf<List<OverlayFile>?>(null) }
     var category by remember { mutableIntStateOf(0) }
     var finding by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    var favorites by remember { mutableStateOf(OverlayFolders.favorites(context)) }
+    var recent by remember { mutableStateOf(OverlayFolders.recent(context)) }
+    var comparing by remember { mutableStateOf(false) }
+    var compareUris by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(reads) { all = withContext(Dispatchers.IO) { OverlayFolders.read(context) } }
     DisposableEffect(clip?.id) {
         if (Trying.clip != clip?.id) {
@@ -685,17 +699,6 @@ fun AtmospherePanel(vm: EditorViewModel) {
     }) {
         val list = all
         when {
-            OverlayFolders.folder(context) == null -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(14.dp))
-                Glyph(LucideIcons.Folder, Palette.DockText, size = 32.dp)
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Choose a folder of overlays on this phone: smoke, mist, light rays, dust and the like, light on black. The folders in it become categories.",
-                    style = Type.Body.copy(color = Palette.Text, textAlign = TextAlign.Center),
-                )
-                Spacer(Modifier.height(18.dp))
-                WideButton("Choose folder") { choose.launch(shelf("Pictures")) }
-            }
             list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Reading your overlays", style = Type.Body.copy(color = Palette.TextSecondary)) }
             list.isEmpty() -> Column(Modifier.fillMaxSize().padding(24.dp)) {
                 Text("There are no pictures in that folder.", style = Type.Body.copy(color = Palette.TextSecondary))
@@ -705,6 +708,26 @@ fun AtmospherePanel(vm: EditorViewModel) {
             else -> {
                 val categories = remember(list) { list.map { it.category }.distinct() }
                 Tabs(categories, category) { category = it }
+                OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                    placeholder = { Text("Search overlays") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Choice("All", category == -1) { category = -1 }
+                    Choice("★ Favorites", category == -2) { category = -2 }
+                    Choice("Recent", category == -3) { category = -3 }
+                    Choice("Compare", comparing) { comparing = !comparing; compareUris = emptyList() }
+                }
+                if (comparing) {
+                    val selected = compareUris.mapNotNull { key -> list.firstOrNull { it.uri.toString() == key } }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        selected.forEach { CompareThumb(it) }
+                        if (selected.size < 2) Text("Choose ${2 - selected.size} more to compare", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.align(Alignment.CenterVertically))
+                    }
+                }
+                Text(
+                    "Original effects are generated on this phone · add a folder for your own overlays",
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    style = Type.Small.copy(color = Palette.TextSecondary),
+                )
                 if (Trying.id != null && vm.clip(Trying.id!!) != null) {
                     // one setting at a time: how strong, how big, which way turned, and where on each axis
                     var setting by remember { mutableStateOf("Strength") }
@@ -768,6 +791,21 @@ fun AtmospherePanel(vm: EditorViewModel) {
                         }
                     }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Choice("Animate", false) {
+                            val overlay = vm.clip(id) ?: return@Choice
+                            val length = overlay.durationUs.coerceAtLeast(1).toDouble()
+                            val keys = JSONArray()
+                            listOf(
+                                Triple(0.0, -0.025, 0.98),
+                                Triple(0.5, 0.025, 1.04),
+                                Triple(1.0, -0.025, 0.98),
+                            ).forEach { (at, x, scale) ->
+                                keys.put(JSONObject().put("op", "setClipKey").put("clipId", id).put("property", "offsetX").put("at", at).put("value", x))
+                                keys.put(JSONObject().put("op", "setClipKey").put("clipId", id).put("property", "scale").put("at", at).put("value", scale))
+                            }
+                            vm.command(JSONObject().put("op", "batch").put("commands", keys), "atmosphere-motion")
+                            vm.message = "Added a gentle drift animation over ${(length / 1_000_000.0).toInt().coerceAtLeast(1)} seconds"
+                        }
                         Choice("Mirror", false) {
                             val id = Trying.id ?: return@Choice
                             val now = vm.clipJson(id)?.optBoolean("flipH") ?: false
@@ -820,7 +858,14 @@ fun AtmospherePanel(vm: EditorViewModel) {
                         }
                     }
                 }
-                val shown = list.filter { it.category == categories.getOrNull(category) }
+                val byUri = list.associateBy { it.uri.toString() }
+                val ordered = when (category) {
+                    -1 -> list
+                    -2 -> favorites.mapNotNull(byUri::get)
+                    -3 -> recent.mapNotNull(byUri::get)
+                    else -> list.filter { it.category == categories.getOrNull(category) }
+                }
+                val shown = ordered.filter { query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true) }
                 LazyVerticalGrid(
                     GridCells.Fixed(4),
                     Modifier.fillMaxWidth().weight(1f),
@@ -829,9 +874,20 @@ fun AtmospherePanel(vm: EditorViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(shown, key = { it.uri.toString() }) { f ->
-                        Thumb(f, f.uri == Trying.file?.uri, Trying.busy && f.uri == Trying.file?.uri) {
-                            if (clip == null) vm.message = "Add a clip first"
-                            else if (!Trying.busy) scope.launch { lay(vm, context, clip, f) }
+                        Thumb(f, f.uri == Trying.file?.uri, Trying.busy && f.uri == Trying.file?.uri, f.uri.toString() in favorites, {
+                            val key = f.uri.toString()
+                            favorites = (favorites - key).let { if (key in favorites) it else it + key }
+                            OverlayFolders.setFavorites(context, favorites)
+                        }) {
+                            if (comparing) {
+                                val key = f.uri.toString()
+                                compareUris = if (key in compareUris) compareUris - key else (compareUris + key).takeLast(2)
+                            } else if (clip == null) vm.message = "Add a clip first"
+                            else if (!Trying.busy) {
+                                recent = (listOf(f.uri.toString()) + recent.filterNot { it == f.uri.toString() }).take(24)
+                                OverlayFolders.setRecent(context, recent)
+                                scope.launch { lay(vm, context, clip, f) }
+                            }
                         }
                     }
                     item { Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2E2E2E)).clickable { choose.launch(shelf("Pictures")) }, contentAlignment = Alignment.Center) { Glyph(LucideIcons.FolderOpen, Palette.DockText, size = 22.dp, description = "Another folder") } }
@@ -850,7 +906,7 @@ private fun Choice(label: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Thumb(file: OverlayFile, on: Boolean, busy: Boolean, onClick: () -> Unit) {
+private fun Thumb(file: OverlayFile, on: Boolean, busy: Boolean, favorite: Boolean, onFavorite: () -> Unit, onClick: () -> Unit) {
     val context = LocalContext.current
     val picture by produceState<Bitmap?>(null, file.uri) { value = withContext(Dispatchers.IO) { OverlayFolders.thumb(context, file) } }
     Box(
@@ -858,6 +914,24 @@ private fun Thumb(file: OverlayFile, on: Boolean, busy: Boolean, onClick: () -> 
             .border(2.dp, if (on) Palette.Accent else Color(0xFF2E2E2E), RoundedCornerShape(8.dp)).clickable(onClick = onClick),
     ) {
         picture?.let { Image(it.asImageBitmap(), contentDescription = file.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        Text(
+            file.name,
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000)).padding(horizontal = 4.dp, vertical = 3.dp),
+            style = Type.Small.copy(color = Color.White, fontSize = 9.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(if (favorite) "★" else "☆", Modifier.align(Alignment.TopEnd).clickable(onClick = onFavorite).padding(horizontal = 7.dp, vertical = 3.dp), style = Type.Body.copy(color = Color.White))
         if (busy) Box(Modifier.fillMaxSize().background(Color(0x88000000)))
+    }
+}
+
+@Composable
+private fun CompareThumb(file: OverlayFile) {
+    val context = LocalContext.current
+    val picture by produceState<Bitmap?>(null, file.uri) { value = withContext(Dispatchers.IO) { OverlayFolders.thumb(context, file) } }
+    Column(Modifier.fillMaxWidth(0.46f), horizontalAlignment = Alignment.CenterHorizontally) {
+        picture?.let { Image(it.asImageBitmap(), contentDescription = file.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(8.dp))) }
+        Text(file.name, style = Type.Small.copy(color = Palette.TextSecondary), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

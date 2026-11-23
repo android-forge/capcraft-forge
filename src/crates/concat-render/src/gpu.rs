@@ -429,6 +429,30 @@ fn fs_resolve_pq(@builtin(position) at: vec4<f32>) -> @location(0) vec4<u32> {
     return deep_out(vec3<f32>(pq_signal(nits.r), pq_signal(nits.g), pq_signal(nits.b)));
 }
 
+// Surface encoders can accept RGBA_1010102 directly on devices advertising
+// Android's HDR-editing capability. These variants write the same HLG/PQ
+// signal into an RGB10_A2 surface without an intermediate CPU readback.
+@fragment
+fn fs_resolve_hlg_10(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    let colour = textureLoad(picture, vec2<i32>(at.xy), 0);
+    let nits = max(to_2020(colour.rgb), vec3<f32>(0.0)) * 203.0;
+    let yd = max(dot(nits, vec3<f32>(0.2627, 0.6780, 0.0593)), 1e-6);
+    let scene = clamp(nits / 1000.0 * pow(yd / 1000.0, -0.2 / 1.2), vec3<f32>(0.0), vec3<f32>(1.0));
+    let a = 0.17883277;
+    let b = 0.28466892;
+    let c = 0.55991073;
+    let low = sqrt(3.0 * scene);
+    let high = a * log(max(12.0 * scene - b, vec3<f32>(1e-6))) + c;
+    return vec4<f32>(select(high, low, scene <= vec3<f32>(1.0 / 12.0)), 1.0);
+}
+
+@fragment
+fn fs_resolve_pq_10(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    let colour = textureLoad(picture, vec2<i32>(at.xy), 0);
+    let nits = max(to_2020(colour.rgb), vec3<f32>(0.0)) * 203.0;
+    return vec4<f32>(pq_signal(nits.r), pq_signal(nits.g), pq_signal(nits.b), 1.0);
+}
+
 // An HDR timeline for an SDR screen: its light rolled off by BT.2390 as an
 // HDR clip's is on an SDR timeline - the same maths, so a lone clip looks
 // the same on either - then encoded as SDR is.
@@ -785,6 +809,12 @@ pub struct WgpuCompositor {
     /// Frames of an HDR plan come back for an HDR file, not rolled off for
     /// an SDR one (`Compositor::deliver_hdr`).
     deliver_hdr: bool,
+    /// A MediaCodec surface whose 10-bit input was capability-checked.
+    surface_10bit: bool,
+    /// SDR resolve to an Android RGB10_A2 encoder surface.
+    surface_10bit_pipelines: [wgpu::RenderPipeline; 2],
+    /// HLG then PQ resolve to an Android RGB10_A2 encoder surface.
+    surface_10bit_hdr_pipelines: [wgpu::RenderPipeline; 2],
     /// The readback target an HDR frame is resolved into: sixteen-bit
     /// integers, eight bytes a pixel.
     deep_target: Option<Target>,
@@ -958,13 +988,15 @@ impl WgpuCompositor {
     }
 
     /// Opens a Vulkan compositor compatible with an Android native window
-    /// (typically MediaCodec's input surface) and configures that window for
-    /// direct SDR rendering.
+    /// (typically MediaCodec's input surface), for SDR or capability-checked
+    /// RGB10_A2 export.
     #[cfg(target_os = "android")]
     pub fn with_android_surface(
         window: *mut std::ffi::c_void,
         width: u32,
         height: u32,
+        ten_bit: bool,
+        signal: concat_core::frame::Signal,
     ) -> Result<(Self, AndroidSurfaceTarget), String> {
         use std::ptr::NonNull;
         if window.is_null() || width == 0 || height == 0 {
@@ -1040,11 +1072,38 @@ impl WgpuCompositor {
         }));
         let mut compositor = Self::drawing_in(device, queue, work);
         compositor.uncaught = uncaught;
-
         let caps = surface.get_capabilities(&adapter);
-        let format = wgpu::TextureFormat::Rgba8Unorm;
-        if !caps.formats.contains(&format) {
-            return Err(format!("MediaCodec surface lacks RGBA8 support: {:?}", caps.formats));
+        let format = if ten_bit {
+            wgpu::TextureFormat::Rgb10a2Unorm
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        };
+        let color_space = match signal {
+            concat_core::frame::Signal::Pq => wgpu::SurfaceColorSpace::Bt2100Pq,
+            concat_core::frame::Signal::Hlg => wgpu::SurfaceColorSpace::Bt2100Hlg,
+            concat_core::frame::Signal::Sdr | concat_core::frame::Signal::SdrWide => {
+                wgpu::SurfaceColorSpace::Auto
+            }
+        };
+        let required_space = match color_space {
+            wgpu::SurfaceColorSpace::Bt2100Pq => Some(wgpu::SurfaceColorSpaces::BT2100_PQ),
+            wgpu::SurfaceColorSpace::Bt2100Hlg => Some(wgpu::SurfaceColorSpaces::BT2100_HLG),
+            _ => None,
+        };
+        let format_supported = if color_space == wgpu::SurfaceColorSpace::Auto {
+            caps.formats.contains(&format)
+        } else {
+            caps.format_capabilities
+                .iter()
+                .any(|capability| capability.format == format)
+        };
+        if !format_supported {
+            return Err(format!("MediaCodec surface lacks {format:?} support"));
+        }
+        if required_space.is_some_and(|required| !caps.color_spaces(format).contains(required)) {
+            return Err(format!(
+                "MediaCodec surface lacks {color_space:?} for {format:?}"
+            ));
         }
         let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
             wgpu::PresentMode::Fifo
@@ -1054,7 +1113,7 @@ impl WgpuCompositor {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
+            color_space,
             width,
             height,
             present_mode,
@@ -1063,6 +1122,7 @@ impl WgpuCompositor {
             view_formats: vec![],
         };
         surface.configure(&compositor.device, &config);
+        compositor.surface_10bit = ten_bit;
         Ok((
             compositor,
             AndroidSurfaceTarget {
@@ -1564,6 +1624,10 @@ impl WgpuCompositor {
             .map(|entry| copy_into(wgpu::TextureFormat::Rgba8Unorm, entry));
         let hdr_pipelines = ["fs_resolve_hlg", "fs_resolve_pq"]
             .map(|entry| copy_into(wgpu::TextureFormat::Rgba16Uint, entry));
+        let surface_10bit_pipelines = ["fs_resolve", "fs_resolve_tone_mapped"]
+            .map(|entry| copy_into(wgpu::TextureFormat::Rgb10a2Unorm, entry));
+        let surface_10bit_hdr_pipelines = ["fs_resolve_hlg_10", "fs_resolve_pq_10"]
+            .map(|entry| copy_into(wgpu::TextureFormat::Rgb10a2Unorm, entry));
 
         let deep_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("concat deep"),
@@ -1670,6 +1734,9 @@ impl WgpuCompositor {
             output: concat_core::frame::Signal::Sdr,
             hdr_pipelines,
             deliver_hdr: false,
+            surface_10bit: false,
+            surface_10bit_pipelines,
+            surface_10bit_hdr_pipelines,
             deep_target: None,
             staging: HashMap::new(),
             deep_pipelines,
@@ -1892,11 +1959,15 @@ impl WgpuCompositor {
         };
         let geometry = layer.geometry(source, plan.width, plan.height);
         let seconds = plan.seconds();
+        // Cutouts have historically been applied to source pixels before
+        // effects. Bake a matte into the GPU picture first to preserve that
+        // ordering without bringing a zero-copy decoded frame to the CPU.
+        let matte_before_effects = layer.mask.is_some() && !layer.effects.is_empty();
         let clip = [
             layer.clip_start.as_f64() as f32,
             layer.clip_length.as_f64() as f32,
         ];
-        let (size, texture, uvs, flips) = if layer.needs_preparing(&geometry) {
+        let (size, texture, uvs, flips) = if layer.needs_preparing(&geometry) || matte_before_effects {
             let uploaded = self.upload(source);
             let made = self.make_picture(
                 uploaded,
@@ -1904,6 +1975,7 @@ impl WgpuCompositor {
                 &geometry,
                 layer.flip_h,
                 layer.flip_v,
+                if matte_before_effects { layer.mask.as_deref() } else { None },
             );
             let treated = self.run_passes(
                 geometry.fitted.0,
@@ -1938,7 +2010,7 @@ impl WgpuCompositor {
                 (layer.flip_h, layer.flip_v),
             )
         };
-        let mask = self.mask_of(layer.mask.as_deref());
+        let mask = self.mask_of(if matte_before_effects { None } else { layer.mask.as_deref() });
         let ground = layer
             .blend
             .grounded()
@@ -1985,9 +2057,10 @@ impl WgpuCompositor {
         geometry: &Geometry,
         flip_h: bool,
         flip_v: bool,
+        mask: Option<&Frame>,
     ) -> usize {
         let (width, height) = geometry.fitted;
-        let mask = self.mask_of(None);
+        let mask = self.mask_of(mask);
         let draws = vec![Draw {
             size: source_size,
             texture: source,
@@ -2747,7 +2820,13 @@ impl WgpuCompositor {
         canvas: usize,
         into: &wgpu::TextureView,
     ) {
-        let pipeline = if self.delivering_hdr() {
+        let pipeline = if self.surface_10bit && self.delivering_hdr() {
+            &self.surface_10bit_hdr_pipelines
+                [usize::from(self.output == concat_core::frame::Signal::Pq)]
+        } else if self.surface_10bit {
+            &self.surface_10bit_pipelines
+                [usize::from(self.output != concat_core::frame::Signal::Sdr)]
+        } else if self.delivering_hdr() {
             &self.hdr_pipelines[usize::from(self.output == concat_core::frame::Signal::Pq)]
         } else {
             let sdr = self.output == concat_core::frame::Signal::Sdr;
@@ -3980,7 +4059,7 @@ impl Compositor for WgpuCompositor {
     }
 
     fn render_into_view(&mut self, plan: &FramePlan, target: &wgpu::TextureView) -> bool {
-        if self.dead || self.deliver_hdr {
+        if self.dead || (self.deliver_hdr && !self.surface_10bit) {
             return false;
         }
         let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
@@ -4023,7 +4102,11 @@ impl Compositor for WgpuCompositor {
         overlays: &FramePlan,
         target: &wgpu::TextureView,
     ) -> bool {
-        if self.dead || self.deliver_hdr || from.width != to.width || from.height != to.height {
+        if self.dead
+            || (self.deliver_hdr && !self.surface_10bit)
+            || from.width != to.width
+            || from.height != to.height
+        {
             return false;
         }
         let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);

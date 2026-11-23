@@ -804,8 +804,9 @@ impl Decoder {
                         })
                     })
                     .and_then(|name| hardware::mediacodec_seat().map(|seat| (name, seat)));
-                // Diagnostic: every reader a phone opens, and where it decodes.
-                log::info!(
+                // Every reader a phone opens, and where it decodes: for a
+                // debug log, when playback is slow.
+                log::debug!(
                     "decoder: {} {}x{} -> {:?}{}{}",
                     path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
                     coded.0,

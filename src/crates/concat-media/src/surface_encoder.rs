@@ -2,7 +2,8 @@
 // SPDX-FileCopyrightText: 2026 CapCraft Forge contributors
 
 //! Android MediaCodec surface encoder. Frames are submitted through an
-//! ANativeWindow; no RGBA frame is read back to CPU memory.
+//! ANativeWindow; no RGBA frame is read back to CPU memory. HEVC Main10 and
+//! HDR color signaling are requested only for a 10-bit Vulkan surface.
 
 use std::ffi::c_void;
 use std::fs::File;
@@ -11,6 +12,7 @@ use std::path::Path;
 use std::ptr;
 use std::time::{Duration, Instant};
 
+use concat_core::frame::Signal;
 use ndk_sys as sys;
 
 /// An Android hardware video encoder whose input is a native rendering surface.
@@ -27,7 +29,8 @@ pub struct SurfaceEncoder {
 }
 
 impl SurfaceEncoder {
-    /// Opens a surface-input AVC or HEVC encoder and MP4 muxer.
+    /// Opens a surface-input AVC or HEVC encoder and MP4 muxer. Ten-bit
+    /// output is HEVC Main10; HDR needs HLG/PQ signaling and a 10-bit surface.
     pub fn open(
         path: &Path,
         width: u32,
@@ -36,6 +39,8 @@ impl SurfaceEncoder {
         bitrate: u32,
         mime: &str,
         color_range: crate::ColorRange,
+        ten_bit: bool,
+        signal: Signal,
     ) -> Result<Self, String> {
         if width == 0
             || height == 0
@@ -53,6 +58,12 @@ impl SurfaceEncoder {
             "video/hevc" => c"video/hevc",
             _ => return Err(format!("unsupported surface encoder MIME {mime}")),
         };
+        if ten_bit && mime != c"video/hevc" {
+            return Err("10-bit surface export requires an HEVC encoder".into());
+        }
+        if matches!(signal, Signal::Hlg | Signal::Pq) && !ten_bit {
+            return Err("HDR surface export requires a 10-bit input surface".into());
+        }
         let codec = unsafe { sys::AMediaCodec_createEncoderByType(mime.as_ptr()) };
         if codec.is_null() {
             return Err(format!("no Android encoder for {}", mime.to_string_lossy()));
@@ -89,6 +100,23 @@ impl SurfaceEncoder {
                     2
                 },
             );
+            if ten_bit {
+                // HEVCProfileMain10. Devices that cannot accept a 10-bit
+                // surface reject configure and the caller takes the regular
+                // encoder path.
+                sys::AMediaFormat_setInt32(format, c"profile".as_ptr(), 2);
+            }
+            let hdr = matches!(signal, Signal::Hlg | Signal::Pq);
+            sys::AMediaFormat_setInt32(format, c"color-standard".as_ptr(), if hdr { 6 } else { 1 });
+            sys::AMediaFormat_setInt32(
+                format,
+                c"color-transfer".as_ptr(),
+                match signal {
+                    Signal::Pq => 6,  // ST 2084
+                    Signal::Hlg => 7, // HLG
+                    _ => 3,           // SDR video
+                },
+            );
         }
         let status = unsafe {
             sys::AMediaCodec_configure(
@@ -109,6 +137,61 @@ impl SurfaceEncoder {
         if status != sys::media_status_t::AMEDIA_OK || window.is_null() {
             unsafe { sys::AMediaCodec_delete(codec) };
             return Err(format!("MediaCodec input surface failed: {status:?}"));
+        }
+        if ten_bit {
+            // Dataspace tells the codec which RGB surface transfer to encode.
+            // Keep the API 28 symbol optional at load time for older phones;
+            // those devices cleanly fall back to the non-surface encoder.
+            let library = unsafe {
+                libc::dlopen(
+                    c"libnativewindow.so".as_ptr(),
+                    libc::RTLD_NOW | libc::RTLD_LOCAL,
+                )
+            };
+            if library.is_null() {
+                unsafe {
+                    sys::ANativeWindow_release(window);
+                    sys::AMediaCodec_delete(codec);
+                }
+                return Err("Android native-window dataspace API is unavailable".into());
+            }
+            let symbol =
+                unsafe { libc::dlsym(library, c"ANativeWindow_setBuffersDataSpace".as_ptr()) };
+            if symbol.is_null() {
+                unsafe {
+                    libc::dlclose(library);
+                    sys::ANativeWindow_release(window);
+                    sys::AMediaCodec_delete(codec);
+                }
+                return Err("Android native-window dataspace API is unavailable".into());
+            }
+            let set_dataspace = unsafe {
+                std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(*mut sys::ANativeWindow, i32) -> i32,
+                >(symbol)
+            };
+            // Standard, transfer and limited/full range from android/data_space.h.
+            let dataspace = match signal {
+                Signal::Pq => 6 << 16 | 7 << 22,
+                Signal::Hlg => 6 << 16 | 8 << 22,
+                _ => 1 << 16 | 3 << 22,
+            } | if color_range == crate::ColorRange::Full {
+                1 << 27
+            } else {
+                2 << 27
+            };
+            let result = unsafe { set_dataspace(window, dataspace) };
+            unsafe { libc::dlclose(library) };
+            if result != 0 {
+                unsafe {
+                    sys::ANativeWindow_release(window);
+                    sys::AMediaCodec_delete(codec);
+                }
+                return Err(format!(
+                    "setting MediaCodec input dataspace failed: {result}"
+                ));
+            }
         }
         let status = unsafe { sys::AMediaCodec_start(codec) };
         if status != sys::media_status_t::AMEDIA_OK {
