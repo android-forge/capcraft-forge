@@ -27,6 +27,19 @@ object Builtins {
         return file.absolutePath
     }
 
+    /**
+     * The sample a template ships with, copied into the project: "p1.jpg" and on for its places,
+     * "music.m4a" for its sound. Null when it has none, and a place then gets [placeholder].
+     */
+    fun sample(context: android.content.Context, dir: File, id: String, name: String): String? {
+        val asset = "templates/$id/$name"
+        val there = runCatching { context.assets.list("templates/$id")?.contains(name) == true }.getOrDefault(false)
+        if (!there) return null
+        val file = File(dir, "template-$id-$name")
+        context.assets.open(asset).use { input -> FileOutputStream(file).use { input.copyTo(it) } }
+        return file.absolutePath
+    }
+
     /** The picture standing in for place [n] (from 1) until a photo of the user's goes there. */
     fun placeholder(dir: File, n: Int): String {
         val b = Bitmap.createBitmap(1080, 1920, Bitmap.Config.ARGB_8888)

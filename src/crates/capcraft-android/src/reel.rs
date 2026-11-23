@@ -162,6 +162,8 @@ impl MobileSession {
                 .clips
                 .iter()
                 .filter(|clip| clip.track_id == main.id || registered.is_some_and(|slots| slots.contains_key(&clip.id)))
+                // a copy of another place is filled with it, not on its own
+                .filter(|clip| registered.and_then(|slots| slots.get(&clip.id)).and_then(|slot| slot.get("copyOf")).is_none())
                 .collect();
             clips.sort_by(|a, b| a.start.total_cmp(&b.start));
             Ok(clips
@@ -220,7 +222,7 @@ impl MobileSession {
             let settings = session.settings();
             Ok((clip.duration, (settings.width, settings.height)))
         })?;
-        let replaced = self.replace_media(clip_id.clone(), path)?;
+        let replaced = self.replace_media(clip_id.clone(), path.clone())?;
         // a picture of another kind is a new clip; the same kind keeps its own
         let here = Some(replaced.created_id)
             .filter(|id| !id.is_empty() && replaced.rows.iter().any(|row| row.clips.iter().any(|c| &c.id == id)))
@@ -347,6 +349,26 @@ impl MobileSession {
                 }
             }
         }
+        if let Some(blend) = slot.get("blend").and_then(Value::as_str).filter(|b| !b.is_empty()) {
+            commands.extend(command(json!({"op": "updateClip", "clipId": here, "patch": {"blend": blend}})));
+        }
+        if slot.get("flip").and_then(Value::as_bool).unwrap_or(false) {
+            commands.extend(command(json!({"op": "updateClip", "clipId": here, "patch": {"flipH": true}})));
+        }
+        // fast, slow and fast again, about the speed it fills its place at, so it keeps its length
+        if moves && !still && length > 0.05 && slot.get("ramp").and_then(Value::as_bool).unwrap_or(false) {
+            let mean = (now.min(length) / wanted).clamp(0.1, 1.0);
+            commands.push(Command::SetClipSpeedCurve {
+                clip_id: here.clone(),
+                curve: Some(
+                    [(0.0, 1.6), (0.5, 0.4), (1.0, 1.6)]
+                        .iter()
+                        .map(|(at, k)| concat_project::model::SpeedPoint { at: *at, speed: k * mean, slope: None })
+                        .collect(),
+                ),
+                ripple: false,
+            });
+        }
         let mut looks: Vec<Value> = slot.get("fx").and_then(Value::as_array).cloned().unwrap_or_default();
         if moves && slot.get("shakes").and_then(Value::as_bool).unwrap_or(false) {
             looks.push(json!({"id": "capcraft.shake", "params": {"amount": 14}}));
@@ -368,21 +390,36 @@ impl MobileSession {
         }
 
         // a picture in a video's place is another clip: what was read goes with the place
+        let mut copies = Vec::new();
         if let Some(slots) = kept.get_mut("slots").and_then(Value::as_object_mut) {
             let mut slot = slot;
             slot["filled"] = json!(true);
             slots.remove(&clip_id);
             slots.insert(here.clone(), slot);
+            // its copies follow it, by its new name when it has one
+            for (id, other) in slots.iter_mut() {
+                if other.get("copyOf").and_then(Value::as_str) == Some(clip_id.as_str()) {
+                    other["copyOf"] = json!(here);
+                    copies.push(id.clone());
+                }
+            }
         }
         let backwards = !still && moves && slot_reverse(&kept, &here);
         commands.push(Command::SetTimelineExtra {
             key: REEL.to_owned(),
             value: Some(kept),
         });
-        let view = self.run(commands)?;
+        let mut view = self.run(commands)?;
         // a place that plays backwards, as the template's beat wants; the
         // place is filled all the same when the copy cannot be made
-        if backwards { Ok(self.reverse(here).unwrap_or(view)) } else { Ok(view) }
+        if backwards {
+            view = self.reverse(here).unwrap_or(view);
+        }
+        // and the places that copy it, each with its own look
+        for copy in copies {
+            view = self.fill_slot(copy, path.clone(), moves, match_colours)?;
+        }
+        Ok(view)
     }
 
     /// Reads the words the reel shows, on a thread of its own (the finder

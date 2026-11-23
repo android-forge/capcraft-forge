@@ -2100,3 +2100,59 @@ fn beat_flash_cuts_on_the_beat_with_white_panels() {
     assert_eq!(panels, 16, "{text}");
     assert_eq!(medias.len(), 4, "{medias:?}");
 }
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg"]
+fn encore_fills_its_copies_and_has_its_music() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Encore".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let media = std::path::Path::new(&made.path).join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    let mut files = std::collections::HashMap::new();
+    for n in 1..=3 {
+        let file = media.join(format!("template-place-{n}.png"));
+        crate::session::write_png(&file, &crate::Picture { width: 108, height: 192, rgba: vec![60 * n as u8; 108 * 192 * 4] }).unwrap();
+        files.insert(format!("p{n}"), file.to_string_lossy().into_owned());
+    }
+    // eight seconds of quiet, as the music
+    let music = media.join("music.wav");
+    let samples = 16_000 * 8;
+    let mut wav = Vec::new();
+    for part in [&b"RIFF"[..], &(36 + samples * 2u32).to_le_bytes(), b"WAVEfmt ", &16u32.to_le_bytes(), &1u16.to_le_bytes(), &1u16.to_le_bytes(), &16_000u32.to_le_bytes(), &32_000u32.to_le_bytes(), &2u16.to_le_bytes(), &16u16.to_le_bytes(), b"data", &(samples * 2).to_le_bytes()] {
+        wav.extend_from_slice(part);
+    }
+    wav.resize(wav.len() + samples as usize * 2, 0);
+    std::fs::write(&music, wav).unwrap();
+    files.insert("music".to_owned(), music.to_string_lossy().into_owned());
+    session.build_template("encore".to_owned(), files).expect("built");
+
+    // three places to fill; the rewind, the mirror and the echo are copies
+    let slots = session.slots();
+    assert_eq!(slots.len(), 3, "{slots:?}");
+    let photo = media.join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    for slot in &slots {
+        session.fill_slot(slot.clip_id.clone(), photo.to_string_lossy().into_owned(), true, false).expect("filled");
+    }
+    let kept: serde_json::Value = serde_json::from_str(&session.extra("capcraftReel".to_owned())).unwrap();
+    let all = kept["slots"].as_object().unwrap();
+    assert_eq!(all.len(), 6, "{kept}");
+    assert!(all.values().all(|s| s["filled"] == true), "{kept}");
+    assert_eq!(all.values().filter(|s| s.get("copyOf").is_some()).count(), 3);
+
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    let photo_media: Vec<String> = doc["media"].as_array().unwrap().iter().filter(|m| m["path"].as_str().is_some_and(|p| p.ends_with("photo.jpg"))).filter_map(|m| m["id"].as_str().map(str::to_owned)).collect();
+    // all six pictures are the photo now
+    assert_eq!(clips.iter().filter(|c| c["mediaId"].as_str().is_some_and(|m| photo_media.iter().any(|p| p == m))).count(), 6, "{doc}");
+    // the mirror is mirrored, the mono one grey, the echo faint
+    assert_eq!(clips.iter().filter(|c| c["flipH"] == true).count(), 1);
+    assert_eq!(clips.iter().filter(|c| c["blend"] == "screen").count(), 1, "{doc}");
+    assert!(doc.to_string().contains("concat.saturation"));
+    assert!(clips.iter().any(|c| c["keys"].as_array().is_some_and(|k| k.iter().any(|k| k["property"] == "opacity" && (k["value"].as_f64().unwrap_or(1.0) - 0.4).abs() < 1e-6))));
+    // its music runs the length of it
+    let audio = clips.iter().find(|c| c["kind"] == "audio").expect("music");
+    assert!((audio["duration"].as_f64().unwrap() - 6.2).abs() < 0.05, "{audio}");
+}

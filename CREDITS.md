@@ -66,6 +66,16 @@ by Clem Onojeghuo (CC0), the photographs above made into a test reel, and Wikime
 credited to its maker in the picture: public domain photographs by the US Air Force, the US Marine Corps, the US National
 Park Service (GlacierNPS) and others.
 
+### Template samples
+
+Built-in templates come with sample photographs and music, made smaller and cut short here, so a template shows how it
+moves before one's own go in. Encore's:
+
+- [20150211-OSEC-LSC-0596](https://www.flickr.com/photos/41284017@N08/16506739925): USDA, public domain
+- [DSC_0761](https://www.flickr.com/photos/38144472@N04/15200743003): US Embassy Canada, public domain
+- [IMG_0773](https://www.flickr.com/photos/131902054@N02/20403086478): driveangry3d, CC0
+- [Heavy Trap/Hip Hop Beat/Loop - Reflection](https://freesound.org/people/Doomsdaybear/sounds/722920): Doomsdaybear, CC0, looped and faded
+
 The README's Home screenshot shows a frame of [Big Buck Bunny](https://peach.blender.org), © 2008 Blender Foundation,
 [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), as the app shows it. The film is not part of this app.
 

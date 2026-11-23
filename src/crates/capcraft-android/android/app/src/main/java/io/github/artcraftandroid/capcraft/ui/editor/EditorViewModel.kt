@@ -329,7 +329,10 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                     val t = io.github.artcraftandroid.capcraft.core.builtinTemplates().first { it.id == id }
                     val dir = java.io.File(path, "media").apply { mkdirs() }
                     val files = HashMap<String, String>()
-                    for (n in 1..t.places.toInt()) files["p$n"] = io.github.artcraftandroid.capcraft.engine.Builtins.placeholder(dir, n)
+                    val builtins = io.github.artcraftandroid.capcraft.engine.Builtins
+                    // its own sample photos where it has them, numbered stand-ins where not
+                    for (n in 1..t.places.toInt()) files["p$n"] = builtins.sample(getApplication(), dir, id, "p$n.jpg") ?: builtins.placeholder(dir, n)
+                    builtins.sample(getApplication(), dir, id, "music.m4a")?.let { files["music"] = it }
                     t.graphics.forEach { files[it] = io.github.artcraftandroid.capcraft.engine.Builtins.graphic(dir, it) }
                     s.buildTemplate(id, files)
                 }

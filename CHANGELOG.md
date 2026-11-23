@@ -54,7 +54,8 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Titles and graphics can go behind the person; graphics take effects; modern animations with a reel's easing; reel title
   styles in twelve new faces (SIL Open Font License).
 - The README shows what is this build's own.
-- Built-in templates on Home: fourteen reel looks (Year Roll, Day Count, Halo Circle, Frame and Heart, Depth Slide, Split
-  Reveal, Wide Roll, Velocity, Flash & Shake, Glow Rush, Seamless Zoom, Into the Eye, Beat Flash), each with places for one's own
-  photos and videos and titles to type over. Stock photos are tried again when a site asks for a pause.
+- Built-in templates on Home: fifteen reel looks (Year Roll, Day Count, Halo Circle, Frame and Heart, Depth Slide, Split
+  Reveal, Wide Roll, Velocity, Flash & Shake, Glow Rush, Seamless Zoom, Into the Eye, Beat Flash, Encore), each with places for one's own
+  photos and videos and titles to type over. Encore ramps, rewinds, mirrors and echoes the user's own clips: a place
+  can copy another and fill with it, and a template can bring public domain sample photos and music. Stock photos are tried again when a site asks for a pause.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

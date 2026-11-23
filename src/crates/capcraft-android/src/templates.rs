@@ -39,6 +39,15 @@ struct Place {
     fx: Vec<Value>,
     /// A video put here plays backwards.
     reverse: bool,
+    /// Mirrored left to right.
+    flip: bool,
+    /// A video here runs fast, slow and fast again, its length kept.
+    ramp: bool,
+    /// A copy of the main place at this index: filled with whatever it is
+    /// filled with, and not offered to be filled on its own.
+    copy_of: Option<usize>,
+    /// How it lays over what is under it ("screen" and the rest); empty is normal.
+    blend: &'static str,
 }
 
 fn cover() -> Place {
@@ -92,6 +101,7 @@ pub fn builtin_templates() -> Vec<BuiltinTemplate> {
         entry("glow-rush", "Glow Rush", "A glowing, colour-split edit in an anime style.", 4, &[]),
         entry("seamless-zoom", "Seamless Zoom", "Each photo zooms into the next.", 4, &[]),
         entry("beat-flash", "Beat Flash", "Punch zooms and reversed moves, with white panels flashing on the beat.", 8, &["panel-right", "panel-left", "panel-bottom", "panel-top"]),
+        entry("encore", "Encore", "Ramped zooms, a rewind, a mirror and an echo, for stage and street clips.", 3, &[]),
         entry("into-the-eye", "Into the Eye", "A deep zoom into a face, then the next shot.", 2, &[]),
     ]
 }
@@ -279,6 +289,22 @@ fn plan(id: &str) -> Option<Plan> {
                 .collect();
             Plan { main: (0..8).map(shot).collect(), graphics: panels, ..empty }
         }
+        "encore" => {
+            // a clip ramped and pushed in, then rewound; the next in mono, then mirrored; the last with an echo over it
+            let zoom = |from: f64, to: f64| vec![("scale", 0.0, from), ("scale", 1.0, to)];
+            let mono = json!({"id": "concat.saturation", "params": {"amount": -100}});
+            let glow = json!({"id": "concat.glow", "params": {"amount": 40}});
+            let main = vec![
+                (1.3, Place { keys: zoom(1.0, 1.3), ramp: true, ..cover() }, None),
+                (0.9, Place { keys: zoom(1.3, 1.0), reverse: true, copy_of: Some(0), ..cover() }, None),
+                (1.2, Place { keys: zoom(1.0, 1.25), ramp: true, fx: vec![mono], ..cover() }, None),
+                (1.0, Place { keys: zoom(1.25, 1.05), flip: true, copy_of: Some(2), ..cover() }, Some(("capcraft.flash-zoom", 0.25))),
+                (1.8, Place { keys: zoom(1.0, 1.3), ramp: true, fx: vec![glow], ..cover() }, None),
+            ];
+            let echo = Place { k: 1.18, keys: vec![("scale", 0.0, 1.0), ("scale", 1.0, 1.3), ("opacity", 0.0, 0.4), ("opacity", 1.0, 0.4)], copy_of: Some(4), blend: "screen", ..cover() };
+            let white = |at: f64| ("capcraft.flash", at, 0.25, json!({"amount": 85, "speed": 2}));
+            Plan { main, over: vec![(4.4, 1.8, echo, false)], layers: vec![white(2.15), white(4.35)], ..empty }
+        }
         _ => return None,
     })
 }
@@ -293,6 +319,9 @@ fn place_json(place: &Place) -> Value {
         "keys": place.keys.iter().map(|(p, at, v)| json!([p, at, v])).collect::<Vec<_>>(),
         "fx": place.fx,
         "reverse": place.reverse,
+        "flip": place.flip,
+        "ramp": place.ramp,
+        "blend": place.blend,
         "filled": false,
         "edited": true,
     })
@@ -310,10 +339,20 @@ impl MobileSession {
         let mut behind = Vec::new();
         let mut places: Vec<(String, String)> = Vec::new();
 
+        // the user's places are numbered in turn; a copy takes its original's picture
+        let mut names: Vec<String> = Vec::new();
+        for place in plan.main.iter().map(|(_, p, _)| p).chain(plan.over.iter().map(|(_, _, p, _)| p)) {
+            let name = match place.copy_of {
+                Some(k) => names.get(k).cloned().unwrap_or_else(|| "p1".to_owned()),
+                None => format!("p{}", names.iter().collect::<std::collections::HashSet<_>>().len() + 1),
+            };
+            names.push(name);
+        }
+
         // the places on the main track, end to end
         let mut ids = Vec::new();
-        for i in 0..plan.main.len() {
-            ids.push(self.import(file(&format!("p{}", i + 1))?)?.id);
+        for name in names.iter().take(plan.main.len()) {
+            ids.push(self.import(file(name)?)?.id);
         }
         let view = self.add_to_main(ids, 0)?;
         let mut main: Vec<_> = view
@@ -335,13 +374,17 @@ impl MobileSession {
             {
                 commands.push(json!({"op": "updateClip", "clipId": clip.id, "patch": {"transitionIn": {"id": transition, "duration": seconds}}}));
             }
-            slots.insert(clip.id.clone(), place_json(place));
-            places.push((clip.id.clone(), file(&format!("p{}", i + 1))?));
+            let mut slot = place_json(place);
+            match place.copy_of.and_then(|k| main.get(k)) {
+                Some(original) => slot["copyOf"] = json!(original.id),
+                None => places.push((clip.id.clone(), file(&names[i])?)),
+            }
+            slots.insert(clip.id.clone(), slot);
         }
 
         // places over them
         for (n, (at, length, place, person_over)) in plan.over.iter().enumerate() {
-            let name = format!("p{}", plan.main.len() + n + 1);
+            let name = names[plan.main.len() + n].clone();
             let media = self.import(file(&name)?)?;
             let made = self.add_overlay(media.id, micros(*at))?.created_id;
             if made.is_empty() {
@@ -358,8 +401,12 @@ impl MobileSession {
             if *person_over {
                 behind.push(json!(made));
             }
-            slots.insert(made.clone(), place_json(place));
-            places.push((made, file(&name)?));
+            let mut slot = place_json(place);
+            match place.copy_of.and_then(|k| main.get(k)) {
+                Some(original) => slot["copyOf"] = json!(original.id),
+                None => places.push((made.clone(), file(&name)?)),
+            }
+            slots.insert(made, slot);
         }
 
         // titles, each with its look, keys and place
@@ -411,6 +458,16 @@ impl MobileSession {
                 commands.push(json!({"op": "updateClip", "clipId": made, "patch": {"videoEffects": [{"id": effect, "params": params}]}}));
             }
         }
+        // its music, cut to its length
+        if let Some(music) = files.get("music") {
+            let length: f64 = plan.main.iter().map(|(l, _, _)| l).sum();
+            let media = self.import(music.clone())?;
+            let made = self.add_audio(media.id, 0)?.created_id;
+            if !made.is_empty() {
+                let now = self.view().rows.iter().flat_map(|r| r.clips.clone()).find(|c| c.id == made).map_or(length, |c| c.duration_us as f64 / 1e6);
+                commands.push(json!({"op": "trimClip", "clipId": made, "edge": "end", "delta": length - now, "ripple": false}));
+            }
+        }
         commands.push(json!({"op": "setTimelineExtra", "key": REEL, "value": {"slots": slots, "behind": behind, "worded": true, "template": id}}));
         self.run(commands.into_iter().filter_map(|c| serde_json::from_value(c).ok()).collect())?;
 
@@ -438,7 +495,8 @@ mod tests {
     fn every_listed_template_has_a_plan_with_its_places() {
         for t in builtin_templates() {
             let plan = plan(&t.id).unwrap_or_else(|| panic!("{}", t.id));
-            assert_eq!((plan.main.len() + plan.over.len()) as u32, t.places, "{}", t.id);
+            let own = plan.main.iter().map(|(_, p, _)| p).chain(plan.over.iter().map(|(_, _, p, _)| p)).filter(|p| p.copy_of.is_none()).count();
+            assert_eq!(own as u32, t.places, "{}", t.id);
             for g in &plan.graphics {
                 assert!(t.graphics.iter().any(|name| name == g.name), "{}", t.id);
             }
