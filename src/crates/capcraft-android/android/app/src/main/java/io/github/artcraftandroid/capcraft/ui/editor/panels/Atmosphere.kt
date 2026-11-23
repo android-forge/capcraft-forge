@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -448,6 +447,7 @@ internal object OverlayFolders {
 private object Trying {
     var clip: String? = null
     var file by mutableStateOf<OverlayFile?>(null)
+    var pending by mutableStateOf<OverlayFile?>(null)
     var id by mutableStateOf<String?>(null)
     /** The warmth golden light gives the picture, a layer of its own. */
     var warm by mutableStateOf<String?>(null)
@@ -478,8 +478,10 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
     val glowing = OverlayFolders.glow(context)
     val warming = OverlayFolders.warmth(context)
     val deep = preset.light && OverlayFolders.depth(context)
-    val result = withContext(Threads.commands) {
-        runCatching {
+    Trying.pending = file
+    try {
+        val result = withContext(Threads.commands) {
+            runCatching {
             if (old.isNotEmpty()) s.delete(old)
             val h = 120
             val w = (h * t.width.toFloat() / t.height.toFloat()).roundToInt().coerceAtLeast(16)
@@ -558,18 +560,21 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
                 // the people stand in the same light
                 if (warm.isNotEmpty()) view = s.restack(warm, 99)
             }
-            Laying(view, how, made, warm, shadow)
+                Laying(view, how, made, warm, shadow)
+            }
         }
+        result.onSuccess { done ->
+            vm.applyView(done.view)
+            Trying.id = done.id.ifEmpty { null }
+            Trying.warm = done.warm.ifEmpty { null }
+            Trying.shadow = done.shadow.ifEmpty { null }
+            Trying.file = file
+            Trying.strength = done.how.opacity.toFloat()
+        }.onFailure { vm.message = it.userMessage }
+    } finally {
+        Trying.pending = null
+        Trying.busy = false
     }
-    Trying.busy = false
-    result.onSuccess { done ->
-        vm.applyView(done.view)
-        Trying.id = done.id.ifEmpty { null }
-        Trying.warm = done.warm.ifEmpty { null }
-        Trying.shadow = done.shadow.ifEmpty { null }
-        Trying.file = file
-        Trying.strength = done.how.opacity.toFloat()
-    }.onFailure { vm.message = it.userMessage }
 }
 
 /**
@@ -624,7 +629,6 @@ fun AtmospherePanel(vm: EditorViewModel) {
     var all by remember { mutableStateOf<List<OverlayFile>?>(null) }
     var category by remember { mutableIntStateOf(0) }
     var finding by remember { mutableStateOf<String?>(null) }
-    var query by remember { mutableStateOf("") }
     var favorites by remember { mutableStateOf(OverlayFolders.favorites(context)) }
     var recent by remember { mutableStateOf(OverlayFolders.recent(context)) }
     var comparing by remember { mutableStateOf(false) }
@@ -708,8 +712,6 @@ fun AtmospherePanel(vm: EditorViewModel) {
             else -> {
                 val categories = remember(list) { list.map { it.category }.distinct() }
                 Tabs(categories, category) { category = it }
-                OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
-                    placeholder = { Text("Search overlays") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Choice("All", category == -1) { category = -1 }
                     Choice("★ Favorites", category == -2) { category = -2 }
@@ -865,7 +867,7 @@ fun AtmospherePanel(vm: EditorViewModel) {
                     -3 -> recent.mapNotNull(byUri::get)
                     else -> list.filter { it.category == categories.getOrNull(category) }
                 }
-                val shown = ordered.filter { query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true) }
+                val shown = ordered
                 LazyVerticalGrid(
                     GridCells.Fixed(4),
                     Modifier.fillMaxWidth().weight(1f),
@@ -874,7 +876,7 @@ fun AtmospherePanel(vm: EditorViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(shown, key = { it.uri.toString() }) { f ->
-                        Thumb(f, f.uri == Trying.file?.uri, Trying.busy && f.uri == Trying.file?.uri, f.uri.toString() in favorites, {
+                        Thumb(f, f.uri == Trying.file?.uri || f.uri == Trying.pending?.uri, Trying.busy && f.uri == Trying.pending?.uri, f.uri.toString() in favorites, {
                             val key = f.uri.toString()
                             favorites = (favorites - key).let { if (key in favorites) it else it + key }
                             OverlayFolders.setFavorites(context, favorites)
