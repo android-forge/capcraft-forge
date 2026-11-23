@@ -142,6 +142,16 @@ fun BodyEffectsPanel(vm: EditorViewModel) {
             }
         }
         if (current.startsWith("tint:")) TintControls(vm, clip.id)
+        if (current == "grey" || current == "pop") {
+            // grey the other way round: everything but the people
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (current == "grey") "The people are grey" else "All but the people is grey", style = Type.Small.copy(color = Palette.Text), modifier = Modifier.weight(1f))
+                Text(
+                    "Invert", style = Type.Small.copy(color = Palette.Accent),
+                    modifier = Modifier.clickable { choose(if (current == "grey") "pop" else "grey") }.padding(8.dp),
+                )
+            }
+        }
         ChoiceGrid(LOOKS.size, Modifier.weight(1f)) { i ->
             val look = LOOKS[i]
             GridTile(look.label, same(look.kind, current), onClick = { choose(look.kind) }) {

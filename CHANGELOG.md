@@ -46,7 +46,7 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down. Light
   laid in 3D puts the people in front of it and casts their shadow away from it; 2D lays it flat, as before. The last
   Golden light settings (glow 80, warm photo 66) are the defaults.
-- People in colour: Body effects turn the people grey, or tint them (angry red, cold blue, sick green), with the amount
+- People in colour: Body effects turn the people grey (or, inverted, all but them), or tint them (angry red, cold blue, sick green), with the amount
   set and grown from the clip's start to the playhead. A Tint effect does it.
 - Remove background: Invert keeps the background and takes the person away.
 - Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
