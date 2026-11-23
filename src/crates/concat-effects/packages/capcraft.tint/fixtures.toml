@@ -1,0 +1,19 @@
+# Colours in the working space: linear light, 1.0 the white of an SDR
+# picture.
+
+[[probe]]
+name = "default, skin"
+input = [0.6, 0.35, 0.25, 1]
+expect = [0.8671875, 0.1274414, 0.060546875, 1.0]
+
+[[probe]]
+name = "minimum, as shot"
+at = "min"
+input = [0.45, 0.4, 0.35, 1]
+expect = [0.45, 0.4, 0.35, 1]
+
+[[probe]]
+name = "maximum (white), a grey kept grey"
+at = "max"
+input = [0.3, 0.3, 0.3, 1]
+expect = [0.2998047, 0.2998047, 0.2998047, 1.0]

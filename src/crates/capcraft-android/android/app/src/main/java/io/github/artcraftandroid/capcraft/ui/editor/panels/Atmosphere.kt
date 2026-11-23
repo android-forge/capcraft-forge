@@ -370,12 +370,17 @@ internal object OverlayFolders {
     fun setTint(context: Context, name: String) = prefs(context).edit().putString("tint", name).apply()
 
     /** How much the light glows about its heart, 0 to 1.5. */
-    fun glow(context: Context): Float = prefs(context).getFloat("glow", 1f)
+    fun glow(context: Context): Float = prefs(context).getFloat("glow", 0.8f)
 
     /** How much the light warms the picture, 0 to 1. */
-    fun warmth(context: Context): Float = prefs(context).getFloat("warmth", 1f)
+    fun warmth(context: Context): Float = prefs(context).getFloat("warmth", 0.66f)
 
     fun setLook(context: Context, glow: Float, warmth: Float) = prefs(context).edit().putFloat("glow", glow).putFloat("warmth", warmth).apply()
+
+    /** Whether light is laid as in the scene (3D: the people in front of it, casting shadows away from it) or flat over the picture (2D). */
+    fun depth(context: Context): Boolean = prefs(context).getBoolean("depth", true)
+
+    fun setDepth(context: Context, on: Boolean) = prefs(context).edit().putBoolean("depth", on).apply()
 
     private val PICTURES = setOf("jpg", "jpeg", "png", "webp")
 
@@ -437,25 +442,28 @@ private object Trying {
     var id by mutableStateOf<String?>(null)
     /** The warmth golden light gives the picture, a layer of its own. */
     var warm by mutableStateOf<String?>(null)
+    /** The shadow a light in 3D casts of the people. */
+    var shadow by mutableStateOf<String?>(null)
     var strength by mutableFloatStateOf(0.7f)
     var busy by mutableStateOf(false)
     /** The last one laid is behind the people. */
     @Volatile var behind = false
 }
 
-private class Laying(val view: TimelineView, val how: Laid, val id: String, val warm: String)
+private class Laying(val view: TimelineView, val how: Laid, val id: String, val warm: String, val shadow: String = "")
 
 private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, file: OverlayFile) {
     val s = vm.session ?: return
     val t = vm.timeline ?: return
     Trying.busy = true
     val at = vm.playhead.coerceIn(clip.startUs, clip.startUs + clip.durationUs - 1)
-    val old = listOfNotNull(Trying.id, Trying.warm).filter { vm.clip(it) != null }
+    val old = listOfNotNull(Trying.id, Trying.warm, Trying.shadow).filter { vm.clip(it) != null }
     val preset = presetFor(file.category)
     val tint = TINTS.firstOrNull { it.name == OverlayFolders.tint(context) }
     val sun = preset.golden && tint != null
     val glowing = OverlayFolders.glow(context)
     val warming = OverlayFolders.warmth(context)
+    val deep = preset.light && OverlayFolders.depth(context)
     val result = withContext(Threads.commands) {
         runCatching {
             if (old.isNotEmpty()) s.delete(old)
@@ -472,16 +480,17 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
             val how = laid(preset, look, scene, frame, sun)
             val black = blackOf(small)
             var warm = ""
+            // where the light is brightest on the frame, from its top left
+            val fitW = if (look.aspect >= frame) 1f else look.aspect / frame
+            val fitH = if (look.aspect >= frame) frame / look.aspect else 1f
+            val heart = if (how.flip) 1f - look.heart else look.heart
+            val hx = 0.5f + how.x.toFloat() + (heart - 0.5f) * fitW * how.scale.toFloat()
+            val hy = 0.5f + how.y.toFloat() + (look.heartY - 0.5f) * fitH * how.scale.toFloat()
             if (sun) {
                 // what of the picture the frame shows, its shorter side
                 val tall = if (look.aspect >= frame) picture.height.toFloat() else picture.width / frame
                 val made = golden(picture, look, min(tall, tall * frame), tint ?: TINTS[0], glowing, black)
                 out.outputStream().use { made.compress(Bitmap.CompressFormat.JPEG, 94, it) }
-                val fitW = if (look.aspect >= frame) 1f else look.aspect / frame
-                val fitH = if (look.aspect >= frame) frame / look.aspect else 1f
-                val heart = if (how.flip) 1f - look.heart else look.heart
-                val hx = 0.5f + how.x.toFloat() + (heart - 0.5f) * fitW * how.scale.toFloat()
-                val hy = 0.5f + how.y.toFloat() + (look.heartY - 0.5f) * fitH * how.scale.toFloat()
                 val gw = if (frame >= 1f) 640 else (640 * frame).roundToInt()
                 val gh = if (frame >= 1f) (640 / frame).roundToInt() else 640
                 val shade = Media.uniqueFile(dir, "Golden light.jpg")
@@ -496,13 +505,32 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
             val stay = Trying.behind
             var view = s.layOver(clip.id, out.absolutePath, how)
             val made = view.createdId
-            val copy = bodyOf(vm, clip.id)?.first
-            if (stay && copy != null) {
+            var copy = bodyOf(vm, clip.id)?.first
+            var shadow = ""
+            if (deep) {
+                // light in the scene: the people cut out (once), in front of it, their shadow cast away from it
+                if (copy == null) {
+                    val done = kotlinx.coroutines.CompletableDeferred<TimelineView?>()
+                    val listener = object : SpeechListener {
+                        override fun onProgress(fraction: Float, stage: String) {}
+                        override fun onDone(result: TimelineView?) { done.complete(result) }
+                        override fun onFailed(message: String) { done.complete(null) }
+                    }
+                    runCatching { s.bodyEffect(clip.id, "front", listener) }.onFailure { done.complete(null) }
+                    done.await()?.let { view = it }
+                    copy = runCatching { JSONObject(s.extra("capcraftBody")).optJSONObject(clip.id)?.optString("copy") }.getOrNull()?.takeIf { it.isNotEmpty() }
+                }
+                if (copy != null) {
+                    runCatching { s.castShadow(copy, hx.toDouble(), hy.toDouble(), how.opacity) }.onSuccess { v -> view = v; shadow = v.createdId }
+                    view = s.restack(copy, 99)
+                    if (warm.isNotEmpty()) view = s.restack(warm, 99)
+                }
+            } else if (stay && copy != null) {
                 view = s.restack(copy, 99)
                 // the people stand in the same light
                 if (warm.isNotEmpty()) view = s.restack(warm, 99)
             }
-            Laying(view, how, made, warm)
+            Laying(view, how, made, warm, shadow)
         }
     }
     Trying.busy = false
@@ -510,6 +538,7 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
         vm.applyView(done.view)
         Trying.id = done.id.ifEmpty { null }
         Trying.warm = done.warm.ifEmpty { null }
+        Trying.shadow = done.shadow.ifEmpty { null }
         Trying.file = file
         Trying.strength = done.how.opacity.toFloat()
     }.onFailure { vm.message = it.userMessage }
@@ -588,9 +617,10 @@ fun AtmospherePanel(vm: EditorViewModel) {
                 style = Type.Small.copy(color = Palette.DockText),
                 modifier = Modifier.clickable {
                     val id = Trying.id ?: return@clickable
-                    vm.edit { delete(listOfNotNull(id, Trying.warm?.takeIf { w -> vm.clip(w) != null })) }
+                    vm.edit { delete(listOfNotNull(id, Trying.warm?.takeIf { w -> vm.clip(w) != null }, Trying.shadow?.takeIf { w -> vm.clip(w) != null })) }
                     Trying.id = null
                     Trying.warm = null
+                    Trying.shadow = null
                     Trying.file = null
                 }.padding(8.dp),
             )
@@ -692,6 +722,16 @@ fun AtmospherePanel(vm: EditorViewModel) {
                             val now = vm.clipJson(id)?.optBoolean("flipV") ?: false
                             vm.patch(id, JSONObject().put("flipV", !now))
                         }
+                        val light = Trying.file?.takeIf { presetFor(it.category).light }
+                        if (light != null && clip != null) {
+                            var deep by remember { mutableStateOf(OverlayFolders.depth(context)) }
+                            Choice(if (deep) "3D light" else "2D light", deep) {
+                                deep = !deep
+                                OverlayFolders.setDepth(context, deep)
+                                // laid again the new way: the shadow cast, or taken away
+                                if (!Trying.busy) scope.launch { lay(vm, context, clip, light) }
+                            }
+                        }
                         Choice(if (finding != null) "Finding people ${finding}" else "Behind people", front) {
                             val s = vm.session ?: return@Choice
                             val c = clip ?: return@Choice
@@ -718,6 +758,7 @@ fun AtmospherePanel(vm: EditorViewModel) {
                             // the next one goes over this one rather than in its place
                             Trying.id = null
                             Trying.warm = null
+                            Trying.shadow = null
                             Trying.file = null
                         }
                     }

@@ -55,7 +55,25 @@ private val LOOKS = listOf(
     BodyLook("trippy", "Trippy"),
     BodyLook("glitch", "Glitch"),
     BodyLook("comic", "Comic"),
+    BodyLook("grey", "People grey"),
+    BodyLook("tint:$RED:70", "Angry red"),
+    BodyLook("tint:$BLUE:60", "Cold blue"),
+    BodyLook("tint:$GREEN:55", "Sick green"),
 )
+
+/** Tints for the people, as the tint effect reads a colour: red, green, blue and alpha in one number. */
+private const val RED = 4280949503L
+private const val BLUE = 711720959L
+private const val GREEN = 1288256255L
+
+/** A tint look's colour as a Compose colour, for its tile; null for any other look. */
+private fun tintOf(kind: String): androidx.compose.ui.graphics.Color? {
+    val rgba = kind.removePrefix("tint:").takeIf { kind.startsWith("tint:") }?.substringBefore(':')?.toLongOrNull() ?: return null
+    return androidx.compose.ui.graphics.Color(((rgba shr 24) and 0xFF).toInt(), ((rgba shr 16) and 0xFF).toInt(), ((rgba shr 8) and 0xFF).toInt())
+}
+
+/** Two looks are the same one: a tint's own amount aside. */
+private fun same(a: String, b: String) = if (a.startsWith("tint:") && b.startsWith("tint:")) a.split(':')[1] == b.split(':')[1] else a == b
 
 /**
  * Body effects: looks that treat the person in the clip apart from what is behind them. The
@@ -101,7 +119,7 @@ fun BodyEffectsPanel(vm: EditorViewModel) {
     }
     fun choose(kind: String) {
         val s = vm.session ?: return
-        if (kind == current) return
+        if (same(kind, current)) return
         if (kind.isNotEmpty()) progress = "Finding the person" to 0f
         scope.launch(Threads.commands) {
             // the edit is in at once; the masks come after, through the listener
@@ -123,9 +141,10 @@ fun BodyEffectsPanel(vm: EditorViewModel) {
                 )
             }
         }
+        if (current.startsWith("tint:")) TintControls(vm, clip.id)
         ChoiceGrid(LOOKS.size, Modifier.weight(1f)) { i ->
             val look = LOOKS[i]
-            GridTile(look.label, look.kind == current, onClick = { choose(look.kind) }) {
+            GridTile(look.label, same(look.kind, current), onClick = { choose(look.kind) }) {
                 if (look.kind.isEmpty() || frame == null) {
                     Glyph(if (look.kind.isEmpty()) LucideIcons.Ban else LucideIcons.UserRound, Palette.TextSecondary, size = 26.dp)
                 } else {
@@ -144,7 +163,8 @@ fun BodyEffectsPanel(vm: EditorViewModel) {
                                 "neon" -> Palette.Accent
                                 "aura" -> androidx.compose.ui.graphics.Color(0xFFFFC94D)
                                 "lines" -> androidx.compose.ui.graphics.Color(0xFFFF4DFF)
-                                else -> androidx.compose.ui.graphics.Color.White
+                                "grey" -> androidx.compose.ui.graphics.Color(0xFFB0B0B0)
+                                else -> tintOf(look.kind) ?: androidx.compose.ui.graphics.Color.White
                             },
                             size = 28.dp,
                         )
@@ -153,6 +173,42 @@ fun BodyEffectsPanel(vm: EditorViewModel) {
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * How strong the people's colour is, and whether it grows: none at the clip's start up to the
+ * amount at the playhead (anger building), or the same throughout.
+ */
+@Composable
+private fun TintControls(vm: EditorViewModel, clipId: String) {
+    val copy = remember(vm.timeline?.revision, clipId) {
+        runCatching { vm.session?.extra(BODY)?.takeIf { it.isNotBlank() }?.let(::JSONObject)?.optJSONObject(clipId)?.optString("copy") }.getOrNull()?.takeIf { it.isNotEmpty() }
+    } ?: return
+    val chain = vm.clipJson(copy)?.optJSONArray("videoEffects") ?: return
+    val at = (0 until chain.length()).firstOrNull { chain.getJSONObject(it).optString("id") == "capcraft.tint" } ?: return
+    val now = chain.getJSONObject(at).optJSONObject("params")?.optDouble("amount", 70.0) ?: 70.0
+    var amount by remember(copy) { mutableStateOf(now.toFloat()) }
+    ValueSlider(
+        value = amount, range = 0f..100f, label = { "${it.roundToInt()}%" },
+        onChange = { v ->
+            amount = v
+            val next = org.json.JSONArray(chain.toString())
+            next.getJSONObject(at).optJSONObject("params")?.put("amount", v.toDouble())
+            vm.patch(copy, JSONObject().put("videoEffects", next), "people-tint")
+        },
+        onDone = { vm.endGesture() }, title = "Amount",
+    )
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            "Grow to here", style = Type.Small.copy(color = Palette.Accent),
+            modifier = Modifier.clickable { vm.edit { bodyTintRise(clipId, vm.playhead, amount.toDouble()) }; vm.message = "The colour grows from the clip's start to here" }.padding(8.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "Steady", style = Type.Small.copy(color = Palette.Text),
+            modifier = Modifier.clickable { vm.edit { bodyTintRise(clipId, 0, amount.toDouble()) }; vm.message = "The colour is the same throughout" }.padding(8.dp),
+        )
     }
 }
 

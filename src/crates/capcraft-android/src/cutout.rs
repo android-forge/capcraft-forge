@@ -63,6 +63,7 @@ impl MobileSession {
             subject: Subject::Auto,
             feather: 0.002,
             strokes: Vec::new(),
+            invert: false,
         });
         let view = self.apply(
             serde_json::to_string(&Command::SetClipCutout {

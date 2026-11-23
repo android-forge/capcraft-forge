@@ -49,9 +49,22 @@ fn looks(kind: &str) -> Option<(Vec<Value>, Vec<Value>)> {
         }
         return Some((Vec::new(), person));
     }
+    // the people washed in one colour, as red for anger: its colour (red, green,
+    // blue, alpha in one number) and how much, keyed later to make it grow
+    if let Some(asked) = kind.strip_prefix("tint:") {
+        let mut asked = asked.split(':');
+        let colour = asked.next().and_then(|c| c.parse::<u32>().ok()).unwrap_or(0xFF2A_1AFF);
+        let amount = asked.next().and_then(|a| a.parse::<f64>().ok()).unwrap_or(70.0).clamp(0.0, 100.0);
+        return Some((Vec::new(), vec![json!({"id": "capcraft.tint", "params": {"color": colour, "amount": amount}})]));
+    }
     Some(match kind {
         // the people alone, in front of whatever is laid over the clip
         "front" => (Vec::new(), Vec::new()),
+        // the people in black and white, the rest in colour
+        "grey" => (
+            Vec::new(),
+            vec![json!({"id": "concat.saturation", "params": {"amount": -100}})],
+        ),
         "blur" => (
             vec![json!({"id": "concat.gaussian-blur", "params": {"radius": 18}})],
             Vec::new(),
@@ -136,7 +149,8 @@ fn without(chain: &[Value], added: &[Value]) -> Vec<Value> {
 #[uniffi::export]
 impl MobileSession {
     /// Puts body effect `kind` ("blur", "pop", "spot", "neon", "aura",
-    /// "lines", "dream", "trippy", "glitch" or "comic") on
+    /// "lines", "dream", "trippy", "glitch", "comic", "grey", or
+    /// "tint:colour:amount") on
     /// `clip_id`, in place of any it had; an empty `kind` takes it off. The
     /// person's masks are then found on a thread of its own, reported
     /// through `listener`.
@@ -167,6 +181,43 @@ impl MobileSession {
             }
         };
         self.find_masks(media, listener)
+    }
+
+    /// Makes the people's tint on `clip_id` grow: none at the clip's start,
+    /// `amount` (0 to 100) at `peak_us` on the timeline, held after it, as
+    /// anger building. A peak at the start takes the growing off and leaves it
+    /// at `amount` throughout. One undo step.
+    pub fn body_tint_rise(&self, clip_id: String, peak_us: i64, amount: f64) -> Result<crate::session::TimelineView, MobileError> {
+        let bodies: Value = serde_json::from_str(&self.extra(BODY.to_owned())).unwrap_or(Value::Null);
+        let copy = bodies
+            .get(&clip_id)
+            .and_then(|b| b.get("copy"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| MobileError::Failed("Colour the people first.".to_owned()))?;
+        let (entry, start, length) = self.with_session(|session| {
+            let clip = session
+                .project()
+                .active()
+                .clips
+                .iter()
+                .find(|c| c.id == copy)
+                .ok_or_else(|| MobileError::Failed("The people's copy is gone.".to_owned()))?;
+            let entry = clip
+                .video_effects
+                .iter()
+                .position(|link| link.id == "capcraft.tint")
+                .ok_or_else(|| MobileError::Failed("The people have no colour to grow.".to_owned()))?;
+            Ok((entry, clip.start, clip.duration))
+        })?;
+        let amount = amount.clamp(0.0, 100.0);
+        let at = if length > 0.0 { ((crate::seconds(peak_us) - start) / length).clamp(0.0, 1.0) } else { 0.0 };
+        let mut commands = vec![command(json!({"op": "clearEffectKeys", "clipId": copy, "entry": entry, "key": "amount"}))?];
+        if at > 0.01 {
+            commands.push(command(json!({"op": "setEffectKey", "clipId": copy, "entry": entry, "key": "amount", "at": 0.0, "value": 0.0}))?);
+            commands.push(command(json!({"op": "setEffectKey", "clipId": copy, "entry": entry, "key": "amount", "at": at, "value": amount}))?);
+        }
+        self.run(commands)
     }
 }
 
@@ -296,6 +347,7 @@ impl MobileSession {
                         // light fades off at their edge rather than stopping
                         feather: if kind.starts_with("light:") { 0.006 } else { 0.002 },
                         strokes: Vec::new(),
+                        invert: false,
                     }),
                 },
                 command(json!({

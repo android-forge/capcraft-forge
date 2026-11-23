@@ -451,6 +451,9 @@ pub struct Cutout {
     /// Corrections painted on the monitor, in the order they were made.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub strokes: Vec<Stroke>,
+    /// Keeps the background and takes the subject away instead.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub invert: bool,
 }
 
 /// The two ways a cutout decides what stays.
@@ -552,6 +555,7 @@ impl Cutout {
             subject: Subject::Auto,
             feather: DEFAULT_FEATHER,
             strokes: Vec::new(),
+            invert: false,
         }
     }
 

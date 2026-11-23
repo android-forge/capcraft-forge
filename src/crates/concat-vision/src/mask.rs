@@ -19,6 +19,13 @@ pub struct Mask {
 }
 
 impl Mask {
+    /// Every value turned round: what was kept is taken and what was taken kept.
+    pub fn invert(&mut self) {
+        for v in &mut self.data {
+            *v = 255 - *v;
+        }
+    }
+
     /// A mask of one value throughout.
     pub fn filled(width: u32, height: u32, value: u8) -> Mask {
         Mask {

@@ -298,7 +298,7 @@ impl MobileSession {
         Ok(Self::changed(&mut state, created))
     }
 
-    fn timeline(&self) -> Timeline {
+    pub(crate) fn timeline(&self) -> Timeline {
         self.lock().session.project().active().clone()
     }
 

@@ -67,6 +67,14 @@ impl CutoutJob {
         let mask = self
             .store
             .resolved(source_time.as_f64(), &self.cutout, self.aspect)?;
+        // an inverted cutout keeps what is around the subject
+        let mask = if self.cutout.invert {
+            let mut turned = (*mask).clone();
+            turned.invert();
+            std::sync::Arc::new(turned)
+        } else {
+            mask
+        };
         let mut out = frame.clone();
         concat_vision::cut(&mut out, &mask, &self.mapping);
         Some(out)

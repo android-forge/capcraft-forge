@@ -98,24 +98,11 @@ internal class StockPhoto(
     val ext: String = ".jpg",
 )
 
-/** What is looked for: photos, videos, or meme pictures. */
+/** What is looked for: photos or videos. */
 internal enum class StockKind(val title: String, val hint: String) {
     PHOTOS("Photos", "Search HD photos"),
     VIDEOS("Videos", "Search videos"),
-    MEMES("Memes", "Search meme pictures"),
 }
-
-/**
- * Meme sites with no feed an app may read: their downloads go through their own pages (with their ads and terms),
- * so they are opened in the browser, and what is downloaded there is added from the phone's own videos and photos.
- */
-internal val MEME_SITES = listOf(
-    "tamilmemes.co.in" to "https://tamilmemes.co.in",
-    "indianmemetemplates.com" to "https://indianmemetemplates.com",
-    "memes.co.in" to "https://memes.co.in",
-    "videomemes.in" to "https://videomemes.in",
-    "memestamil.in" to "https://memestamil.in",
-)
 
 /** The languages of India a search can be narrowed to: its name, and the code archives file it under. */
 internal val INDIAN_LANGUAGES = listOf(
@@ -132,19 +119,9 @@ internal enum class StockSite(val title: String, val kind: StockKind, val keyPag
     COMMONS_FREE("Commons", StockKind.PHOTOS, null, "Wikimedia Commons: public domain and CC0. No credit needed."),
     COMMONS_CREDIT("Commons, with credit", StockKind.PHOTOS, null, "Wikimedia Commons: CC BY. Credit the maker wherever it is shown."),
     NASA("NASA", StockKind.PHOTOS, null, "NASA's own pictures. Free to use; do not suggest NASA endorses anything."),
-    PEXELS("Pexels", StockKind.PHOTOS, "https://www.pexels.com/api/", "Photos provided by Pexels."),
     UNSPLASH("Unsplash", StockKind.PHOTOS, "https://unsplash.com/developers", "Photos provided by Unsplash."),
     ARCHIVE("Internet Archive", StockKind.VIDEOS, null, "Public domain films from 1965 and before, old Indian-language films among them. Uploaders set these licences, and songs in a film can still be under copyright: check the film's page."),
     COMMONS_VIDEO("Commons", StockKind.VIDEOS, null, "Videos on Wikimedia Commons: public domain, CC0 and CC BY (credit the maker)."),
-    PEXELS_VIDEO("Pexels", StockKind.VIDEOS, "https://www.pexels.com/api/", "Videos provided by Pexels.", "PEXELS"),
-    PIXABAY_VIDEO("Pixabay", StockKind.VIDEOS, "https://pixabay.com/api/docs/", "Videos provided by Pixabay.", "PIXABAY"),
-    COMMONS_MEME("Commons", StockKind.MEMES, null, "Meme pictures on Wikimedia Commons: public domain, CC0 and CC BY (credit the maker)."),
-    OPENVERSE("Openverse", StockKind.MEMES, null, "Openverse: openly licensed pictures from many sites. Public domain, CC0 and CC BY (credit the maker)."),
-    PIXABAY_IMAGE("Pixabay", StockKind.MEMES, "https://pixabay.com/api/docs/", "Pictures and illustrations provided by Pixabay.", "PIXABAY"),
-    // what these two hold is mostly from films and shows whose makers keep their rights: its use is the user's to judge
-    GIPHY("GIPHY", StockKind.MEMES, "https://developers.giphy.com/dashboard/", "Powered by GIPHY. GIFs, brought in as silent videos, credited to whoever put them there. Many are from films and shows whose makers keep their rights: how you use them is for you to judge.", moving = true),
-    PEXELS_MEME("Pexels videos", StockKind.MEMES, "https://www.pexels.com/api/", "Videos provided by Pexels, free to use: try \"indian memes\".", "PEXELS", moving = true),
-    IMGFLIP("Imgflip", StockKind.MEMES, null, "Imgflip's most used meme templates, put there by its users. Most come from films, shows and photos whose makers keep their rights: how you use them is for you to judge."),
 }
 
 /** Photos from stock sites, searched from the import page. Only those at least full HD are shown. */
@@ -200,18 +177,9 @@ internal object Stock {
             StockSite.COMMONS_FREE -> commons(words, page, "unrestricted")
             StockSite.COMMONS_CREDIT -> commons(words, page, "attribution")
             StockSite.NASA -> nasa(words, page)
-            StockSite.PEXELS -> pexels(key, words, page)
             StockSite.UNSPLASH -> unsplash(key, words, page)
             StockSite.ARCHIVE -> archive(query, page, language?.second)
             StockSite.COMMONS_VIDEO -> commonsOpen(words, page, video = true)
-            StockSite.PEXELS_VIDEO -> pexelsVideos(key, words, page)
-            StockSite.PIXABAY_VIDEO -> pixabay(key, words, page, video = true)
-            StockSite.COMMONS_MEME -> commonsOpen("$words meme".trim(), page, video = false)
-            StockSite.OPENVERSE -> openverse("$words meme".trim(), page)
-            StockSite.PIXABAY_IMAGE -> pixabay(key, words, page, video = false)
-            StockSite.GIPHY -> giphy(key, query, page, language)
-            StockSite.IMGFLIP -> imgflip(words, page)
-            StockSite.PEXELS_MEME -> pexelsVideos(key, words.ifBlank { "memes" }, page)
         }
     }
 
@@ -220,7 +188,7 @@ internal object Stock {
 
     /** Commons, pictures of any size or videos, under a licence a reel may use; a CC BY one is credited. */
     private fun commonsOpen(query: String, page: Int, video: Boolean): List<StockPhoto> {
-        val asked = q(if (video) "$query filetype:video" else "$query filetype:bitmap filew:>299")
+        val asked = q(if (video) "$query filetype:video" else "$query filetype:bitmap filew:>1919")
         val found = json(
             "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=40&gsroffset=${(page - 1) * 40}" +
                 "&gsrsearch=$asked&prop=imageinfo&iiprop=url%7Csize%7Cmime%7Cextmetadata&iiextmetadatafilter=LicenseShortName%7CArtist&iiurlwidth=330",
@@ -241,20 +209,6 @@ internal object Stock {
                 video = video, ext = ext,
             )
         }.toList()
-    }
-
-    /** Openverse pictures under CC0, public domain marks or CC BY. */
-    private fun openverse(query: String, page: Int): List<StockPhoto> {
-        val list = json("https://api.openverse.org/v1/images/?q=${q(query)}&license=cc0,pdm,by&page_size=40&page=$page").optJSONArray("results") ?: return emptyList()
-        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { r ->
-            val licence = r.optString("license").uppercase()
-            val url = r.optString("url").ifBlank { return@mapNotNull null }
-            StockPhoto(
-                "openverse-" + r.optString("id"), r.optString("thumbnail").ifBlank { url }, url, r.optInt("width"), r.optInt("height"),
-                r.optString("creator").ifBlank { "Unknown" }.take(80), if (licence == "PDM") "Public domain" else "CC ${licence} ${r.optString("license_version")}".trim(),
-                r.optString("foreign_landing_url"), credit = licence == "BY", ext = "." + url.substringAfterLast('.', "jpg").substringBefore('?').lowercase().take(4).ifBlank { "jpg" },
-            )
-        }
     }
 
     /** Films on the Internet Archive in the public domain or under CC0 or CC BY, in [language] (a code) when given. */
@@ -289,83 +243,6 @@ internal object Stock {
             .filter { it.optString("name").lowercase().endsWith(".mp4") && it.optString("size").toLongOrNull()?.let { s -> s in 1..VIDEO_LIMIT } == true }
             .maxByOrNull { it.optString("size").toLong() } ?: throw IOException("That film has no MP4 small enough to bring in.")
         return "https://archive.org/download/${Uri.encode(id)}/" + mp4.optString("name").split('/').joinToString("/") { Uri.encode(it) }
-    }
-
-    /**
-     * GIFs on GIPHY, as their MP4s, credited to their uploaders. GIPHY reads two of India's languages itself;
-     * for the rest, the language's name goes in among the words.
-     */
-    private fun giphy(key: String, query: String, page: Int, language: Pair<String, String>?): List<StockPhoto> {
-        val own = mapOf("hin" to "hi", "ben" to "bn")[language?.second]
-        val words = if (language != null && own == null) "$query ${language.first}".trim() else query.ifBlank { language?.first.orEmpty() }
-        val list = json(
-            "https://api.giphy.com/v1/gifs/search?api_key=${q(key)}&q=${q(words.take(50))}&limit=40&offset=${(page - 1) * 40}&rating=pg-13" + (own?.let { "&lang=$it" } ?: ""),
-        ).optJSONArray("data") ?: return emptyList()
-        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { g ->
-            val images = g.optJSONObject("images") ?: return@mapNotNull null
-            val original = images.optJSONObject("original") ?: return@mapNotNull null
-            val mp4 = original.optString("mp4").ifBlank { return@mapNotNull null }
-            val still = images.optJSONObject("fixed_width_still")?.optString("url").orEmpty().ifBlank { images.optJSONObject("original_still")?.optString("url").orEmpty() }
-            val by = g.optString("username").ifBlank { g.optString("source_tld") }.ifBlank { "GIPHY" }
-            StockPhoto(
-                "giphy-" + g.optString("id"), still, mp4, original.optString("width").toIntOrNull() ?: 0, original.optString("height").toIntOrNull() ?: 0,
-                by.take(80), "GIPHY", g.optString("url"), credit = true, video = true, ext = ".mp4",
-            )
-        }
-    }
-
-    /** Imgflip's most used templates, a hundred of them, kept once read; those whose names hold any of the words. */
-    @Volatile private var templates: List<StockPhoto>? = null
-
-    private fun imgflip(query: String, page: Int): List<StockPhoto> {
-        if (page > 1) return emptyList()
-        val all = templates ?: run {
-            val memes = json("https://api.imgflip.com/get_memes").optJSONObject("data")?.optJSONArray("memes") ?: return emptyList()
-            (0 until memes.length()).map { memes.getJSONObject(it) }.map { m ->
-                val url = m.optString("url")
-                StockPhoto(
-                    "imgflip-" + m.optString("id"), url, url, m.optInt("width"), m.optInt("height"), m.optString("name").take(80), "Imgflip template",
-                    "https://imgflip.com/meme/" + m.optString("id"), credit = false, ext = "." + url.substringAfterLast('.', "jpg").lowercase().take(4),
-                )
-            }.also { templates = it }
-        }
-        val words = query.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
-        return if (words.isEmpty()) all else all.filter { t -> words.any { t.by.lowercase().contains(it) } }
-    }
-
-    private fun pexelsVideos(key: String, query: String, page: Int): List<StockPhoto> {
-        val list = json("https://api.pexels.com/videos/search?query=${q(query)}&per_page=40&page=$page", mapOf("Authorization" to key)).optJSONArray("videos") ?: return emptyList()
-        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { v ->
-            val files = v.optJSONArray("video_files") ?: return@mapNotNull null
-            // the largest no wider than 4K
-            val file = (0 until files.length()).map { files.getJSONObject(it) }
-                .filter { it.optString("file_type") == "video/mp4" && maxOf(it.optInt("width"), it.optInt("height")) <= 3840 }
-                .maxByOrNull { it.optInt("width") * it.optInt("height") } ?: return@mapNotNull null
-            StockPhoto(
-                "pexelsv-" + v.optLong("id"), v.optString("image"), file.optString("link"), file.optInt("width"), file.optInt("height"),
-                v.optJSONObject("user")?.optString("name").orEmpty(), "Pexels", v.optString("url"), false, video = true, ext = ".mp4",
-            )
-        }
-    }
-
-    private fun pixabay(key: String, query: String, page: Int, video: Boolean): List<StockPhoto> {
-        val base = if (video) "https://pixabay.com/api/videos/" else "https://pixabay.com/api/"
-        val list = json("$base?key=${q(key)}&q=${q(query)}&per_page=40&page=$page&safesearch=true").optJSONArray("hits") ?: return emptyList()
-        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { h ->
-            if (video) {
-                val sizes = h.optJSONObject("videos") ?: return@mapNotNull null
-                val best = listOf("large", "medium", "small").mapNotNull { sizes.optJSONObject(it) }.firstOrNull { it.optString("url").isNotBlank() } ?: return@mapNotNull null
-                StockPhoto(
-                    "pixabayv-" + h.optLong("id"), sizes.optJSONObject("tiny")?.optString("thumbnail").orEmpty().ifBlank { best.optString("thumbnail") }, best.optString("url"),
-                    best.optInt("width"), best.optInt("height"), h.optString("user"), "Pixabay", h.optString("pageURL"), false, video = true, ext = ".mp4",
-                )
-            } else {
-                StockPhoto(
-                    "pixabay-" + h.optLong("id"), h.optString("previewURL"), h.optString("largeImageURL"), h.optInt("imageWidth"), h.optInt("imageHeight"),
-                    h.optString("user"), "Pixabay", h.optString("pageURL"), false, ext = "." + h.optString("largeImageURL").substringAfterLast('.', "jpg").lowercase().take(4),
-                )
-            }
-        }
     }
 
     private fun commons(query: String, page: Int, terms: String): List<StockPhoto> {
@@ -414,16 +291,6 @@ internal object Stock {
             // some are kept there for others, who keep their rights in them
             if (data.optString("description").contains(Regex("copyright|©", RegexOption.IGNORE_CASE))) return@mapNotNull null
             StockPhoto("nasa-" + data.optString("nasa_id"), https(small.optString("href")), https(full.optString("href")), w, h, maker.take(80), "NASA", "https://images.nasa.gov/details/" + Uri.encode(data.optString("nasa_id")), false)
-        }
-    }
-
-    private fun pexels(key: String, query: String, page: Int): List<StockPhoto> {
-        val list = json("https://api.pexels.com/v1/search?query=${q(query)}&per_page=40&page=$page", mapOf("Authorization" to key)).optJSONArray("photos") ?: return emptyList()
-        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { p ->
-            val w = p.optInt("width")
-            val h = p.optInt("height")
-            val src = p.optJSONObject("src") ?: return@mapNotNull null
-            if (!hd(w, h)) null else StockPhoto("pexels-" + p.optLong("id"), src.optString("medium"), src.optString("original") + "?auto=compress&cs=srgb&fit=max&w=3840&h=3840", w, h, p.optString("photographer"), "Pexels", p.optString("url"), false)
         }
     }
 
@@ -521,13 +388,13 @@ internal object Stock {
     const val VIDEO_LIMIT = 400L * 1024 * 1024
 }
 
-/** The Stock tab of the import page: a search over the sites for photos (full HD or better), videos and memes. */
+/** The Stock tab of the import page: a search over the sites for photos (full HD or better) and videos. */
 @Composable
 internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: MediaKinds = MediaKinds.BOTH) {
     // what the picker was asked for: pictures, videos or either
     val kinds = StockKind.entries.filter {
         when (wanted) {
-            MediaKinds.IMAGE -> it != StockKind.VIDEOS
+            MediaKinds.IMAGE -> it == StockKind.PHOTOS
             MediaKinds.VIDEO -> it == StockKind.VIDEOS
             MediaKinds.BOTH -> true
         }
@@ -610,7 +477,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
             }
             if (words.isNotEmpty()) Text("Search", style = Type.BodyStrong.copy(color = Palette.Accent, fontSize = 14.sp), modifier = Modifier.clickable { start() }.padding(8.dp))
         }
-        // photos, videos or memes; then the sites that have them; then a language of India, if wanted
+        // photos or videos; then the sites that have them; then a language of India, if wanted
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             kinds.forEach { k ->
                 Text(
@@ -655,19 +522,6 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
             }
         }
         Text(site.about, style = Type.Tiny, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
-        if (kind == StockKind.MEMES) {
-            // the sites that keep their downloads on their own pages
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("On the web:", style = Type.Tiny.copy(fontSize = 12.sp))
-                MEME_SITES.forEach { (name, url) ->
-                    Text(
-                        name, style = Type.Tiny.copy(fontSize = 12.sp, color = Palette.Accent),
-                        modifier = Modifier.clip(RoundedCornerShape(13.dp)).clickable { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }.padding(horizontal = 6.dp, vertical = 4.dp),
-                    )
-                }
-            }
-            Text("Those open in the browser: download there, then add it from Videos or Photos.", style = Type.Tiny.copy(fontSize = 11.sp), modifier = Modifier.padding(horizontal = 14.dp))
-        }
         if (needsKey) {
             KeyForm(site) { key -> Stock.setKey(context, site, key); keys++ }
             return@Column
@@ -728,7 +582,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
         }
         if (multiple) {
             Row(Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).height(58.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                val owed = chosen.filter { it.credit || it.licence == "Unsplash" || it.licence == "Pexels" || it.licence == "Pixabay" || it.licence == "Imgflip template" }
+                val owed = chosen.filter { it.credit || it.licence == "Unsplash" }
                 if (owed.isNotEmpty()) {
                     Text(
                         if (owed.any { it.credit }) "Copy credits (needed)" else "Copy credits",

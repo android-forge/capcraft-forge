@@ -2179,3 +2179,73 @@ fn main_clips_are_cut_to_the_beat_or_one_length() {
     session.fit_main_to_beats(vec![600_000, 700_000, 1_200_000, 2_000_000, 2_500_000]).unwrap();
     assert_eq!(lengths(&session), [600_000, 600_000, 800_000, 500_000]);
 }
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg"]
+fn a_people_tint_grows_to_the_playhead_and_holds() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Tint".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let photo = std::path::Path::new(&made.path).join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    let media = session.import(photo.to_string_lossy().into_owned()).unwrap();
+    let main = session.add_to_main(vec![media.id.clone()], 0).unwrap();
+    let main_id = main.rows.iter().flat_map(|r| r.clips.clone()).next().unwrap().id;
+    // the person's copy, tinted red, as the body effect leaves it
+    let copy = session.add_overlay(media.id, 0).unwrap().created_id;
+    let commands: Vec<concat_project::Command> = [
+        serde_json::json!({"op": "updateClip", "clipId": copy, "patch": {"videoEffects": [{"id": "capcraft.tint", "params": {"color": 4280949503u32, "amount": 70}}]}}),
+        serde_json::json!({"op": "setTimelineExtra", "key": crate::body::BODY, "value": {main_id.clone(): {"copy": copy, "kind": "tint:4280949503:70"}}}),
+    ]
+    .into_iter()
+    .map(|c| serde_json::from_value(c).unwrap())
+    .collect();
+    session.run(commands).unwrap();
+    let length = session.view().rows.iter().flat_map(|r| r.clips.clone()).find(|c| c.id == copy).unwrap().duration_us;
+    session.body_tint_rise(main_id.clone(), length / 2, 90.0).expect("grown");
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    let tinted = clips.iter().find(|c| c["id"] == copy.as_str()).unwrap();
+    let keys = tinted["videoEffects"][0]["keys"]["amount"].as_array().cloned().unwrap_or_default();
+    assert_eq!(keys.len(), 2, "{tinted}");
+    assert_eq!(keys[0]["value"].as_f64(), Some(0.0));
+    assert!((keys[1]["at"].as_f64().unwrap() - 0.5).abs() < 0.02 && keys[1]["value"].as_f64() == Some(90.0), "{tinted}");
+    // steady again: no keys
+    session.body_tint_rise(main_id, 0, 90.0).expect("steady");
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    let tinted = clips.iter().find(|c| c["id"] == copy.as_str()).unwrap();
+    assert!(tinted["videoEffects"][0]["keys"]["amount"].as_array().is_none_or(|k| k.is_empty()), "{tinted}");
+}
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg"]
+fn a_light_casts_the_persons_shadow_away_from_it() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Shadow".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let photo = std::path::Path::new(&made.path).join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    let media = session.import(photo.to_string_lossy().into_owned()).unwrap();
+    session.add_to_main(vec![media.id.clone()], 0).unwrap();
+    let person = session.add_overlay(media.id, 0).unwrap().created_id;
+    // a light high on the left: the shadow falls right and down
+    let first = session.cast_shadow(person.clone(), 0.15, 0.1, 0.9).expect("cast").created_id;
+    assert!(!first.is_empty());
+    session.cast_shadow(person.clone(), 0.15, 0.1, 0.9).expect("cast again");
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    let shadows: Vec<&serde_json::Value> = clips.iter().filter(|c| c["blend"] == "multiply").collect();
+    assert_eq!(shadows.len(), 1, "the second light's shadow is in place of the first: {doc}");
+    let shadow = shadows[0];
+    assert!(shadow["offsetX"].as_f64().unwrap_or(0.0) > 0.02 && shadow["offsetY"].as_f64().unwrap_or(0.0) > 0.01, "{shadow}");
+    assert!(shadow["videoEffects"].as_array().unwrap().iter().any(|e| e["id"] == "concat.gaussian-blur"));
+    let kept: serde_json::Value = serde_json::from_str(&session.extra(crate::atmosphere::SHADOWS.to_owned())).unwrap();
+    assert_eq!(kept[&person], shadow["id"]);
+    // the person stands in front of their shadow
+    let view = session.view();
+    let row_of = |id: &str| view.rows.iter().position(|r| r.clips.iter().any(|c| c.id == id)).unwrap();
+    assert!(row_of(&person) > row_of(shadow["id"].as_str().unwrap()), "rows are listed from the bottom up");
+}

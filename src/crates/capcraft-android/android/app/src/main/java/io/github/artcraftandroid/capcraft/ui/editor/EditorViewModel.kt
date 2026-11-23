@@ -919,6 +919,14 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     /** Every beat on the timeline, for edges to snap to. */
     fun allBeatTimes(): List<Long> = timeline?.rows.orEmpty().flatMap { r -> r.clips.flatMap { beatTimes(it) } }
 
+    /** Turns [clip]'s cutout round: the background kept and the subject taken away, or back the usual way. */
+    fun invertCutout(clip: ClipView) {
+        val cutout = clipJson(clip.id)?.optJSONObject("cutout") ?: return
+        val inverted = !cutout.optBoolean("invert", false)
+        command(JSONObject().put("op", "setClipCutout").put("clipId", clip.id).put("cutout", cutout.put("invert", inverted)))
+        message = if (inverted) "The person is taken away, the background kept" else "The background is taken away again"
+    }
+
     /** Cuts the main track's clips so each change lands on one of the timeline's beat marks. */
     fun fitClipsToBeats() {
         val beats = allBeatTimes().distinct().sorted()

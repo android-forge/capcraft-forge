@@ -375,6 +375,10 @@ private fun clipSubTools(vm: EditorViewModel, clip: ClipView, level: String): Li
         Tool("changebg", "Change BG", LucideIcons.ImagePlus, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
             vm.panel = Panel.Background(0)
         },
+        // the background kept and the person taken away instead, or back again
+        Tool("invertcut", "Invert", LucideIcons.Contrast, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
+            vm.invertCutout(clip)
+        },
     )
     else -> emptyList()
 }

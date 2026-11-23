@@ -482,6 +482,7 @@ mod tests {
                 size: 0.5,
                 points: vec![[0.5, 0.5]],
             }],
+            invert: false,
         };
         assert_eq!(
             store.resolved(0.0, &custom, 1.0).map(|m| m.at(8, 8)),
@@ -515,6 +516,7 @@ mod tests {
                 size: 0.5,
                 points: vec![[0.5, 0.5]],
             }],
+            invert: false,
         };
         assert_eq!(
             store.resolved(0.0, &painted, 1.0).map(|m| m.at(8, 8)),

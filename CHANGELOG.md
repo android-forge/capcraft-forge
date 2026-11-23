@@ -39,16 +39,16 @@ dated, as the licence asks; `#` numbers are the original project's.
   voices that look them up.
 - Graphics: 20,236 emoji, stickers, icons, flags, logos and shapes for video, kept in the app and found by words without the
   internet; `graphics/build.py` packs them. Timing: when a graphic, title or overlay comes on and goes.
-- Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA, and Pexels and Unsplash with a key of
-  one's own. Stock videos and meme pictures beside them, narrowed to any of twelve languages of India: public domain films from
-  1965 and before on the Internet Archive, Commons, Openverse, and Pexels and Pixabay with a key; only what may be changed and
-  used commercially (public domain, CC0, CC BY credited, and the sites' own licences). Among the memes, GIPHY GIFs (silent
-  videos, credited, "Powered by GIPHY", with a key of one's own) and Imgflip's most used templates, whose makers keep their
-  rights: their use is the user's to judge. Pexels videos among the memes too. tamilmemes.co.in, indianmemetemplates.com,
-  memes.co.in, videomemes.in and memestamil.in open in the browser, as their downloads go through their own pages. YouTube and Klipy are left out, as their
-  API terms forbid keeping copies.
+- Stock photos, full HD or better, searched on the import page: Wikimedia Commons, NASA and Unsplash (with a key of one's own).
+  Stock videos beside them, narrowed to any of twelve languages of India: public domain films from 1965 and before on the
+  Internet Archive, and Commons videos; only what may be changed and used commercially.
 - Beats: the main track's clips cut so each change lands on a beat, or all made one length, in one tap.
-- Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down.
+- Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down. Light
+  laid in 3D puts the people in front of it and casts their shadow away from it; 2D lays it flat, as before. The last
+  Golden light settings (glow 80, warm photo 66) are the defaults.
+- People in colour: Body effects turn the people grey, or tint them (angry red, cold blue, sick green), with the amount
+  set and grown from the clip's start to the playhead. A Tint effect does it.
+- Remove background: Invert keeps the background and takes the person away.
 - Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
   to go in. A video shared to the app may be made one.
 - Golden light in Atmosphere: rays, lights and window beams yellow, and the picture warmed by them; the colour (golden,
