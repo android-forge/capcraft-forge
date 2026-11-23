@@ -201,6 +201,7 @@ private val SHORTCUTS = listOf(
     Shortcut("highlight", "Auto highlight", LucideIcons.Sparkles),
     Shortcut("screen", "Screen record", LucideIcons.Film),
     Shortcut("reel", "Reel to template", LucideIcons.LayoutTemplate),
+    Shortcut("templates", "Templates", LucideIcons.Sparkles),
 )
 
 /** Photo tools' list: each a tool, with what it does in a line. */
@@ -380,6 +381,7 @@ fun HomeScreen(
     }
 
     var audioTools by remember { mutableStateOf(false) }
+    var builtins by remember { mutableStateOf(false) }
     var photoTools by remember { mutableStateOf(false) }
     // Shoot and record: the phone's camera records into our cache, and what it records starts a project
     var capture by remember { mutableStateOf<Uri?>(null) }
@@ -501,6 +503,7 @@ fun HomeScreen(
                                 "screen" -> recordScreen()
                                 "audiotools" -> audioTools = true
                                 "phototools" -> photoTools = true
+                                "templates" -> builtins = true
                                 "reel" -> io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
                                     io.github.artcraftandroid.capcraft.ui.common.MediaKinds.VIDEO, multiple = false,
                                 ) { uris -> startProject(uris, "reel") }
@@ -549,6 +552,20 @@ fun HomeScreen(
             ToolsSheet("Audio tools", AUDIO_TOOLS, onClose = { audioTools = false }) { id ->
                 audioTools = false
                 shortcut(id, videoOnly = true)
+            }
+        }
+        if (builtins) {
+            val list = remember { runCatching { io.github.artcraftandroid.capcraft.core.builtinTemplates() }.getOrDefault(emptyList()) }
+            ToolsSheet("Templates", list.map { Triple("tpl:" + it.id, it.name, it.line + " " + if (it.places == 1u) "1 photo." else "${it.places} photos.") }, onClose = { builtins = false }) { id ->
+                builtins = false
+                scope.launch {
+                    runCatching {
+                        withContext(Threads.commands) {
+                            val existing = projects ?: runCatching { listProjects() }.getOrDefault(emptyList())
+                            createProject(newProjectName(existing), 1080u, 1920u, 30u)
+                        }
+                    }.onSuccess { edit(it.path, emptyList(), id) }.onFailure { message = it.userMessage }
+                }
             }
         }
         if (photoTools) {
@@ -778,7 +795,10 @@ private fun ToolsSheet(title: String, tools: List<Triple<String, String, String>
             .background(Brush.verticalGradient(Home.Wash))
             .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {},
     ) {
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().navigationBarsPadding().padding(start = 24.dp, end = 24.dp, bottom = 24.dp)) {
+        Column(
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().statusBarsPadding().navigationBarsPadding()
+                .verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+        ) {
             Text(title, style = ink(22f, FontWeight.Bold))
             Spacer(Modifier.height(18.dp))
             tools.forEach { (id, name, line) ->
@@ -795,7 +815,7 @@ private fun ToolsSheet(title: String, tools: List<Triple<String, String, String>
                                 "collage" -> LucideIcons.LayoutTemplate
                                 "lighting" -> LucideIcons.Lightbulb
                                 "framecapture" -> LucideIcons.ImagePlay
-                                else -> LucideIcons.AudioLines
+                                else -> if (id.startsWith("tpl:")) LucideIcons.LayoutTemplate else LucideIcons.AudioLines
                             },
                             Home.Ink,
                             size = 22.dp,

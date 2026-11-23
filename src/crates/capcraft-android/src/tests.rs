@@ -1999,3 +1999,54 @@ fn a_reel_becomes_a_template() {
     let sounds = view.rows.iter().filter(|row| row.kind == RowKind::Audio).map(|row| row.clips.len()).sum::<usize>();
     assert_eq!(sounds, 2);
 }
+
+/// Every built-in template laid out on a project, its places filled with a
+/// photo: each keeps its length, and the photo fills the frame and moves.
+#[test]
+#[ignore = "needs a photo"]
+fn a_builtin_template_is_laid_out_and_filled() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    for t in crate::templates::builtin_templates() {
+        let made = create_project(t.name.clone(), 1080, 1920, 30).expect("made");
+        let session = MobileSession::open(made.path.clone()).expect("opened");
+        let media = std::path::Path::new(&made.path).join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let mut files = std::collections::HashMap::new();
+        for n in 1..=t.places {
+            let file = media.join(format!("template-place-{n}.png"));
+            crate::session::write_png(&file, &crate::Picture { width: 108, height: 192, rgba: vec![120; 108 * 192 * 4] }).unwrap();
+            files.insert(format!("p{n}"), file.to_string_lossy().into_owned());
+        }
+        for g in &t.graphics {
+            let file = media.join(format!("sticker-template-{g}.png"));
+            crate::session::write_png(&file, &crate::Picture { width: 64, height: 64, rgba: vec![255; 64 * 64 * 4] }).unwrap();
+            files.insert(g.clone(), file.to_string_lossy().into_owned());
+        }
+        session.build_template(t.id.clone(), files).unwrap_or_else(|e| panic!("{}: {e}", t.id));
+        let before: Vec<i64> = session.slots().iter().map(|s| s.duration_us).collect();
+        assert_eq!(before.len() as u32, t.places, "{}", t.id);
+        let photo = std::path::Path::new(&made.path).join("media").join("photo.jpg");
+        std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+        for slot in session.slots() {
+            session
+                .fill_slot(slot.clip_id.clone(), photo.to_string_lossy().into_owned(), true, true)
+                .unwrap_or_else(|e| panic!("{} {}: {e}", t.id, slot.clip_id));
+        }
+        let after = session.slots();
+        assert!(after.iter().all(|s| s.filled), "{}: {after:?}", t.id);
+        for (a, b) in before.iter().zip(after.iter().map(|s| s.duration_us)) {
+            assert!((a - b).abs() < 40_000, "{} {before:?}", t.id);
+        }
+        // the landscape photo fills a tall frame: it is drawn well over its fitted size
+        let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+        let first = &after[0].clip_id;
+        let clip = doc.to_string();
+        assert!(clip.contains(first), "{}", t.id);
+        let clips = doc.get("clips").or_else(|| doc.pointer("/timelines/0/clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+        let c = clips.iter().find(|c| c.get("id").and_then(|i| i.as_str()) == Some(first)).expect("the first place");
+        let biggest = c.get("keys").and_then(|k| k.as_array()).map(|keys| keys.iter().filter(|k| k["property"] == "scale").map(|k| k["value"].as_f64().unwrap_or(0.0)).fold(0.0, f64::max)).unwrap_or(0.0);
+        let scale = c.get("scale").and_then(|s| s.as_f64()).unwrap_or(0.0).max(biggest);
+        assert!(scale > 1.4, "{}: {c}", t.id);
+    }
+}

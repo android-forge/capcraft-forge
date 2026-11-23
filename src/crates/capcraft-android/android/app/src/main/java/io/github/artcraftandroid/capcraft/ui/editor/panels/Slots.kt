@@ -118,7 +118,16 @@ fun SlotsPanel(vm: EditorViewModel) {
                 }
             }
             filling = null
-            result.onSuccess { vm.applyView(it) }.onFailure { vm.message = it.userMessage }
+            result.onSuccess { view ->
+                vm.applyView(view)
+                // what the template puts behind the person, now there is one
+                val behind = runCatching { org.json.JSONObject(s.extra("capcraftReel")).optJSONArray("behind") }.getOrNull()
+                if (behind != null && behind.length() > 0) {
+                    working = "Finding the people"
+                    for (i in 0 until behind.length()) putBehindPeople(vm, behind.optString(i))
+                    working = null
+                }
+            }.onFailure { vm.message = it.userMessage }
         }
     }
 

@@ -157,10 +157,11 @@ impl MobileSession {
             let Some(main) = timeline.tracks.first() else {
                 return Ok(Vec::new());
             };
+            let registered = kept.get("slots").and_then(Value::as_object);
             let mut clips: Vec<_> = timeline
                 .clips
                 .iter()
-                .filter(|clip| clip.track_id == main.id)
+                .filter(|clip| clip.track_id == main.id || registered.is_some_and(|slots| slots.contains_key(&clip.id)))
                 .collect();
             clips.sort_by(|a, b| a.start.total_cmp(&b.start));
             Ok(clips
@@ -220,11 +221,10 @@ impl MobileSession {
             Ok((clip.duration, (settings.width, settings.height)))
         })?;
         let replaced = self.replace_media(clip_id.clone(), path)?;
-        let here = if replaced.created_id.is_empty() {
-            clip_id.clone()
-        } else {
-            replaced.created_id
-        };
+        // a picture of another kind is a new clip; the same kind keeps its own
+        let here = Some(replaced.created_id)
+            .filter(|id| !id.is_empty() && replaced.rows.iter().any(|row| row.clips.iter().any(|c| &c.id == id)))
+            .unwrap_or_else(|| clip_id.clone());
 
         // a video shorter than its place is slowed to fill it
         let (now, speed) = self.with_session(|session| {
@@ -289,20 +289,42 @@ impl MobileSession {
             .and_then(|slots| slots.get(&clip_id))
             .cloned()
             .unwrap_or_else(|| json!({}));
-        for property in ["scale", "offsetX", "offsetY"] {
+        for property in ["scale", "offsetX", "offsetY", "rotation", "opacity"] {
             commands.extend(command(json!({
                 "op": "clearClipKeys", "clipId": here, "property": property,
             })));
         }
+        // a built-in template's place: its framing, keys and effects
+        let base = slot.get("base").cloned();
+        let of = |v: &Option<Value>, k: &str, d: f64| v.as_ref().and_then(|b| b.get(k)).and_then(Value::as_f64).unwrap_or(d);
+        let sized = if base.as_ref().and_then(|b| b.get("fit")).and_then(Value::as_str) == Some("contain") {
+            of(&base, "k", 1.0)
+        } else {
+            cover * of(&base, "k", 1.0)
+        };
         commands.push(Command::SetClipTransform {
             clip_id: here.clone(),
-            scale: Some(cover),
-            offset_x: Some(0.0),
-            offset_y: Some(middle),
-            rotation: None,
+            scale: Some(sized),
+            offset_x: Some(of(&base, "x", 0.0)),
+            offset_y: Some(if base.is_some() { of(&base, "y", 0.0) } else { middle }),
+            rotation: Some(of(&base, "rotation", 0.0)),
             stretch_x: None,
             stretch_y: None,
         });
+        if moves {
+            for k in slot.get("keys").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let (property, at, value) = (
+                    k.get(0).and_then(Value::as_str).unwrap_or_default().to_owned(),
+                    k.get(1).and_then(Value::as_f64).unwrap_or(0.0),
+                    k.get(2).and_then(Value::as_f64).unwrap_or(0.0),
+                );
+                let value = if property == "scale" { value * sized } else { value };
+                commands.extend(command(json!({
+                    "op": "setClipKey", "clipId": here, "property": property,
+                    "at": at.clamp(0.0, 1.0), "value": value, "ease": [0.16, 1.0, 0.3, 1.0],
+                })));
+            }
+        }
         // a video has moves of its own: only those an editor made are put on it
         let edited = slot.get("edited").and_then(Value::as_bool).unwrap_or(false);
         let path_of = slot
@@ -325,7 +347,7 @@ impl MobileSession {
                 }
             }
         }
-        let mut looks = Vec::new();
+        let mut looks: Vec<Value> = slot.get("fx").and_then(Value::as_array).cloned().unwrap_or_default();
         if moves && slot.get("shakes").and_then(Value::as_bool).unwrap_or(false) {
             looks.push(json!({"id": "capcraft.shake", "params": {"amount": 14}}));
         }

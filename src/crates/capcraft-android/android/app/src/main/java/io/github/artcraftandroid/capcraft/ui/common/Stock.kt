@@ -106,7 +106,7 @@ internal enum class StockSite(val title: String, val keyPage: String? = null, va
 /** Photos from stock sites, searched from the import page. Only those at least full HD are shown. */
 internal object Stock {
     /** Names the app, and nobody who uses it. */
-    private const val AGENT = "CapCraftForge/1.0 (Android video editor)"
+    private const val AGENT = "CapCraftForge/1.0 (https://github.com/artcraft-android/capcraft-android; Android video editor)"
     private const val FILE = "capcraft-stock"
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -245,8 +245,17 @@ internal object Stock {
         val file = File(dir, photo.id.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".jpg")
         if (file.length() > 0) return file
         val part = File(dir, file.name + ".part")
-        val c = open(photo.full)
+        // a site asking for a pause is given one, twice at the most
+        var c = open(photo.full)
+        for (wait in listOf(3L, 8L)) {
+            if (c.responseCode != 429 && c.responseCode != 503) break
+            val asked = c.getHeaderField("Retry-After")?.toLongOrNull()?.coerceIn(1, 15) ?: wait
+            c.disconnect()
+            Thread.sleep(asked * 1000)
+            c = open(photo.full)
+        }
         try {
+            if (c.responseCode == 429) throw IOException("The site is busy. Try that photo again in a minute.")
             if (c.responseCode != 200) throw IOException("That photo could not be fetched (${c.responseCode}).")
             val total = c.contentLengthLong
             if (total > 80L * 1024 * 1024) throw IOException("That photo is too large.")

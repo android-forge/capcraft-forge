@@ -84,3 +84,30 @@ private fun listenerFor(vm: EditorViewModel, scope: kotlinx.coroutines.Coroutine
         }
     }
 }
+
+/**
+ * [clipId] (a title, a graphic, or a picture laid over another) put behind the person of the main-track
+ * picture under it, as [toggleBehindPeople] does, waiting for the people to be found. Nothing when there
+ * are none.
+ */
+internal suspend fun putBehindPeople(vm: EditorViewModel, clipId: String) {
+    val s = vm.session ?: return
+    val clip = vm.clip(clipId) ?: return
+    val main = vm.timeline?.rows?.firstOrNull { it.kind == RowKind.MAIN }?.clips
+        ?.firstOrNull { clip.startUs + 1 >= it.startUs && clip.startUs < it.startUs + it.durationUs } ?: return
+    var copy = bodyOf(vm, main.id)?.first
+    if (copy == null) {
+        val done = kotlinx.coroutines.CompletableDeferred<TimelineView?>()
+        val listener = object : SpeechListener {
+            override fun onProgress(fraction: Float, stage: String) {}
+            override fun onDone(result: TimelineView?) { done.complete(result) }
+            override fun onFailed(message: String) { done.complete(null) }
+        }
+        withContext(Threads.commands) { runCatching { s.bodyEffect(main.id, "front", listener) }.onFailure { done.complete(null) } }
+        val view = done.await() ?: return
+        vm.applyView(view)
+        copy = bodyOf(vm, main.id)?.first ?: return
+    }
+    val placed = withContext(Threads.commands) { runCatching { s.placePersonOver(copy, clipId) } }
+    placed.onSuccess { vm.applyView(it) }
+}

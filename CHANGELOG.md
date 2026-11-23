@@ -54,4 +54,7 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Titles and graphics can go behind the person; graphics take effects; modern animations with a reel's easing; reel title
   styles in twelve new faces (SIL Open Font License).
 - The README shows what is this build's own.
+- Built-in templates on Home: thirteen reel looks (Year Roll, Day Count, Halo Circle, Frame and Heart, Depth Slide, Split
+  Reveal, Wide Roll, Velocity, Flash & Shake, Glow Rush, Seamless Zoom, Into the Eye), each with places for one's own
+  photos and videos and titles to type over. Stock photos are tried again when a site asks for a pause.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

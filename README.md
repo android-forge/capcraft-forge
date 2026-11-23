@@ -159,6 +159,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 | A project as a file, and a file opened as a project; a project used as a template | ✅ |
 | Reel to template: a finished video's cuts, transitions, moves, shake, flashes, framing and sound read on the phone, for your own photos and videos to go in, in its colours | ✅ |
 | Reel to template reads the words it shows as titles, and parts its voice from its music | ✅ |
+| Built-in templates: thirteen reel looks with places for your own photos, titles to type over | ✅ |
 | Screen recording, a Home screen widget, and live photos in and out | ✅ |
 
 ### Export

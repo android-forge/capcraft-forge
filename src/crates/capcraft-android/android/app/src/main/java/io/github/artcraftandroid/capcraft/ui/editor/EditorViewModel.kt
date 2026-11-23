@@ -220,6 +220,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 exportGif = false
             }
             when {
+                then?.startsWith("tpl:") == true -> startBuiltin(then.removePrefix("tpl:"))
                 incoming.isEmpty() -> {}
                 then == "collage" -> startCollage(incoming)
                 then == "autocut" -> startAutoCut(incoming)
@@ -314,6 +315,31 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 timeline = v
                 scheduleSave()
                 message = "Your video is ready - change anything you like"
+            }.onFailure { fail(it) }
+        }
+    }
+
+    /** A built-in template laid out on this new project, its places then shown to be filled. */
+    private fun startBuiltin(id: String) {
+        val s = session ?: return
+        viewModelScope.launch {
+            busy = "Laying out the template"
+            val result = withContext(Threads.commands) {
+                runCatching {
+                    val t = io.github.artcraftandroid.capcraft.core.builtinTemplates().first { it.id == id }
+                    val dir = java.io.File(path, "media").apply { mkdirs() }
+                    val files = HashMap<String, String>()
+                    for (n in 1..t.places.toInt()) files["p$n"] = io.github.artcraftandroid.capcraft.engine.Builtins.placeholder(dir, n)
+                    t.graphics.forEach { files[it] = io.github.artcraftandroid.capcraft.engine.Builtins.graphic(dir, it) }
+                    s.buildTemplate(id, files)
+                }
+            }
+            busy = null
+            result.onSuccess { v ->
+                timeline = v
+                scheduleSave()
+                panel = Panel.Slots
+                message = "Put your photos in, then type over the words"
             }.onFailure { fail(it) }
         }
     }
