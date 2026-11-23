@@ -2050,3 +2050,53 @@ fn a_builtin_template_is_laid_out_and_filled() {
         assert!(scale > 1.4, "{}: {c}", t.id);
     }
 }
+
+#[test]
+#[ignore = "needs REEL_DIR with B.mp4"]
+fn beat_flash_cuts_on_the_beat_with_white_panels() {
+    // (a reverse is not made here: a phone's encoder wants the app's Android context)
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Beat Flash".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let media = std::path::Path::new(&made.path).join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    let mut files = std::collections::HashMap::new();
+    for n in 1..=8 {
+        let file = media.join(format!("template-place-{n}.png"));
+        crate::session::write_png(&file, &crate::Picture { width: 108, height: 192, rgba: vec![120; 108 * 192 * 4] }).unwrap();
+        files.insert(format!("p{n}"), file.to_string_lossy().into_owned());
+    }
+    for g in ["panel-right", "panel-left", "panel-bottom", "panel-top"] {
+        let file = media.join(format!("sticker-template-{g}.png"));
+        crate::session::write_png(&file, &crate::Picture { width: 108, height: 192, rgba: vec![255; 108 * 192 * 4] }).unwrap();
+        files.insert(g.to_owned(), file.to_string_lossy().into_owned());
+    }
+    session.build_template("beat-flash".to_owned(), files).expect("built");
+    let kept: serde_json::Value = serde_json::from_str(&session.extra("capcraftReel".to_owned())).unwrap();
+    let slots = session.slots();
+    assert_eq!(slots.len(), 8);
+    // every second place plays its video backwards
+    let backwards: Vec<bool> = slots.iter().map(|s| kept["slots"][&s.clip_id]["reverse"].as_bool().unwrap_or(false)).collect();
+    assert_eq!(backwards, [false, true, false, true, false, true, false, true]);
+    // a video in a forward place, a photo in a backward one: neither is reversed
+    let video = media.join("B.mp4");
+    std::fs::copy(std::path::Path::new(&dir).join("B.mp4"), &video).unwrap();
+    let photo = media.join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    session.fill_slot(slots[0].clip_id.clone(), video.to_string_lossy().into_owned(), true, false).expect("video");
+    session.fill_slot(slots[1].clip_id.clone(), photo.to_string_lossy().into_owned(), true, false).expect("photo");
+    let after = session.slots();
+    assert!(after[..2].iter().all(|s| s.filled), "{after:?}");
+    assert!((after[0].duration_us - 900_000).abs() < 40_000, "{after:?}");
+    let text = session.document();
+    assert!(!text.contains("reverse-"), "nothing reversed");
+    // a white flash on each of the seven cuts
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    // two white panels on the beats of each of the eight shots, from four pictures
+    let medias: std::collections::HashSet<&str> = clips.iter().filter(|c| c["kind"] == "sticker" || c["kind"] == "image").filter(|c| c["duration"].as_f64().is_some_and(|d| (d - 0.2).abs() < 0.01)).filter_map(|c| c["mediaId"].as_str()).collect();
+    let panels = clips.iter().filter(|c| c["duration"].as_f64().is_some_and(|d| (d - 0.2).abs() < 0.01)).count();
+    assert_eq!(panels, 16, "{text}");
+    assert_eq!(medias.len(), 4, "{medias:?}");
+}

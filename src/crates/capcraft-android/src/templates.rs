@@ -37,6 +37,8 @@ struct Place {
     keys: Vec<(&'static str, f64, f64)>,
     /// Effects the picture in it carries.
     fx: Vec<Value>,
+    /// A video put here plays backwards.
+    reverse: bool,
 }
 
 fn cover() -> Place {
@@ -59,7 +61,7 @@ pub struct BuiltinTemplate {
     pub line: String,
     /// How many photos or videos it takes.
     pub places: u32,
-    /// The graphics it wants drawn, by name: "ring", "frame", "heart".
+    /// The graphics it wants drawn, by name: "ring", "frame", "heart", or a white half "panel-…".
     pub graphics: Vec<String>,
 }
 
@@ -89,6 +91,7 @@ pub fn builtin_templates() -> Vec<BuiltinTemplate> {
         entry("flash-shake", "Flash & Shake", "Hard flashes and a shaken camera.", 3, &[]),
         entry("glow-rush", "Glow Rush", "A glowing, colour-split edit in an anime style.", 4, &[]),
         entry("seamless-zoom", "Seamless Zoom", "Each photo zooms into the next.", 4, &[]),
+        entry("beat-flash", "Beat Flash", "Punch zooms and reversed moves, with white panels flashing on the beat.", 8, &["panel-right", "panel-left", "panel-bottom", "panel-top"]),
         entry("into-the-eye", "Into the Eye", "A deep zoom into a face, then the next shot.", 2, &[]),
     ]
 }
@@ -129,13 +132,30 @@ fn rise() -> Vec<(&'static str, f64, f64)> {
     vec![("opacity", 0.0, 0.0), ("opacity", 0.15, 1.0)]
 }
 
+/// A graphic of the template: which, when, how big, where, its keys, and
+/// whether it goes behind the person.
+struct Graphic {
+    name: &'static str,
+    at: f64,
+    length: f64,
+    scale: f64,
+    x: f64,
+    y: f64,
+    keys: Vec<(&'static str, f64, f64)>,
+    behind: bool,
+}
+
+fn graphic(name: &'static str, at: f64, length: f64, scale: f64, keys: Vec<(&'static str, f64, f64)>, behind: bool) -> Graphic {
+    Graphic { name, at, length, scale, x: 0.0, y: -0.05, keys, behind }
+}
+
 /// A whole template: its places on the main track, places over them, titles,
 /// graphics, short flashes and the joins between the main places.
 struct Plan {
     main: Vec<(f64, Place, Option<(&'static str, f64)>)>,
     over: Vec<(f64, f64, Place, bool)>,
     titles: Vec<Title>,
-    graphics: Vec<(&'static str, f64, f64, f64, Vec<(&'static str, f64, f64)>, bool)>,
+    graphics: Vec<Graphic>,
     layers: Vec<(&'static str, f64, f64, Value)>,
 }
 
@@ -170,7 +190,7 @@ fn plan(id: &str) -> Option<Plan> {
             Plan { main: vec![one(4.5, 1.0, 1.06)], titles: vec![number, day, series], layers: vec![flash(0.2)], ..empty }
         }
         "halo-circle" | "halo-frame" | "halo-heart" => {
-            let graphic = match id {
+            let name = match id {
                 "halo-circle" => "ring",
                 "halo-frame" => "frame",
                 _ => "heart",
@@ -180,7 +200,7 @@ fn plan(id: &str) -> Option<Plan> {
             words.keys = rise();
             Plan {
                 main: vec![one(4.5, 1.0, 1.05)],
-                graphics: vec![(graphic, 0.2, 4.3, 0.9, pop, true)],
+                graphics: vec![graphic(name, 0.2, 4.3, 0.9, pop, true)],
                 titles: vec![words],
                 ..empty
             }
@@ -242,6 +262,23 @@ fn plan(id: &str) -> Option<Plan> {
             let deep = Place { keys: vec![("scale", 0.0, 1.0), ("scale", 1.0, 3.2), ("offsetY", 0.0, 0.0), ("offsetY", 1.0, 0.45)], fx: vec![json!({"id": "concat.glow", "params": {"amount": 35}})], ..cover() };
             Plan { main: vec![(2.6, deep, None), (1.8, Place { keys: breathe(1.2, 1.0), ..cover() }, Some(("capcraft.flash-zoom", 0.3)))], layers: vec![flash(2.5)], ..empty }
         }
+        "beat-flash" => {
+            // a shot a bar: punched out and settling, then pushed in with its video backwards
+            let shot = |i: usize| {
+                let back = i % 2 == 1;
+                let keys = if back { breathe(1.0, 1.26) } else { vec![("scale", 0.0, 1.45), ("scale", 0.2, 1.02), ("scale", 1.0, 1.0)] };
+                (0.9, Place { keys, reverse: back, ..cover() }, None)
+            };
+            // and on each beat in it a white panel over one half of the frame, round the halves
+            let halves = ["panel-right", "panel-left", "panel-bottom", "panel-top"];
+            let panels = (0..16)
+                .map(|n| {
+                    let at = (n / 2) as f64 * 0.9 + if n % 2 == 0 { 0.3 } else { 0.6 };
+                    Graphic { y: 0.0, ..graphic(halves[n % 4], at, 0.2, 1.0, vec![("opacity", 0.0, 1.0), ("opacity", 1.0, 0.6)], false) }
+                })
+                .collect();
+            Plan { main: (0..8).map(shot).collect(), graphics: panels, ..empty }
+        }
         _ => return None,
     })
 }
@@ -255,6 +292,7 @@ fn place_json(place: &Place) -> Value {
         "base": {"fit": place.fit, "k": place.k, "x": place.x, "y": place.y, "rotation": place.rotation},
         "keys": place.keys.iter().map(|(p, at, v)| json!([p, at, v])).collect::<Vec<_>>(),
         "fx": place.fx,
+        "reverse": place.reverse,
         "filled": false,
         "edited": true,
     })
@@ -343,17 +381,25 @@ impl MobileSession {
         }
 
         // graphics
-        for (name, at, length, scale, keys, is_behind) in &plan.graphics {
-            let media = self.import(file(name)?)?;
-            let made = self.add_sticker(media.id, micros(*at), micros(*length))?.created_id;
+        let mut imported: HashMap<&str, String> = HashMap::new();
+        for g in &plan.graphics {
+            let media = match imported.get(g.name) {
+                Some(id) => id.clone(),
+                None => {
+                    let id = self.import(file(g.name)?)?.id;
+                    imported.insert(g.name, id.clone());
+                    id
+                }
+            };
+            let made = self.add_sticker(media, micros(g.at), micros(g.length))?.created_id;
             if made.is_empty() {
                 continue;
             }
-            commands.push(json!({"op": "setClipTransform", "clipId": made, "scale": scale, "offsetX": 0.0, "offsetY": -0.05}));
-            for (p, at, v) in keys {
-                commands.push(key(&made, p, *at, if *p == "scale" { v * scale } else { *v }));
+            commands.push(json!({"op": "setClipTransform", "clipId": made, "scale": g.scale, "offsetX": g.x, "offsetY": g.y}));
+            for (p, at, v) in &g.keys {
+                commands.push(key(&made, p, *at, if *p == "scale" { v * g.scale } else { *v }));
             }
-            if *is_behind {
+            if g.behind {
                 behind.push(json!(made));
             }
         }
@@ -393,8 +439,8 @@ mod tests {
         for t in builtin_templates() {
             let plan = plan(&t.id).unwrap_or_else(|| panic!("{}", t.id));
             assert_eq!((plan.main.len() + plan.over.len()) as u32, t.places, "{}", t.id);
-            for (name, ..) in &plan.graphics {
-                assert!(t.graphics.iter().any(|g| g == name), "{}", t.id);
+            for g in &plan.graphics {
+                assert!(t.graphics.iter().any(|name| name == g.name), "{}", t.id);
             }
         }
         let _ = HashMap::<String, String>::new();

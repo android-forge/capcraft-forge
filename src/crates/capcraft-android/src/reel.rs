@@ -372,13 +372,17 @@ impl MobileSession {
             let mut slot = slot;
             slot["filled"] = json!(true);
             slots.remove(&clip_id);
-            slots.insert(here, slot);
+            slots.insert(here.clone(), slot);
         }
+        let backwards = !still && moves && slot_reverse(&kept, &here);
         commands.push(Command::SetTimelineExtra {
             key: REEL.to_owned(),
             value: Some(kept),
         });
-        self.run(commands)
+        let view = self.run(commands)?;
+        // a place that plays backwards, as the template's beat wants; the
+        // place is filled all the same when the copy cannot be made
+        if backwards { Ok(self.reverse(here).unwrap_or(view)) } else { Ok(view) }
     }
 
     /// Reads the words the reel shows, on a thread of its own (the finder
@@ -1006,4 +1010,9 @@ impl MobileSession {
                 .ok_or_else(|| MobileError::Failed("There is no shot there.".to_owned()))
         })
     }
+}
+
+/// Whether the place `clip` of a kept reel plays its video backwards.
+fn slot_reverse(kept: &Value, clip: &str) -> bool {
+    kept.get("slots").and_then(|slots| slots.get(clip)).and_then(|slot| slot.get("reverse")).and_then(Value::as_bool).unwrap_or(false)
 }
