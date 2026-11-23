@@ -3,11 +3,22 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
-## Unreleased
+## 0.0.6 (23 November 2026)
 
 ### 23 November 2026
 - An icon of its own: a white CF, the C's top running on into the F, and a spark struck off it, on a plum-to-ember
   tile; one colour for themed icons. Its source is `docs/images/forge-icon.svg`. CapCraft's camera is gone.
+- Playback first: the copies written after an import (the scrub copy every video gets, the proxy a large one does)
+  stop while the player plays and give their decoder back until it stops. A 4K clip played at one or two frames a
+  second while its copy was written, and at sixty alone.
+- A copy of a video larger than 720p is decoded on the phone's video chip, on two threads where it cannot be; each
+  video's proxy is written first and its scrub copy made from it, so a 4K file is read once, not twice.
+- "Preparing clips · 3 of 11 ready" over the preview while the copies are written.
+- A new project is as sharp as the sharpest clip put on with it (1080 on the short side at most): a 480p clip first
+  no longer makes a 480p project. The export asks by default for the sharpest clip's size, so 4K clips leave as 4K.
+- A prototype of zero-copy video (`src/crates/zerocopy-proto`, not part of the app): a phone's decoded frames
+  imported into Vulkan and wgpu with no copy through the CPU, at 159-162 frames a second of 4K against 45-47 on the
+  road the editor takes today.
 
 ## 0.0.5 (23 November 2026)
 
