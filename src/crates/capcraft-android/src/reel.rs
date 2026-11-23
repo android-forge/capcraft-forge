@@ -380,7 +380,12 @@ impl MobileSession {
                         let read = crate::objects::fetched(ModelId::WordsRead, &mut tell)?;
                         Words::load(&find, &read)?
                     };
-                    let titles = read_titles(&path, &mut words, &|f| {
+                    let cuts: Vec<f64> = kept
+                        .get("cuts")
+                        .and_then(Value::as_array)
+                        .map(|cuts| cuts.iter().filter_map(Value::as_f64).collect())
+                        .unwrap_or_default();
+                    let titles = read_titles(&path, &cuts, &mut words, &|f| {
                         listener.on_progress(0.2 + f * 0.75, "work".to_owned());
                         !STOP.load(Ordering::Relaxed)
                     })?;
@@ -436,10 +441,12 @@ impl MobileSession {
                     })
                 })();
                 let placed = made.map_err(MobileError::Failed).and_then(|(music, voice)| {
-                    let view = self.replace_media(sound.0.clone(), music.to_string_lossy().into_owned())?;
-                    let _ = view;
+                    self.replace_media(sound.0.clone(), music.to_string_lossy().into_owned())?;
                     let speech = self.import_sound(voice.to_string_lossy().into_owned())?;
-                    self.add_audio(speech.id, micros(sound.1))
+                    self.add_audio(speech.id, micros(sound.1))?;
+                    let mut kept = self.reel();
+                    kept["separated"] = json!(true);
+                    self.run(vec![Command::SetTimelineExtra { key: REEL.to_owned(), value: Some(kept) }])
                 });
                 match placed {
                     Ok(view) => listener.on_done(Some(view)),
@@ -557,7 +564,11 @@ struct Title {
 
 /// The lines of words the video in `path` shows, read twice a second and
 /// followed while they stay.
-fn read_titles(path: &str, words: &mut Words, step: &dyn Fn(f32) -> bool) -> Result<Vec<Title>, String> {
+///
+/// Words that are part of what was filmed - a sign, a shirt - stay with their
+/// shot; words put over a video stay as the shots change under them. With
+/// cuts in `cuts`, only those that stay over one are kept.
+fn read_titles(path: &str, cuts: &[f64], words: &mut Words, step: &dyn Fn(f32) -> bool) -> Result<Vec<Title>, String> {
     const EVERY: f64 = 0.5;
     let info = concat_media::probe(path).map_err(|error| error.to_string())?;
     let video = info.video.as_ref().ok_or("That file has no picture.")?;
@@ -570,7 +581,17 @@ fn read_titles(path: &str, words: &mut Words, step: &dyn Fn(f32) -> bool) -> Res
         .eight_bit(true)
         .threaded(4);
     let mut decoder = Decoder::open(path, &options).map_err(|error| error.to_string())?;
-    let mut titles: Vec<(Title, f64)> = Vec::new();
+    // each title as it is followed: its box, when, and every way it was read
+    struct Track {
+        rect: [f64; 4],
+        start: f64,
+        end: f64,
+        last: f64,
+        read: Vec<(String, u32)>,
+        ink: String,
+        outline: Option<String>,
+    }
+    let mut tracks: Vec<Track> = Vec::new();
     let mut at = 0.0;
     let wanted = (seconds / EVERY).max(1.0);
     let mut seen = 0.0;
@@ -587,22 +608,33 @@ fn read_titles(path: &str, words: &mut Words, step: &dyn Fn(f32) -> bool) -> Res
                 f64::from(r.x + r.width) / fw,
                 f64::from(r.y + r.height) / fh,
             ];
-            let same = titles.iter_mut().find(|(title, last)| {
-                (at - *last - EVERY).abs() < 0.01
-                    && title.text.eq_ignore_ascii_case(&line.text)
-                    && overlap(&title.rect, &rect) > 0.4
+            // the same title read again, a letter or two otherwise at times, after a gap of a second at most
+            let same = tracks.iter_mut().find(|track| {
+                at - track.last <= 1.01
+                    && at > track.last
+                    && overlap(&track.rect, &rect) > 0.4
+                    && track.read.iter().any(|(said, _)| alike(said, &line.text))
             });
             match same {
-                Some((title, last)) => {
-                    title.end = at + EVERY / 2.0;
-                    *last = at;
+                Some(track) => {
+                    track.end = at + EVERY / 2.0;
+                    track.last = at;
+                    match track.read.iter_mut().find(|(said, _)| *said == line.text) {
+                        Some((_, count)) => *count += 1,
+                        None => track.read.push((line.text, 1)),
+                    }
                 }
                 None => {
                     let (ink, outline) = colours(&frame, r);
-                    titles.push((
-                        Title { text: line.text, start: (at - EVERY / 2.0).max(0.0), end: at + EVERY / 2.0, rect, ink, outline },
-                        at,
-                    ));
+                    tracks.push(Track {
+                        rect,
+                        start: (at - EVERY / 2.0).max(0.0),
+                        end: at + EVERY / 2.0,
+                        last: at,
+                        read: vec![(line.text, 1)],
+                        ink,
+                        outline,
+                    });
                 }
             }
         }
@@ -612,7 +644,61 @@ fn read_titles(path: &str, words: &mut Words, step: &dyn Fn(f32) -> bool) -> Res
             return Err("Cancelled.".to_owned());
         }
     }
-    Ok(titles.into_iter().map(|(title, _)| title).filter(|t| t.end - t.start >= 0.5 || t.text.len() > 2).collect())
+    // readings of the same words in the same place, broken off for a while, are one title
+    tracks.sort_by(|a, b| a.start.total_cmp(&b.start));
+    let mut joined: Vec<Track> = Vec::new();
+    for track in tracks {
+        let words = track.read.iter().max_by_key(|(_, count)| *count).map(|(said, _)| said.clone()).unwrap_or_default();
+        let earlier = joined.iter_mut().find(|other| {
+            track.start - other.end <= 1.6
+                && overlap(&other.rect, &track.rect) > 0.4
+                && other.read.iter().any(|(said, _)| alike(said, &words))
+        });
+        match earlier {
+            Some(other) => {
+                other.end = other.end.max(track.end);
+                other.last = other.last.max(track.last);
+                for (said, count) in track.read {
+                    match other.read.iter_mut().find(|(have, _)| *have == said) {
+                        Some((_, have)) => *have += count,
+                        None => other.read.push((said, count)),
+                    }
+                }
+            }
+            None => joined.push(track),
+        }
+    }
+    Ok(joined
+        .into_iter()
+        .filter(|t| cuts.is_empty() || cuts.iter().any(|cut| t.start < cut - 0.2 && t.end > cut + 0.2))
+        .filter(|t| t.end - t.start >= 0.5)
+        .map(|t| Title {
+            // the way it was read most often
+            text: t.read.iter().max_by_key(|(_, count)| *count).map(|(said, _)| said.clone()).unwrap_or_default(),
+            start: t.start,
+            end: t.end,
+            rect: t.rect,
+            ink: t.ink,
+            outline: t.outline,
+        })
+        .collect())
+}
+
+/// Whether two readings are of the same words: alike but for a letter in
+/// four.
+fn alike(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.to_lowercase().chars().collect(), b.to_lowercase().chars().collect());
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut last = row[0];
+        row[0] = i;
+        for j in 1..=b.len() {
+            let here = row[j];
+            row[j] = (row[j] + 1).min(row[j - 1] + 1).min(last + usize::from(a[i - 1] != b[j - 1]));
+            last = here;
+        }
+    }
+    row[b.len()] * 4 <= a.len().max(b.len())
 }
 
 fn overlap(a: &[f64; 4], b: &[f64; 4]) -> f64 {
@@ -790,6 +876,14 @@ impl MobileSession {
     ) -> Result<TimelineView, MobileError> {
         let media = self.import(path.to_owned())?;
         self.add_to_main(vec![media.id.clone()], 0)?;
+        // its sound taken out to a row of its own, under the whole, before the shots are cut
+        let sound = concat_host::media::probe(path)
+            .map(|summary| summary.to_new_media().has_audio)
+            .unwrap_or(false);
+        if sound {
+            let whole = self.main_at(0.01)?;
+            self.extract_audio(whole)?;
+        }
         // the shots, and the cuts between them no nearer than the engine splits
         let starts: Vec<f64> = reading
             .shots
@@ -852,24 +946,13 @@ impl MobileSession {
         };
         commands.push(Command::SetTimelineExtra {
             key: REEL.to_owned(),
-            value: Some(json!({"slots": slots, "held": held, "worded": false, "band": band, "path": path})),
+            value: Some(json!({
+                "slots": slots, "held": held, "worded": false, "band": band, "path": path,
+                "cuts": reading.shots.iter().skip(1).map(|shot| shot.start).collect::<Vec<_>>(),
+            })),
         });
 
-        // the sound on a row of its own, under the whole, and the shots silent
-        let sound = concat_host::media::probe(path)
-            .map(|summary| summary.to_new_media().has_audio)
-            .unwrap_or(false);
-        if sound {
-            commands.extend(reading.shots.iter().filter_map(|shot| {
-                let clip = self.main_at((shot.start + shot.end) / 2.0).ok()?;
-                command(json!({"op": "updateClip", "clipId": clip, "patch": {"muted": true}}))
-            }));
-        }
         self.run(commands)?;
-        if sound {
-            let music = self.import_sound(path.to_owned())?;
-            self.add_audio(music.id, 0)?;
-        }
         // its pictures over a blur of themselves: so will the ones put in
         if matches!(reading.framing, Framing::Blurred { .. }) {
             self.set_background(json!({"kind": "blur", "level": 3}).to_string())?;

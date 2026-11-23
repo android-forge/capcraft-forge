@@ -47,7 +47,7 @@ dated, as the licence asks; `#` numbers are the original project's.
   sunset, warm white, pink, blue hour or the overlay's own), the glow and the warmth are the user's to set. An overlay's black
   is taken away before it is brightened, so it leaves the picture under it as it was.
 - Manners for text to audio: an epic narrator, a storyteller, an announcer and a calm voice.
-- Reel to template reads more: the words it shows (PaddleOCR, downloaded when wanted) as titles in their colour, size and
+- Reel to template reads more (tested on the phone): the words it shows (PaddleOCR, downloaded when wanted) as titles in their colour, size and
   outline; its voice and music on rows of their own; whether its pictures sit between bars or over a blur of themselves; and
   the media put in it take the colours of its own.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

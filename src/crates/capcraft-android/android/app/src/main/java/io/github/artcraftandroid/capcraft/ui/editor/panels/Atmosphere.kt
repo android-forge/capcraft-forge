@@ -311,7 +311,7 @@ internal fun golden(picture: Bitmap, seen: Seen, reach: Float, tint: Tint = TINT
     val far = 6f
     val glow = FloatArray(steps + 1) { i ->
         val d2 = i * far / steps
-        (glowing * (0.6 * exp(-d2 / (0.24 * 0.24)) + 0.26 * exp(-d2 / (0.7 * 0.7)))).toFloat()
+        (glowing * (0.6 * exp(-d2 / (0.24 * 0.24)) + 0.14 * exp(-d2 / (0.45 * 0.45)))).toFloat()
     }
     val cx = seen.heart * w
     val cy = seen.heartY * h

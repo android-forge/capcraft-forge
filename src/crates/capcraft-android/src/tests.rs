@@ -1921,3 +1921,81 @@ fn a_volume_key_plays_where_it_is_set() {
     assert_eq!(volume(0.5), 0.0);
     assert_eq!(volume(1.0), 0.0);
 }
+
+/// A reel read and laid out, filled with photos, its words read and its
+/// sound parted, on the phone: with test videos in `REEL_DIR` (B.mp4 with
+/// transitions, E.mp4 with words and a voice over music, and a photo).
+#[test]
+#[ignore = "needs the test videos and the network"]
+fn a_reel_becomes_a_template() {
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    struct Heard(Mutex<mpsc::Sender<Result<Option<crate::session::TimelineView>, String>>>);
+    impl crate::speech::SpeechListener for Heard {
+        fn on_progress(&self, _: f32, _: String) {}
+        fn on_done(&self, result: Option<crate::session::TimelineView>) {
+            let _ = self.0.lock().unwrap().send(Ok(result));
+        }
+        fn on_failed(&self, message: String) {
+            let _ = self.0.lock().unwrap().send(Err(message));
+        }
+    }
+    let wait = |job: &dyn Fn(Arc<dyn crate::speech::SpeechListener>)| {
+        let (tx, rx) = mpsc::channel();
+        job(Arc::new(Heard(Mutex::new(tx))));
+        rx.recv_timeout(std::time::Duration::from_secs(300)).expect("an answer").expect("done").expect("a view")
+    };
+    let copy = |name: &str, project: &str| {
+        let to = std::path::Path::new(project).join("media").join(name);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(std::path::Path::new(&dir).join(name), &to).expect("copied");
+        to.to_string_lossy().into_owned()
+    };
+
+    // the joins of the one with transitions
+    let made = create_project("Reel B".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let video = copy("B.mp4", &made.path);
+    let view = wait(&|listener| session.clone().make_from_reel(video.clone(), listener).expect("started"));
+    let main = &view.rows.iter().find(|row| row.kind == RowKind::Main).expect("main").clips;
+    assert_eq!(main.len(), 6, "{:?}", main.iter().map(|c| c.duration_us).collect::<Vec<_>>());
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).expect("document");
+    let ids: Vec<String> = doc.to_string().match_indices("\"transitionIn\":{\"duration\"").map(|_| String::new()).collect();
+    let joins: Vec<&str> = ["concat.dissolve", "capcraft.fade-black", "concat.push", "capcraft.fade-white", "concat.linear-wipe"]
+        .into_iter()
+        .filter(|id| doc.to_string().contains(id))
+        .collect();
+    assert_eq!(joins.len(), 5, "{joins:?} {}", ids.len());
+
+    // every place filled with a photo, each as long as before
+    let photo = copy("photo.jpg", &made.path);
+    let before: Vec<i64> = session.slots().iter().map(|s| s.duration_us).collect();
+    for slot in session.slots() {
+        session.fill_slot(slot.clip_id, photo.clone(), true, true).expect("filled");
+    }
+    let after = session.slots();
+    assert!(after.iter().all(|s| s.filled && s.path == photo), "{after:?}");
+    let lengths: Vec<i64> = after.iter().map(|s| s.duration_us).collect();
+    for (a, b) in before.iter().zip(&lengths) {
+        assert!((a - b).abs() < 40_000, "{before:?} {lengths:?}");
+    }
+    assert!(session.document().contains("capcraft.color-match"));
+
+    // the words of the other, and its voice parted from its music
+    let made = create_project("Reel E".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let video = copy("E.mp4", &made.path);
+    let view = wait(&|listener| session.clone().make_from_reel(video.clone(), listener).expect("started"));
+    assert!(view.rows.iter().any(|row| row.kind == RowKind::Audio));
+    let view = wait(&|listener| session.clone().read_reel_words(listener).expect("started"));
+    let doc = session.document();
+    assert!(doc.contains("SUMMER 2026") && doc.contains("@me"), "{}", &doc[..doc.len().min(3000)]);
+    let titles = view.rows.iter().filter(|row| row.kind == RowKind::Text).map(|row| row.clips.len()).sum::<usize>();
+    let said: Vec<String> = doc.match_indices("\"content\":\"").map(|(i, _)| doc[i + 11..].chars().take_while(|c| *c != '"').collect()).collect();
+    assert_eq!(titles, 2, "{said:?}");
+    let view = wait(&|listener| session.clone().separate_reel_sound(listener).expect("started"));
+    let sounds = view.rows.iter().filter(|row| row.kind == RowKind::Audio).map(|row| row.clips.len()).sum::<usize>();
+    assert_eq!(sounds, 2);
+}

@@ -146,7 +146,8 @@ fun SlotsPanel(vm: EditorViewModel) {
                     vm.message = "Titles added where the video had words"
                 }
             }
-            if (session?.extra("capcraftReel")?.contains("\"path\"") == true) Pick("Separate voice and music", false) {
+            val reel = remember(vm.timeline?.revision) { session?.extra("capcraftReel").orEmpty() }
+            if (reel.contains("\"path\"") && !reel.contains("\"separated\":true")) Pick("Separate voice and music", false) {
                 val s = session ?: return@Pick
                 if (working == null) {
                     working = "Starting"

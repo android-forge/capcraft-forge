@@ -355,7 +355,11 @@ fun HomeScreen(
             val uris = shared
             consumeShared()
             // a video on its own may be wanted for how it was made
-            val video = uris.singleOrNull()?.takeIf { (homeContext.contentResolver.getType(it) ?: "").startsWith("video/") }
+            val video = uris.singleOrNull()?.takeIf { uri ->
+                val type = homeContext.contentResolver.getType(uri)
+                    ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(android.webkit.MimeTypeMap.getFileExtensionFromUrl(uri.toString()).lowercase())
+                (type ?: "").startsWith("video/")
+            }
             if (video != null) sharedVideo = video
             // shared files open plainly, whatever shortcut was last begun
             else startProject(uris, null)
