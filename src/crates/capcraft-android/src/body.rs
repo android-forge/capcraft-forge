@@ -32,14 +32,22 @@ fn looks(kind: &str) -> Option<(Vec<Value>, Vec<Value>)> {
         let mut asked = asked.split(':').map(|n| n.parse::<f64>().unwrap_or(0.0));
         let mut next = || asked.next().unwrap_or(0.0);
         let (exposure, shadows, highlights) = (next(), next(), next());
-        return Some((
-            Vec::new(),
-            vec![json!({"id": "concat.adjust", "params": {
-                "exposure": exposure.clamp(-3.0, 3.0),
-                "shadows": shadows.clamp(-100.0, 100.0),
-                "highlights": highlights.clamp(-100.0, 100.0),
-            }})],
-        ));
+        let mut person = vec![json!({"id": "concat.adjust", "params": {
+            "exposure": exposure.clamp(-3.0, 3.0),
+            "shadows": shadows.clamp(-100.0, 100.0),
+            "highlights": highlights.clamp(-100.0, 100.0),
+        }})];
+        // and a light on the face, where it is in shadow
+        let (x, y, size, stops) = (next(), next(), next(), next());
+        if stops > 0.0 {
+            person.push(json!({"id": "capcraft.face-light", "params": {
+                "x": (x * 100.0).round().clamp(0.0, 100.0),
+                "y": (y * 100.0).round().clamp(0.0, 100.0),
+                "size": (size * 100.0).round().clamp(5.0, 80.0),
+                "stops": stops.clamp(0.0, 2.5),
+            }}));
+        }
+        return Some((Vec::new(), person));
     }
     Some(match kind {
         // the people alone, in front of whatever is laid over the clip
@@ -303,6 +311,39 @@ impl MobileSession {
             Some(gesture),
         )?;
         Ok(Some(clip.media_id.clone()))
+    }
+}
+
+#[uniffi::export]
+impl MobileSession {
+    /// Puts the lane of `copy_id` (a person's copy) right over the lane of
+    /// `under_id` (a title or a sticker), so that one shows behind the person
+    /// and whatever is over it stays in front. With `under_id` empty, puts the
+    /// copy back with the overlays.
+    pub fn place_person_over(&self, copy_id: String, under_id: String) -> Result<crate::session::TimelineView, MobileError> {
+        let timeline = self.with_session(|session| Ok(session.project().active().clone()))?;
+        let lane = |id: &str| {
+            let track = &timeline.clips.iter().find(|clip| clip.id == id)?.track_id;
+            timeline.tracks.iter().position(|t| &t.id == track)
+        };
+        let from = lane(&copy_id).ok_or_else(|| MobileError::Failed("The person's copy is gone.".to_owned()))?;
+        let to = if under_id.is_empty() {
+            // the highest overlay lane, or just over the main track
+            (1..timeline.tracks.len())
+                .filter(|i| *i != from && lanes::role(&timeline, *i) == Some(RowKind::Overlay))
+                .max()
+                .map_or(1, |i| if i < from { i + 1 } else { i })
+        } else {
+            let under = lane(&under_id).ok_or_else(|| MobileError::Failed("That clip is gone.".to_owned()))?;
+            if under < from { under + 1 } else { under }
+        };
+        if to == from {
+            return Ok(self.view());
+        }
+        self.run(vec![Command::MoveTrack {
+            track_id: timeline.tracks[from].id.clone(),
+            index: to,
+        }])
     }
 }
 

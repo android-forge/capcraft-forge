@@ -67,7 +67,49 @@ import org.json.JSONObject
 // ── Animation ──
 
 /** One animation preset: the keys it puts on a clip, as (property, at 0..1 of its run, value). */
-private data class Anim(val name: String, val category: String, val keys: (base: Base) -> List<Triple<String, Double, Double>>)
+private data class Anim(
+    val name: String,
+    val category: String,
+    /** How each key is approached: a cubic Bézier's two handles. */
+    val ease: List<Double> = CLASSIC,
+    /** A package that does part of it on the clip's chain (a blur or a flash), its span the animation's. */
+    val fx: String? = null,
+    val keys: (base: Base) -> List<Triple<String, Double, Double>>,
+)
+
+/** The old even ease in and out. */
+private val CLASSIC = listOf(0.42, 0.0, 0.58, 1.0)
+
+/** A modern reel's ease: quick away and a long, soft settle. */
+private val SETTLE = listOf(0.16, 1.0, 0.3, 1.0)
+
+/** Its mirror, for an out: a soft start and a quick end. */
+private val LEAVE = listOf(0.7, 0.0, 0.84, 0.0)
+
+/** The packages animations put on a chain. */
+private val ANIM_FX = setOf("capcraft.blur-in", "capcraft.blur-out", "capcraft.flash-in")
+
+/** The modern ins, settling softly as high-end reels' titles do. */
+private val MODERN_IN = listOf(
+    Anim("Smooth rise", "Modern", SETTLE) { b -> run("offsetY", 0.0 to b.y + 0.08, 1.0 to b.y) + run("opacity", 0.0 to 0.0, 0.5 to b.opacity) },
+    Anim("Focus in", "Modern", SETTLE, "capcraft.blur-in") { b -> run("scale", 0.0 to b.scale * 1.12, 1.0 to b.scale) + run("opacity", 0.0 to 0.0, 0.4 to b.opacity) },
+    Anim("Snap", "Modern", SETTLE) { b -> run("scale", 0.0 to b.scale * 0.8, 0.55 to b.scale * 1.03, 1.0 to b.scale) + run("opacity", 0.0 to 0.0, 0.25 to b.opacity) },
+    Anim("Slam", "Modern", SETTLE) { b -> run("scale", 0.0 to b.scale * 2.2, 0.7 to b.scale * 0.97, 1.0 to b.scale) + run("opacity", 0.0 to 0.0, 0.2 to b.opacity) },
+    Anim("Blur rise", "Modern", SETTLE, "capcraft.blur-in") { b -> run("offsetY", 0.0 to b.y + 0.05, 1.0 to b.y) + run("opacity", 0.0 to 0.0, 0.5 to b.opacity) },
+    Anim("Swipe", "Modern", SETTLE, "capcraft.blur-in") { b -> run("offsetX", 0.0 to b.x - 0.35, 1.0 to b.x) + run("opacity", 0.0 to 0.0, 0.3 to b.opacity) },
+    Anim("Drop in", "Modern", SETTLE) { b -> run("offsetY", 0.0 to b.y - 0.15, 1.0 to b.y) + run("opacity", 0.0 to 0.0, 0.35 to b.opacity) },
+    Anim("Flash in", "Modern", SETTLE, "capcraft.flash-in") { b -> run("scale", 0.0 to b.scale * 1.06, 1.0 to b.scale) },
+    Anim("Unfold", "Modern", SETTLE) { b -> run("rotation", 0.0 to b.rotation - 8, 1.0 to b.rotation) + run("scale", 0.0 to b.scale * 0.9, 1.0 to b.scale) + run("opacity", 0.0 to 0.0, 0.4 to b.opacity) },
+)
+
+/** The modern outs. */
+private val MODERN_OUT = listOf(
+    Anim("Smooth sink", "Modern", LEAVE) { b -> run("offsetY", 0.0 to b.y, 1.0 to b.y + 0.08) + run("opacity", 0.5 to b.opacity, 1.0 to 0.0) },
+    Anim("Focus out", "Modern", LEAVE, "capcraft.blur-out") { b -> run("scale", 0.0 to b.scale, 1.0 to b.scale * 1.12) + run("opacity", 0.6 to b.opacity, 1.0 to 0.0) },
+    Anim("Snap out", "Modern", LEAVE) { b -> run("scale", 0.0 to b.scale, 0.45 to b.scale * 1.03, 1.0 to b.scale * 0.8) + run("opacity", 0.75 to b.opacity, 1.0 to 0.0) },
+    Anim("Swipe out", "Modern", LEAVE, "capcraft.blur-out") { b -> run("offsetX", 0.0 to b.x, 1.0 to b.x + 0.35) + run("opacity", 0.7 to b.opacity, 1.0 to 0.0) },
+    Anim("Lift away", "Modern", LEAVE) { b -> run("offsetY", 0.0 to b.y, 1.0 to b.y - 0.15) + run("opacity", 0.65 to b.opacity, 1.0 to 0.0) },
+)
 
 /** The clip's resting values the keys lead to or from. */
 private data class Base(val scale: Double, val x: Double, val y: Double, val rotation: Double, val opacity: Double)
@@ -76,9 +118,9 @@ private data class Base(val scale: Double, val x: Double, val y: Double, val rot
 private fun run(property: String, vararg stops: Pair<Double, Double>) = stops.map { (at, v) -> Triple(property, at, v) }
 
 /** The same preset played backwards, an in turned into an out. */
-private fun backwards(name: String, of: Anim) = Anim(name, of.category) { b -> of.keys(b).map { (p, at, v) -> Triple(p, 1.0 - at, v) } }
+private fun backwards(name: String, of: Anim) = Anim(name, of.category, of.ease) { b -> of.keys(b).map { (p, at, v) -> Triple(p, 1.0 - at, v) } }
 
-private val IN = listOf(
+private val IN = MODERN_IN + listOf(
     Anim("Fade in", "Basic") { b -> run("opacity", 0.0 to 0.0, 1.0 to b.opacity) },
     Anim("Zoom in", "Basic") { b -> run("scale", 0.0 to b.scale * 0.6, 1.0 to b.scale) + run("opacity", 0.0 to 0.0, 0.5 to b.opacity) },
     Anim("Zoom out", "Basic") { b -> run("scale", 0.0 to b.scale * 1.5, 1.0 to b.scale) },
@@ -118,7 +160,7 @@ private val IN = listOf(
 
 private fun inNamed(name: String) = IN.first { it.name == name }
 
-private val OUT = listOf(
+private val OUT = MODERN_OUT + listOf(
     backwards("Fade out", inNamed("Fade in")),
     backwards("Zoom in", inNamed("Zoom out")),
     backwards("Zoom out", inNamed("Zoom in")),
@@ -313,7 +355,7 @@ fun AnimationChoices(vm: EditorViewModel, clipId: String, fixedTab: Int? = null,
                 batch.put(
                     JSONObject().put("op", "setClipKey").put("clipId", clip.id).put("property", property)
                         .put("at", (from + at * span).coerceIn(0.0, 1.0)).put("value", value)
-                        .put("ease", JSONArray(listOf(0.42, 0.0, 0.58, 1.0))),
+                        .put("ease", JSONArray(anim.ease)),
                 )
             }
         }
@@ -342,6 +384,20 @@ fun AnimationChoices(vm: EditorViewModel, clipId: String, fixedTab: Int? = null,
         val words = inAnim?.name?.takeIf { it in WORD_NAMES }
         val chain = json.optJSONArray("videoEffects") ?: JSONArray()
         val hadWords = (0 until chain.length()).any { chain.getJSONObject(it).optString("id") == WORDS }
+        // a blur or a flash the in or out does, as long as it
+        val inFx = inAnim?.let { c -> IN.firstOrNull { it.name == c.name }?.fx?.let { it to c.seconds } }
+        val outFx = outAnim?.let { c -> OUT.firstOrNull { it.name == c.name }?.fx?.let { it to c.seconds } }
+        val hadFx = (0 until chain.length()).any { chain.getJSONObject(it).optString("id") in ANIM_FX }
+        if ((inFx != null || outFx != null || hadFx) && comboAnim == null && loopAnim == null || hadFx) {
+            val next = JSONArray()
+            for (i in 0 until chain.length()) chain.getJSONObject(i).let { if (it.optString("id") !in ANIM_FX) next.put(it) }
+            if (comboAnim == null && loopAnim == null) {
+                listOfNotNull(inFx, outFx).forEach { (id, seconds) -> next.put(JSONObject().put("id", id).put("params", JSONObject().put("span", seconds.toDouble()))) }
+            }
+            chain.let { while (it.length() > 0) it.remove(0) }
+            for (i in 0 until next.length()) chain.put(next.get(i))
+            if (words == null && !hadWords) batch.put(JSONObject().put("op", "updateClip").put("clipId", clip.id).put("patch", JSONObject().put("videoEffects", next)))
+        }
         if (words != null || hadWords) {
             // first on the chain, before the title's glow, shadow and curve
             val next = JSONArray()

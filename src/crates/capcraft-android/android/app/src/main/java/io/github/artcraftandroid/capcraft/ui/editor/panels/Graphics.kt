@@ -306,9 +306,13 @@ fun GraphicsPanel(vm: EditorViewModel, first: String) {
         if (shown.isEmpty() && all.isNotEmpty()) {
             Text(if (shelf == -1 && query.isBlank()) "Press and hold one to keep it here" else "No graphics found", style = Type.Small, modifier = Modifier.padding(24.dp))
         }
+        // a new search or shelf starts at its top
+        val grid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+        LaunchedEffect(shown) { runCatching { grid.scrollToItem(0) } }
         LazyVerticalGrid(
             GridCells.Fixed(5),
             Modifier.fillMaxWidth().weight(1f),
+            state = grid,
             contentPadding = PaddingValues(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

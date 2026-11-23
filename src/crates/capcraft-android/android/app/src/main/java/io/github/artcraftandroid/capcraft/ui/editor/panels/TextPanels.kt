@@ -87,6 +87,8 @@ val FONTS = listOf(
     "Bangers", "Staatliches", "Secular One", "Hammersmith One", "Londrina Solid", "Black Ops One",
     "Pixelify Sans", "Rubik Scribble", "Shadows Into Light Two", "Emilys Candy", "Frijole", "Mystery Quest",
     "Atomic Age", "Germania One", "Bungee Hairline", "Zen Tokyo Zoo", "Kosugi Maru",
+    "Instrument Serif", "Poppins", "Shrikhand", "Monoton", "Righteous", "DM Mono", "Italiana", "Rubik Mono One",
+    "Bowlby One SC", "Major Mono Display",
 )
 
 /** The kinds the Fonts tab sorts the families into, the first showing them all. */
@@ -409,6 +411,10 @@ fun TextPanel(vm: EditorViewModel, clipId: String?, startTab: Int = 3) {
                             }
                             put("background", t.plate ?: "")
                             put("shadow", t.shadow)
+                            put("textCase", if (t.upper) "upper" else "original")
+                            put("tracking", t.tracking)
+                            put("gradient", t.gradient ?: "")
+                            t.size?.let { put("fontSize", it) }
                             // an empty title takes the template's words, to be typed over
                             if (text.isBlank()) {
                                 text = t.word
@@ -915,19 +921,40 @@ private class TextTemplate(
     val shadow: Boolean = false,
     /** Which of [TEMPLATE_KINDS] it is shown under, besides the first. */
     val kinds: Set<String> = emptySet(),
+    /** Set in capitals, whatever is typed. */
+    val upper: Boolean = false,
+    /** The space between letters, in frame heights: wide for a quiet title, tight for a loud one. */
+    val tracking: Double = 0.0,
+    /** A second colour the words run down to. */
+    val gradient: String? = null,
+    /** How big, as a fraction of the frame's height; the size it has otherwise. */
+    val size: Double? = null,
 ) {
     /** What it is kept under among the favourites. */
     val key: String get() = "$word|$family"
 }
 
 /** The kinds the Templates tab sorts its titles into; the first shows them all. */
-private val TEMPLATE_KINDS = listOf("Trending", "Bold", "Script", "Labels", "Fun", "Classic")
+private val TEMPLATE_KINDS = listOf("Trending", "Reels", "Bold", "Script", "Labels", "Fun", "Classic")
 
 /** The plain title every other template departs from. */
 private val DEFAULT_TEMPLATE = TextTemplate("", "Inter", "#ffffff", weight = 700)
 
 private val TEMPLATES = listOf(
     DEFAULT_TEMPLATE,
+    // as high-end reels set their titles now: an editorial serif, heavy capitals, quiet spaced words
+    TextTemplate("Golden hour", "Instrument Serif", "#ffffff", italic = true, size = 0.07, kinds = setOf("Reels")),
+    TextTemplate("NEW ERA", "Poppins", "#ffffff", weight = 900, upper = true, tracking = -0.002, size = 0.08, kinds = setOf("Reels", "Bold")),
+    TextTemplate("the little things", "Instrument Serif", "#f5e6c8", size = 0.055, kinds = setOf("Reels")),
+    TextTemplate("WEEKEND", "Bowlby One SC", "#ffffff", gradient = "#ffb347", size = 0.08, kinds = setOf("Reels", "Bold")),
+    TextTemplate("S T U D I O", "DM Mono", "#ffffff", upper = true, tracking = 0.012, size = 0.03, kinds = setOf("Reels")),
+    TextTemplate("Paris", "Italiana", "#ffffff", tracking = 0.006, size = 0.07, kinds = setOf("Reels", "Classic")),
+    TextTemplate("NIGHT", "Monoton", "#ff4fd8", size = 0.08, kinds = setOf("Reels", "Fun")),
+    TextTemplate("Sunday", "Shrikhand", "#ffd166", stroke = "#7a2e00", size = 0.07, kinds = setOf("Reels", "Script")),
+    TextTemplate("POV", "Rubik Mono One", "#000000", plate = "#ffffff", upper = true, size = 0.04, kinds = setOf("Reels", "Labels")),
+    TextTemplate("moodboard", "Major Mono Display", "#ffffff", size = 0.045, kinds = setOf("Reels")),
+    TextTemplate("Day in my life", "Poppins", "#ffffff", weight = 800, gradient = "#9be7ff", size = 0.05, kinds = setOf("Reels")),
+    TextTemplate("RIGHT NOW", "Righteous", "#ffffff", stroke = "#000000", upper = true, size = 0.06, kinds = setOf("Reels", "Fun")),
     TextTemplate("BIG NEWS", "Anton", "#ffffff", stroke = "#000000", kinds = setOf("Bold")),
     TextTemplate("Weekend", "Pacifico", "#ffd166", shadow = true, kinds = setOf("Script")),
     TextTemplate("SALE", "Bebas Neue", "#ffffff", plate = "#ff2d55", kinds = setOf("Labels", "Bold")),
@@ -1029,6 +1056,7 @@ private fun TemplatesTab(style: JSONObject, onKept: (Boolean) -> Unit, onPick: (
                         if (t.key in kept) {
                             Glyph(LucideIcons.Bookmark, Color.White, Modifier.align(Alignment.TopEnd).padding(2.dp), size = 11.dp)
                         }
+                        val shown = if (t.upper) t.word.uppercase() else t.word
                         Box(
                             Modifier.clip(RoundedCornerShape(3.dp)).background(t.plate?.let(::color) ?: Color.Transparent)
                                 .padding(horizontal = 5.dp, vertical = 2.dp),
@@ -1046,11 +1074,11 @@ private fun TemplatesTab(style: JSONObject, onKept: (Boolean) -> Unit, onPick: (
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             )
                             if (t.stroke != null) {
-                                Text(t.word, style = base.copy(color = color(t.stroke), drawStyle = Stroke(width = 6f), shadow = null), maxLines = 2)
+                                Text(shown, style = base.copy(color = color(t.stroke), drawStyle = Stroke(width = 6f), shadow = null), maxLines = 2)
                             }
                             Text(
-                                t.word,
-                                style = base.copy(color = color(t.color)),
+                                shown,
+                                style = t.gradient?.let { g -> base.copy(brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(color(t.color), color(g)))) } ?: base.copy(color = color(t.color)),
                                 maxLines = 2,
                                 onTextLayout = { layout ->
                                     val words = t.word.split(' ').count { it.isNotEmpty() }

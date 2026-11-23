@@ -584,6 +584,20 @@ pub const BASE_FONTS: &[&[u8]] = &[
     include_bytes!("../fonts/BungeeHairline-Regular.ttf"),
     #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/RubikScribble-Regular.ttf"),
+    // the faces of modern reels' titles: an editorial serif, a heavy geometric sans, a retro script,
+    // neon lines, a mono and display caps
+    include_bytes!("../fonts/InstrumentSerif-Regular.ttf"),
+    include_bytes!("../fonts/InstrumentSerif-Italic.ttf"),
+    include_bytes!("../fonts/Poppins-ExtraBold.ttf"),
+    include_bytes!("../fonts/Poppins-Black.ttf"),
+    include_bytes!("../fonts/Shrikhand-Regular.ttf"),
+    include_bytes!("../fonts/Monoton-Regular.ttf"),
+    include_bytes!("../fonts/Righteous-Regular.ttf"),
+    include_bytes!("../fonts/DMMono-Medium.ttf"),
+    include_bytes!("../fonts/Italiana-Regular.ttf"),
+    include_bytes!("../fonts/RubikMonoOne-Regular.ttf"),
+    include_bytes!("../fonts/BowlbyOneSC-Regular.ttf"),
+    include_bytes!("../fonts/MajorMonoDisplay-Regular.ttf"),
     #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/ShadowsIntoLightTwo-Regular.ttf"),
     #[cfg(not(target_os = "android"))]

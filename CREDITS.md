@@ -61,7 +61,12 @@ photographers deserve it:
 - [Price Building illuminated at night in Quebec City](https://commons.wikimedia.org/wiki/File:Price_Building_illuminated_at_night_in_Quebec_City.jpg): Wilfredor
 - [Common Jezebel Delias eucharis by kadavoor 3](https://commons.wikimedia.org/wiki/File:Common_Jezebel_Delias_eucharis_by_kadavoor_3.jpg): Jeevan Jose
 
-Two of the README's screenshots (the film clip, and its project on Home) show a frame of [Big Buck Bunny](https://peach.blender.org), © 2008 Blender Foundation,
+The README's screenshots also show [Street portrait](https://commons.wikimedia.org/wiki/File:Street_portrait_(Unsplash).jpg)
+by Clem Onojeghuo (CC0), the photographs above made into a test reel, and Wikimedia Commons search results, each
+credited to its maker in the picture: public domain photographs by the US Air Force, the US Marine Corps, the US National
+Park Service (GlacierNPS) and others.
+
+The README's Home screenshot shows a frame of [Big Buck Bunny](https://peach.blender.org), © 2008 Blender Foundation,
 [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/), as the app shows it. The film is not part of this app.
 
 Neither CapCraft nor CapCraft Forge is affiliated with, endorsed by or connected to ByteDance or CapCut.

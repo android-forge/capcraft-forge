@@ -24,11 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="#editing">Editing</a> ·
-  <a href="#color">Color</a> ·
-  <a href="#filters-effects-and-transitions">Filters, effects &amp; transitions</a> ·
-  <a href="#text-and-stickers">Text &amp; stickers</a> ·
-  <a href="#sound-and-export">Sound &amp; export</a> ·
+  <a href="#made-for-reels">Made for reels</a> ·
   <a href="#what-capcraft-forge-adds">What Forge adds</a> ·
   <a href="#still-to-do">Still to do</a> ·
   <a href="#building-instructions">Building</a>
@@ -49,86 +45,42 @@
 
 <br>
 
-## Editing
+## Made for reels
 
 <table align="center">
 <tr>
-<td align="center"><img src="docs/images/clip-tools.png" alt="A clip selected on the main track with its trim handles and length, and clip tools such as Duplicate, Replace, Overlay, Adjust and Filters" width="250"></td>
-<td align="center"><img src="docs/images/mask.png" alt="The Mask panel with Circle chosen: the photograph shown through a circle on the preview, with handles to size it, and None, Horizontal, Mirror, Circle and Rectangle" width="250"></td>
-<td align="center"><img src="docs/images/film.png" alt="The editor with a frame of the film Big Buck Bunny on the preview and its clip on the timeline" width="250"></td>
+<td align="center"><img src="docs/images/behind-person.jpg" alt="A man in a hat in front of an old car, the word WEEKEND set behind him so his head and shoulders cover part of it" width="250"></td>
+<td align="center"><img src="docs/images/reel-styles.jpg" alt="The title styles on the Reels shelf: Golden hour, NEW ERA, the little things, WEEKEND, STUDIO, Paris, NIGHT, Sunday, POV, MOODBOARD and Day in my life, each in its own font" width="250"></td>
+<td align="center"><img src="docs/images/graphics.jpg" alt="The Graphics panel searched for party: party poppers, balloons, bunting and masks, a balloon placed on the photo, its timing row and a credit to copy" width="250"></td>
 </tr>
 <tr>
-<td align="center"><sub>A clip selected: trim, duplicate, replace, adjust and more</sub></td>
-<td align="center"><sub>Masks, moved and sized on the preview</sub></td>
-<td align="center"><sub>Video clips on the timeline</sub></td>
+<td align="center"><sub>Titles behind the person: the people cut out on the phone</sub></td>
+<td align="center"><sub>Reel title styles in modern fonts</sub></td>
+<td align="center"><sub>20,236 graphics, found by words without the internet</sub></td>
 </tr>
-</table>
-
-<br>
-
-## Color
-
-<table align="center">
 <tr>
-<td align="center"><img src="docs/images/adjust.png" alt="Adjust, Customize: the smart tools Auto adjust, Color correction and Color match, then Brightness, Contrast and Saturation, with a slider" width="250"></td>
+<td align="center"><img src="docs/images/golden-light.jpg" alt="Golden light from a light-rays overlay on the street photo, with the colours Golden, Sunset, Warm white, Pink and Blue hour and sliders for Glow and Warm photo" width="250"></td>
+<td align="center"><img src="docs/images/reel-template.jpg" alt="Replace media for a template read from a reel: six places, each with its length and the reel's title, and Fill all, Camera moves, Match colours and Read its words" width="250"></td>
+<td align="center"><img src="docs/images/stock-photos.jpg" alt="The Stock tab of the import page searched for northern lights: HD and 4K photos from Wikimedia Commons, each with its maker" width="250"></td>
+</tr>
+<tr>
+<td align="center"><sub>Light in the colour you choose, its black gone</sub></td>
+<td align="center"><sub>Reel to template: cuts, moves, words and sound read on the phone</sub></td>
+<td align="center"><sub>HD stock photos searched on the import page</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/narrator.jpg" alt="Text to audio with Supertonic 3, ten voices and the manners Natural, Epic narrator, Storyteller, Announcer and Calm" width="250"></td>
 <td align="center"><img src="docs/images/color-match.png" alt="Color match: the aurora photograph taking the warm colors of a sunset frame, with the frame chosen by a slider, Match this frame, Photo, and a Strength slider" width="250"></td>
 </tr>
 <tr>
-<td align="center"><sub>Adjust: smart tools and sliders</sub></td>
-<td align="center"><sub>Color match: take the colors of another frame or a photo</sub></td>
+<td align="center"><sub>An epic narrator, and voices that say words as they are meant</sub></td>
+<td align="center"><sub>Color match: the colours of another frame or photo</sub></td>
 </tr>
 </table>
 
 <br>
 
-## Filters, effects and transitions
-
-<table align="center">
-<tr>
-<td align="center"><img src="docs/images/filters.png" alt="The Filters panel: None, Fresh, Vivid and Clean, each a preview of the clip itself, on shelves such as Everyday, Portrait and Cinematic" width="250"></td>
-<td align="center"><img src="docs/images/effects.png" alt="The Video effects panel: shelves such as Motion, Light, Distort, Retro and Stylize, and effects such as Shake, Flash, Pulse, Glitch, VHS, Old Film and Rainbow, each previewed on the frame" width="250"></td>
-<td align="center"><img src="docs/images/transitions.png" alt="The Transitions panel at a cut: None, Dissolve, Blur Dissolve, Fade to Black, Fade to White, Film Burn, Zoom, Slide, Push, Spin, Swirl and Glitch, each tile drawn with the clips" width="250"></td>
-</tr>
-<tr>
-<td align="center"><sub>80+ filters, previewed on the clip</sub></td>
-<td align="center"><sub>Video effects, on a clip or on a row of their own</sub></td>
-<td align="center"><sub>Transitions, shown on your own clips</sub></td>
-</tr>
-</table>
-
-<br>
-
-## Text and stickers
-
-<table align="center">
-<tr>
-<td align="center"><img src="docs/images/text.png" alt="The text sheet for Northern Nights on its Styles tab, beside Templates, Fonts, Effects, Animations and Bubbles, with colors, size and opacity" width="250"></td>
-<td align="center"><img src="docs/images/stickers.png" alt="The Stickers panel on its shapes shelf: square, circle, triangle, line, arrow, star, heart and hexagon" width="250"></td>
-</tr>
-<tr>
-<td align="center"><sub>Text: templates, fonts, styles, effects, animations and bubbles</sub></td>
-<td align="center"><sub>Stickers, labels, shapes and doodles</sub></td>
-</tr>
-</table>
-
-<br>
-
-## Sound and export
-
-<table align="center">
-<tr>
-<td align="center"><img src="docs/images/sounds.png" alt="The Sound FX panel: a search field, the kinds Swooshes, Pops, Bells, Booms and Game, and sounds such as Whoosh, Swoosh down, Whip and Riser, each with its length and an add button" width="250"></td>
-<td align="center"><img src="docs/images/export.png" alt="The export settings: Video and GIF tabs, and sliders for resolution (480p to 4k, set at 1080p), frame rate (24 to 60, set at 30) and bitrate, with the estimated file size" width="250"></td>
-</tr>
-<tr>
-<td align="center"><sub>Sound effects, made by the app</sub></td>
-<td align="center"><sub>Export at 480p to 4K, 24 to 60 fps, or as a GIF or photo</sub></td>
-</tr>
-</table>
-
-<br>
-
-<p align="center"><sub>Every picture here is a screenshot of the app. The photographs in them are CC0; Big Buck Bunny is © Blender Foundation, CC BY 3.0. See <a href="CREDITS.md#photographs-and-film">CREDITS.md</a>.</sub></p>
+<p align="center"><sub>Every picture here is a screenshot of the app. The photographs in them are CC0 or public domain; see <a href="CREDITS.md#photographs-and-film">CREDITS.md</a>.</sub></p>
 
 <br>
 
@@ -165,7 +117,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 |---|---|
 | Color match: a clip takes the colours of another frame or a photo | ✅ |
 | Exposure in Adjust | ✅ |
-| Light people: people who are underexposed lit, the rest left alone | ✅ |
+| Light people: people who are underexposed lit, the rest left alone; a face in shadow given a soft light of its own, dark clothes kept dark | ✅ |
 | Atmosphere: smoke, mist, light rays and dust from a folder of your own overlays, each laid as its kind is, behind people if wanted | ✅ |
 | Atmosphere's light in a colour of your choice (golden, sunset, warm white, pink, blue hour or its own), with glow and warmth; an overlay's black taken away so it leaves the photo as it was | ✅ |
 
@@ -183,6 +135,9 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 |---|---|
 | Filler words ("um", "uh") found and cut; caption keywords in colour; caption emojis; captions with their English under them | ✅ |
 | The colour emoji of newer phones in titles | ✅ |
+| Reel title styles and twelve modern faces (Instrument Serif, Poppins, Shrikhand, Monoton, DM Mono and more) | ✅ |
+| Titles, graphics and stickers behind the person in the picture | ✅ |
+| Modern animations: smooth rise, focus in, snap, slam, swipe and their outs, on a reel's easing | ✅ |
 | Supertonic 3 voices that say "live" in "broadcast live" and "how you live" as meant, in 31 languages | ✅ |
 | Reading manners: epic narrator, storyteller, announcer, calm | ✅ |
 | My voice: text read in your own voice, recorded saying it may be copied | 🧪 |
@@ -192,7 +147,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 
 | Feature | |
 |---|---|
-| 20,236 graphics (emoji, stickers, icons, flags, logos and shapes for video) kept in the app and found by words without the internet | ✅ |
+| 20,236 graphics (emoji, stickers, icons, flags, logos and shapes for video) kept in the app and found by words without the internet, with keyframes, animations and effects | ✅ |
 | Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA | ✅ |
 | Pexels and Unsplash among the stock photos, with a key of your own | 🧪 |
 | Sound FX from your own folders of sounds | ✅ |

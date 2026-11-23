@@ -308,3 +308,19 @@ mod tests {
         assert_eq!(segmenter.input_size(1000, 1000), (512, 512));
     }
 }
+
+#[cfg(test)]
+mod picture_mask {
+    /// The selfie mask of a picture (`MASK_IN`, raw RGBA, `MASK_SIZE` "w h"),
+    /// written as a PNG to `MASK_OUT`: for looking at by eye.
+    #[test]
+    #[ignore = "needs a picture"]
+    fn a_picture_is_masked() {
+        let (Ok(input), Ok(size), Ok(out)) = (std::env::var("MASK_IN"), std::env::var("MASK_SIZE"), std::env::var("MASK_OUT")) else { return };
+        let mut size = size.split(' ').map(|v| v.parse::<u32>().unwrap());
+        let (w, h) = (size.next().unwrap(), size.next().unwrap());
+        let frame = concat_core::frame::Frame::from_rgba(w, h, std::fs::read(input).unwrap()).unwrap();
+        let mask = super::Segmenter::selfie().unwrap().mask(&frame).unwrap();
+        std::fs::write(out, mask.to_png()).unwrap();
+    }
+}

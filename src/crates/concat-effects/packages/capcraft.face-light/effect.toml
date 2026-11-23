@@ -1,0 +1,61 @@
+format = 2
+
+# CapCraft's face light: a soft round of light on a face, the dark and middle
+# of the picture there brightened and what is already bright left as it is,
+# so a face in shadow comes up without a white shirt or a lamp burning out.
+# Put on a person's copy by Light people rather than chosen from the effects
+# list. Written for CapCraft Forge (AGPL-3.0-or-later).
+
+[effect]
+id = "capcraft.face-light"
+name = "Face light"
+version = 1
+kind = "effect"
+category = "Color"
+order = 69
+intensity = "stops"
+description = "A soft light on a face: its shadows and middle tones brightened, its highlights left alone."
+
+# Where the light falls, across and down the picture.
+[[param]]
+key = "x"
+label = "Across"
+type = "int"
+min = 0
+max = 100
+default = 50
+step = 1
+unit = "%"
+
+[[param]]
+key = "y"
+label = "Down"
+type = "int"
+min = 0
+max = 100
+default = 50
+step = 1
+unit = "%"
+
+# How wide its round is, in hundredths of the picture's height.
+[[param]]
+key = "size"
+label = "Size"
+type = "int"
+min = 5
+max = 80
+default = 25
+step = 1
+unit = "%"
+
+# How much light at its middle, in stops.
+[[param]]
+key = "stops"
+label = "Light"
+min = 0
+max = 2.5
+default = 1.2
+step = 0.1
+
+[wgsl]
+entry = "effect.wgsl"

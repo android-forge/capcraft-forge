@@ -432,6 +432,10 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             split,
             timing,
             Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation },
+            Tool("stickereffects", "Effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Clip) },
+            Tool("behind", if (io.github.artcraftandroid.capcraft.ui.editor.panels.isBehindPeople(vm, clip)) "In front" else "Behind person", LucideIcons.UserRound) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.toggleBehindPeople(vm, clip)
+            },
             duplicate,
             delete,
             Tool("mirror", "Mirror", LucideIcons.FlipVertical2) { vm.mirror(clip) },
@@ -607,6 +611,9 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             },
             layer,
             timing,
+            Tool("behind", if (io.github.artcraftandroid.capcraft.ui.editor.panels.isBehindPeople(vm, clip)) "In front" else "Behind person", LucideIcons.UserRound) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.toggleBehindPeople(vm, clip)
+            },
             Tool("basic", "Basic", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
             // several titles and stickers at once, starting with this one
             Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {

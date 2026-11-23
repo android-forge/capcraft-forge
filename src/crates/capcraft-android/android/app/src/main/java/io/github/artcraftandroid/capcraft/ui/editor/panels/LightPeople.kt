@@ -53,7 +53,7 @@ fun LightPeoplePanel(vm: EditorViewModel) {
     var strength by remember(clip.id) { mutableFloatStateOf(100f) }
     val on = bodyOf(vm, clip.id)?.second?.startsWith("light:") == true
 
-    fun kind(l: PeopleLight) = "light:%.3f:%.1f:%.1f".format(java.util.Locale.US, l.exposure, l.shadows, l.highlights)
+    fun kind(l: PeopleLight) = "light:%.3f:%.1f:%.1f:%.3f:%.3f:%.3f:%.2f".format(java.util.Locale.US, l.exposure, l.shadows, l.highlights, l.faceX, l.faceY, l.faceSize, l.faceStops)
 
     val listener = remember {
         object : SpeechListener {
@@ -95,9 +95,9 @@ fun LightPeoplePanel(vm: EditorViewModel) {
                 light = l
                 when {
                     l.people <= 0f -> said = "No people were found here."
-                    l.exposure == 0f && l.shadows == 0f && l.highlights == 0f -> said = "The people are well lit already."
+                    l.exposure == 0f && l.shadows == 0f && l.highlights == 0f && l.faceStops == 0f -> said = "The people are well lit already."
                     else -> {
-                        said = if (l.exposure < 0) "They were too bright. Eased." else if (l.shadows > 0) "They were against the light. Lit." else "They were too dark. Lit."
+                        said = if (l.exposure < 0) "They were too bright. Eased." else if (l.faceStops > 0) "Their face was in shadow. Lit." else if (l.shadows > 0) "They were against the light. Lit." else "They were too dark. Lit."
                         strength = 100f
                         put(l)
                     }
@@ -117,9 +117,12 @@ fun LightPeoplePanel(vm: EditorViewModel) {
         val last = (0 until chain.length()).lastOrNull { chain.getJSONObject(it).optString("id") == "concat.adjust" } ?: return
         for (i in 0 until chain.length()) {
             val link = JSONObject(chain.getJSONObject(i).toString())
+            val k = percent / 100.0
             if (i == last) {
-                val k = percent / 100.0
                 link.put("params", (link.optJSONObject("params") ?: JSONObject()).put("exposure", l.exposure * k).put("shadows", l.shadows * k).put("highlights", l.highlights * k))
+            }
+            if (link.optString("id") == "capcraft.face-light") {
+                link.put("params", (link.optJSONObject("params") ?: JSONObject()).put("stops", l.faceStops * k))
             }
             next.put(link)
         }

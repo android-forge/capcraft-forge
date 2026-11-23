@@ -27,6 +27,13 @@ pub struct PeopleLight {
     pub shadows: f32,
     /// How far to ease their highlights, 0 to -100.
     pub highlights: f32,
+    /// Where a light on the face goes, across and down the picture (0 to
+    /// 1), how wide it is (a fraction of the picture's height), and how
+    /// much (stops); no stops for none.
+    pub face_x: f32,
+    pub face_y: f32,
+    pub face_size: f32,
+    pub face_stops: f32,
 }
 
 /// A pixel this likely is a person's.
@@ -73,6 +80,10 @@ fn measured(frame: &Frame, mask: &Mask) -> PeopleLight {
         exposure: 0.0,
         shadows: 0.0,
         highlights: 0.0,
+        face_x: 0.5,
+        face_y: 0.3,
+        face_size: 0.2,
+        face_stops: 0.0,
     };
     if people.len() < 200 || share < 0.004 {
         asked.people = 0.0;
@@ -100,6 +111,21 @@ fn measured(frame: &Frame, mask: &Mask) -> PeopleLight {
         asked.shadows = ((round * 0.6 - half) * 160.0).clamp(10.0, 45.0);
         asked.exposure = asked.exposure.max(0.4);
     }
+    // the face, the top of the tallest of them: in shadow while the rest is
+    // lit - light behind them, a white shirt - it is given a light of its own
+    if let Some((x, y, size, face_end)) = face(mask, &frame_light(frame), w, h) {
+        // only where the face is well below the rest of them: a dark scene wants them all lit
+        if face_end < FACE_DIM && end > face_end + 0.2 && asked.highlights == 0.0 {
+            asked.face_x = x;
+            asked.face_y = y;
+            asked.face_size = size;
+            asked.face_stops = (light(FACE_LIT) / light(face_end).max(0.002)).log2().clamp(0.4, 2.5);
+            // the rest gently, so dark clothes stay dark
+            asked.exposure = asked.exposure.min(0.4);
+            asked.shadows = asked.shadows.min(12.0);
+            asked.highlights = -20.0;
+        }
+    }
     // burnt out: a tenth of them at the very top
     if at(&people, 0.9) > BLOWN || half > 0.8 {
         asked.exposure = -((light(half) / light(0.66)).log2()).clamp(0.2, 0.9);
@@ -107,11 +133,62 @@ fn measured(frame: &Frame, mask: &Mask) -> PeopleLight {
         asked.shadows = 0.0;
     }
     // too little to see is nothing
-    if asked.exposure.abs() < 0.1 && asked.shadows < 10.0 {
+    if asked.exposure.abs() < 0.1 && asked.shadows < 10.0 && asked.face_stops == 0.0 {
         asked.exposure = 0.0;
         asked.shadows = 0.0;
     }
     asked
+}
+
+/// Under this the bright end of a face is in shadow; a face in good light,
+/// dark skin or light, has its cheeks and brow well over it.
+const FACE_DIM: f32 = 0.42;
+/// Where a face light brings it.
+const FACE_LIT: f32 = 0.5;
+
+/// Each pixel's brightness, 0 to 1, as stored.
+fn frame_light(frame: &Frame) -> Vec<f32> {
+    frame
+        .pixels()
+        .chunks_exact(BYTES_PER_PIXEL)
+        .map(|p| (0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2])) / 255.0)
+        .collect()
+}
+
+/// The face of the tallest person in `mask`: its middle across and down and
+/// a size for a light on it (fractions of the picture), and the bright end
+/// of it. Their head is the top eighth of them.
+fn face(mask: &Mask, bright: &[f32], w: usize, h: usize) -> Option<(f32, f32, f32, f32)> {
+    let on = |x: usize, y: usize| mask.sample((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32) >= SURELY;
+    let rows: Vec<usize> = (0..h).filter(|y| (0..w).step_by(2).any(|x| on(x, *y))).collect();
+    let (top, bottom) = (*rows.first()?, *rows.last()?);
+    let tall = bottom - top;
+    if tall < h / 6 {
+        return None;
+    }
+    let head = top + tall * 13 / 100;
+    let mut seen = Vec::new();
+    let (mut sx, mut count) = (0usize, 0usize);
+    for y in top..head {
+        for x in 0..w {
+            if on(x, y) {
+                seen.push(bright[y * w + x]);
+                sx += x;
+                count += 1;
+            }
+        }
+    }
+    if count < 50 {
+        return None;
+    }
+    seen.sort_by(f32::total_cmp);
+    let end = seen[(seen.len() * 85 / 100).min(seen.len() - 1)];
+    Some((
+        sx as f32 / count as f32 / w as f32,
+        (top as f32 + tall as f32 * 0.09) / h as f32,
+        (tall as f32 / h as f32 * 0.22).clamp(0.05, 0.8),
+        end,
+    ))
 }
 
 #[uniffi::export]
@@ -179,6 +256,32 @@ mod tests {
     fn asked(round: u8, person: u8, bright: u8) -> PeopleLight {
         let (frame, mask) = scene(round, person, bright);
         measured(&frame, &mask)
+    }
+
+    #[test]
+    fn a_face_in_shadow_over_a_white_shirt_is_given_a_light() {
+        // lit from behind: a dark face over a white shirt and dark trousers
+        let mut frame = Frame::black(200, 400);
+        let mut mask = Mask::filled(200, 400, 0);
+        for y in 0..400u32 {
+            for x in 0..200u32 {
+                let inside = (70..130).contains(&x) && (60..400).contains(&y);
+                let v = match (inside, y) {
+                    (false, _) => 120,
+                    (true, 60..100) => 30,
+                    (true, 100..220) => 215,
+                    _ => 20,
+                };
+                frame.set_pixel(x, y, [v, v, v, 255]);
+                if inside {
+                    mask.bytes_mut()[(y * 200 + x) as usize] = 255;
+                }
+            }
+        }
+        let light = measured(&frame, &mask);
+        assert!(light.face_stops > 1.5, "{light:?}");
+        assert!((light.face_x - 0.5).abs() < 0.05 && light.face_y < 0.25, "{light:?}");
+        assert!(light.exposure <= 0.4 && light.shadows <= 12.0, "{light:?}");
     }
 
     #[test]
