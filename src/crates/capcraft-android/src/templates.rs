@@ -48,6 +48,8 @@ struct Place {
     copy_of: Option<usize>,
     /// How it lays over what is under it ("screen" and the rest); empty is normal.
     blend: &'static str,
+    /// A mask of its own, as a clip's `mask` is written.
+    mask: Option<Value>,
 }
 
 fn cover() -> Place {
@@ -382,11 +384,13 @@ impl MobileSession {
             slots.insert(clip.id.clone(), slot);
         }
 
-        // places over them
+        // places over them; a copy may copy any place before it
+        let mut made_ids: Vec<String> = main.iter().map(|c| c.id.clone()).collect();
         for (n, (at, length, place, person_over)) in plan.over.iter().enumerate() {
             let name = names[plan.main.len() + n].clone();
             let media = self.import(file(&name)?)?;
             let made = self.add_overlay(media.id, micros(*at))?.created_id;
+            made_ids.push(made.clone());
             if made.is_empty() {
                 continue;
             }
@@ -398,12 +402,15 @@ impl MobileSession {
                     commands.push(key(&made, p, *at, *v));
                 }
             }
+            if let Some(mask) = &place.mask {
+                commands.push(json!({"op": "updateClip", "clipId": made, "patch": {"mask": mask}}));
+            }
             if *person_over {
                 behind.push(json!(made));
             }
             let mut slot = place_json(place);
-            match place.copy_of.and_then(|k| main.get(k)) {
-                Some(original) => slot["copyOf"] = json!(original.id),
+            match place.copy_of.and_then(|k| made_ids.get(k)).filter(|id| !id.is_empty()) {
+                Some(original) => slot["copyOf"] = json!(original),
                 None => places.push((made.clone(), file(&name)?)),
             }
             slots.insert(made, slot);

@@ -222,6 +222,22 @@ impl MobileSession {
             let settings = session.settings();
             Ok((clip.duration, (settings.width, settings.height)))
         })?;
+        // a cut-out copy of the person in the old picture goes with it; one is made again from the new
+        if let Ok(mut bodies) = serde_json::from_str::<Value>(&self.extra(crate::body::BODY.to_owned()))
+            && let Some(copy) = bodies.get(&clip_id).and_then(|b| b.get("copy")).and_then(Value::as_str).map(str::to_owned)
+        {
+            if let Some(all) = bodies.as_object_mut() {
+                all.remove(&clip_id);
+            }
+            let gone: Vec<Command> = [
+                json!({"op": "removeClips", "clipIds": [copy], "ripple": false}),
+                json!({"op": "setTimelineExtra", "key": crate::body::BODY, "value": bodies}),
+            ]
+            .into_iter()
+            .filter_map(|c| serde_json::from_value(c).ok())
+            .collect();
+            self.run(gone)?;
+        }
         let replaced = self.replace_media(clip_id.clone(), path.clone())?;
         // a picture of another kind is a new clip; the same kind keeps its own
         let here = Some(replaced.created_id)

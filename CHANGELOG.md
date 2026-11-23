@@ -40,7 +40,11 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Graphics: 20,236 emoji, stickers, icons, flags, logos and shapes for video, kept in the app and found by words without the
   internet; `graphics/build.py` packs them. Timing: when a graphic, title or overlay comes on and goes.
 - Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA, and Pexels and Unsplash with a key of
-  one's own.
+  one's own. Stock videos and meme pictures beside them, narrowed to any of twelve languages of India: public domain films from
+  1965 and before on the Internet Archive, Commons, Openverse, and Pexels and Pixabay with a key; only what may be changed and
+  used commercially (public domain, CC0, CC BY credited, and the sites' own licences).
+- Beats: the main track's clips cut so each change lands on a beat, or all made one length, in one tap.
+- Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down.
 - Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
   to go in. A video shared to the app may be made one.
 - Golden light in Atmosphere: rays, lights and window beams yellow, and the picture warmed by them; the colour (golden,

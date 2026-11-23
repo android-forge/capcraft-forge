@@ -91,7 +91,14 @@ fun BeatsPanel(vm: EditorViewModel) {
     PanelFrame("Beats", vm, tall = true, titleOnTop = true) {
         Spacer(Modifier.height(14.dp))
         BeatStrip(vm, clip)
-        Spacer(Modifier.height(30.dp))
+        Spacer(Modifier.height(14.dp))
+        // the clips above, cut to these beats or all made one length
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+            BeatAction("Cut clips to beats", enabled = marks.isNotEmpty()) { vm.fitClipsToBeats() }
+            BeatAction("All 0.5 s") { vm.sameLengths(0.5) }
+            BeatAction("All 1 s") { vm.sameLengths(1.0) }
+        }
+        Spacer(Modifier.height(18.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             val deleting = near >= 0
             Row(
@@ -259,4 +266,18 @@ private fun TwoStops(right: Boolean, enabled: Boolean, onChange: (Boolean) -> Un
         if (enabled && right) drawLine(Palette.Accent, Offset(r, cy), Offset(cx, cy), 2.dp.toPx())
         drawCircle(if (enabled) Color.White else Color(0xFF666666), r, Offset(cx, cy))
     }
+}
+
+/** A small rounded action under the beats. */
+@Composable
+private fun BeatAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Text(
+        label,
+        Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (enabled) Color(0xFF3A3A3A) else Color(0xFF262626))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        style = Type.Small.copy(color = if (enabled) Palette.Text else Palette.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+    )
 }

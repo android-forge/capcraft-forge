@@ -241,7 +241,7 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
         MediaKinds.VIDEO -> listOf("Videos")
         MediaKinds.IMAGE -> listOf("Photos")
         MediaKinds.BOTH -> listOf("Videos", "Photos")
-    } + listOfNotNull("Collage".takeIf { req.onCollage != null }, "Stock".takeIf { req.kinds != MediaKinds.VIDEO })
+    } + listOfNotNull("Collage".takeIf { req.onCollage != null }, "Stock")
     var tab by remember { mutableIntStateOf(0) }
     var album by remember { mutableStateOf<Long?>(null) }
     var albums by remember { mutableStateOf(false) }
@@ -309,7 +309,7 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
             }
         }
         if (stock) {
-            Box(Modifier.fillMaxWidth().weight(1f)) { StockPage(req.multiple, onDone) }
+            Box(Modifier.fillMaxWidth().weight(1f)) { StockPage(req.multiple, onDone, req.kinds) }
             return@Column
         }
         if (partial) {

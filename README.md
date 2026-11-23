@@ -150,6 +150,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 | 20,236 graphics (emoji, stickers, icons, flags, logos and shapes for video) kept in the app and found by words without the internet, with keyframes, animations and effects | ✅ |
 | Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA | ✅ |
 | Pexels and Unsplash among the stock photos, with a key of your own | 🧪 |
+| Stock videos and meme pictures on the import page, narrowed to a language of India: public domain films (1965 and before) on the Internet Archive, Commons, Openverse, and Pexels and Pixabay with a key of your own. Only what may be changed and used commercially | 🧪 |
 | Sound FX from your own folders of sounds | ✅ |
 
 ### Projects and templates
@@ -182,6 +183,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 | Reel to template: speed ramps, freeze frames and how titles come in | Its separate layers and exact fonts cannot be had back from one video |
 | Voices made from a sample on the phone (Chatterbox) | Desktop only today |
 | Pixabay among the stock photos | Its free key gives 1280-pixel photos only |
+| YouTube, GIPHY, Klipy and Imgflip among the stock videos and memes | Their terms do not let what they host be put into one's own video, or do not say so |
 | Generative AI, cloud storage, accounts | Not planned: CapCraft is a local app |
 
 <br>

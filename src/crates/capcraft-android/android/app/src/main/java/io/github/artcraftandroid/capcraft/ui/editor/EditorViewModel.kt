@@ -343,6 +343,14 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 scheduleSave()
                 panel = Panel.Slots
                 message = "Put your photos in, then type over the words"
+                // with a real sample person in it, what goes behind them goes there now
+                val samples = runCatching { getApplication<Application>().assets.list("templates/$id")?.isNotEmpty() == true }.getOrDefault(false)
+                val behind = runCatching { JSONObject(s.extra("capcraftReel")).optJSONArray("behind") }.getOrNull()
+                if (samples && behind != null && behind.length() > 0) {
+                    busy = "Finding the people"
+                    for (i in 0 until behind.length()) io.github.artcraftandroid.capcraft.ui.editor.panels.putBehindPeople(this@EditorViewModel, behind.optString(i))
+                    busy = null
+                }
             }.onFailure { fail(it) }
         }
     }
@@ -910,6 +918,20 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
 
     /** Every beat on the timeline, for edges to snap to. */
     fun allBeatTimes(): List<Long> = timeline?.rows.orEmpty().flatMap { r -> r.clips.flatMap { beatTimes(it) } }
+
+    /** Cuts the main track's clips so each change lands on one of the timeline's beat marks. */
+    fun fitClipsToBeats() {
+        val beats = allBeatTimes().distinct().sorted()
+        if (beats.isEmpty()) { message = "Find the beats first"; return }
+        edit { fitMainToBeats(beats) }
+        message = "Clips cut to the beat"
+    }
+
+    /** Gives every clip on the main track the same length. */
+    fun sameLengths(seconds: Double) {
+        edit { setMainLengths(seconds) }
+        message = "Every clip is ${if (seconds % 1.0 == 0.0) seconds.toInt().toString() else seconds.toString()} s"
+    }
 
     /** Sets the beats of the file behind a clip (null or empty takes them off), as one undo step. */
     fun setBeats(mediaId: String, marks: List<Double>?) {

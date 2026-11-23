@@ -2156,3 +2156,26 @@ fn encore_fills_its_copies_and_has_its_music() {
     let audio = clips.iter().find(|c| c["kind"] == "audio").expect("music");
     assert!((audio["duration"].as_f64().unwrap() - 6.2).abs() < 0.05, "{audio}");
 }
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg"]
+fn main_clips_are_cut_to_the_beat_or_one_length() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Beats".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let photo = std::path::Path::new(&made.path).join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    let ids: Vec<String> = (0..4).map(|_| session.import(photo.to_string_lossy().into_owned()).unwrap().id).collect();
+    session.add_to_main(ids, 0).unwrap();
+    let lengths = |s: &MobileSession| -> Vec<i64> {
+        let view = s.view();
+        let mut c = view.rows.iter().find(|r| r.kind == crate::lanes::RowKind::Main).unwrap().clips.clone();
+        c.sort_by_key(|c| c.start_us);
+        c.iter().map(|c| c.duration_us).collect()
+    };
+    session.set_main_lengths(1.0).unwrap();
+    assert_eq!(lengths(&session), [1_000_000; 4]);
+    session.fit_main_to_beats(vec![600_000, 700_000, 1_200_000, 2_000_000, 2_500_000]).unwrap();
+    assert_eq!(lengths(&session), [600_000, 600_000, 800_000, 500_000]);
+}

@@ -92,15 +92,43 @@ internal class StockPhoto(
     val credit: Boolean,
     /** Told when the photo is taken, as its site asks. */
     val told: String? = null,
+    /** A video rather than a picture. */
+    val video: Boolean = false,
+    /** The file's ending, ".jpg" and the like. */
+    val ext: String = ".jpg",
 )
 
-/** A site photos come from. One with a [keyPage] searches with a key the user makes there, free, and gives here. */
-internal enum class StockSite(val title: String, val keyPage: String? = null, val about: String) {
-    COMMONS_FREE("Commons", null, "Wikimedia Commons: public domain and CC0. No credit needed."),
-    COMMONS_CREDIT("Commons, with credit", null, "Wikimedia Commons: CC BY. Credit the maker wherever it is shown."),
-    NASA("NASA", null, "NASA's own pictures. Free to use; do not suggest NASA endorses anything."),
-    PEXELS("Pexels", "https://www.pexels.com/api/", "Photos provided by Pexels."),
-    UNSPLASH("Unsplash", "https://unsplash.com/developers", "Photos provided by Unsplash."),
+/** What is looked for: photos, videos, or meme pictures. */
+internal enum class StockKind(val title: String, val hint: String) {
+    PHOTOS("Photos", "Search HD photos"),
+    VIDEOS("Videos", "Search videos"),
+    MEMES("Memes", "Search meme pictures"),
+}
+
+/** The languages of India a search can be narrowed to: its name, and the code archives file it under. */
+internal val INDIAN_LANGUAGES = listOf(
+    "Hindi" to "hin", "Tamil" to "tam", "Telugu" to "tel", "Malayalam" to "mal", "Kannada" to "kan", "Bengali" to "ben",
+    "Marathi" to "mar", "Gujarati" to "guj", "Punjabi" to "pan", "Odia" to "ori", "Urdu" to "urd", "Assamese" to "asm",
+)
+
+/**
+ * A site things come from, for one [kind]. One with a [keyPage] searches with a key the user makes there, free,
+ * and gives here; sites that share a key name it in [keyName]. Only what may be changed and used in a video,
+ * commercially, is shown: public domain, CC0, CC BY (credited), and the sites' own free licences.
+ */
+internal enum class StockSite(val title: String, val kind: StockKind, val keyPage: String? = null, val about: String, val keyName: String? = null) {
+    COMMONS_FREE("Commons", StockKind.PHOTOS, null, "Wikimedia Commons: public domain and CC0. No credit needed."),
+    COMMONS_CREDIT("Commons, with credit", StockKind.PHOTOS, null, "Wikimedia Commons: CC BY. Credit the maker wherever it is shown."),
+    NASA("NASA", StockKind.PHOTOS, null, "NASA's own pictures. Free to use; do not suggest NASA endorses anything."),
+    PEXELS("Pexels", StockKind.PHOTOS, "https://www.pexels.com/api/", "Photos provided by Pexels."),
+    UNSPLASH("Unsplash", StockKind.PHOTOS, "https://unsplash.com/developers", "Photos provided by Unsplash."),
+    ARCHIVE("Internet Archive", StockKind.VIDEOS, null, "Public domain films from 1965 and before, old Indian-language films among them. Uploaders set these licences, and songs in a film can still be under copyright: check the film's page."),
+    COMMONS_VIDEO("Commons", StockKind.VIDEOS, null, "Videos on Wikimedia Commons: public domain, CC0 and CC BY (credit the maker)."),
+    PEXELS_VIDEO("Pexels", StockKind.VIDEOS, "https://www.pexels.com/api/", "Videos provided by Pexels.", "PEXELS"),
+    PIXABAY_VIDEO("Pixabay", StockKind.VIDEOS, "https://pixabay.com/api/docs/", "Videos provided by Pixabay.", "PIXABAY"),
+    COMMONS_MEME("Commons", StockKind.MEMES, null, "Meme pictures on Wikimedia Commons: public domain, CC0 and CC BY (credit the maker)."),
+    OPENVERSE("Openverse", StockKind.MEMES, null, "Openverse: openly licensed pictures from many sites. Public domain, CC0 and CC BY (credit the maker)."),
+    PIXABAY_IMAGE("Pixabay", StockKind.MEMES, "https://pixabay.com/api/docs/", "Pictures and illustrations provided by Pixabay.", "PIXABAY"),
 }
 
 /** Photos from stock sites, searched from the import page. Only those at least full HD are shown. */
@@ -111,9 +139,9 @@ internal object Stock {
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-    fun key(context: Context, site: StockSite): String? = prefs(context).getString(site.name, null)?.takeIf { it.isNotBlank() }
+    fun key(context: Context, site: StockSite): String? = prefs(context).getString(site.keyName ?: site.name, null)?.takeIf { it.isNotBlank() }
 
-    fun setKey(context: Context, site: StockSite, key: String?) = prefs(context).edit().putString(site.name, key?.trim()).apply()
+    fun setKey(context: Context, site: StockSite, key: String?) = prefs(context).edit().putString(site.keyName ?: site.name, key?.trim()).apply()
 
     private fun open(url: String, headers: Map<String, String> = emptyMap()): HttpURLConnection {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -144,13 +172,139 @@ internal object Stock {
 
     private fun plain(html: String) = html.replace(Regex("<[^>]+>"), "").replace("&amp;", "&").replace("&quot;", "\"").replace("&#039;", "'").replace("&nbsp;", " ").trim()
 
-    /** Page [page] (from 1) of what [query] finds on [site]. */
-    fun search(context: Context, site: StockSite, query: String, page: Int): List<StockPhoto> = when (site) {
-        StockSite.COMMONS_FREE -> commons(query, page, "unrestricted")
-        StockSite.COMMONS_CREDIT -> commons(query, page, "attribution")
-        StockSite.NASA -> nasa(query, page)
-        StockSite.PEXELS -> pexels(key(context, site).orEmpty(), query, page)
-        StockSite.UNSPLASH -> unsplash(key(context, site).orEmpty(), query, page)
+    /**
+     * Page [page] (from 1) of what [query] finds on [site], in [language] (a name and code of
+     * [INDIAN_LANGUAGES]) when one is given.
+     */
+    fun search(context: Context, site: StockSite, query: String, page: Int, language: Pair<String, String>? = null): List<StockPhoto> {
+        // a site that files no language is asked with the language's name among the words
+        val words = if (language != null && site != StockSite.ARCHIVE) "$query ${language.first}".trim() else query
+        val key = key(context, site).orEmpty()
+        return when (site) {
+            StockSite.COMMONS_FREE -> commons(words, page, "unrestricted")
+            StockSite.COMMONS_CREDIT -> commons(words, page, "attribution")
+            StockSite.NASA -> nasa(words, page)
+            StockSite.PEXELS -> pexels(key, words, page)
+            StockSite.UNSPLASH -> unsplash(key, words, page)
+            StockSite.ARCHIVE -> archive(query, page, language?.second)
+            StockSite.COMMONS_VIDEO -> commonsOpen(words, page, video = true)
+            StockSite.PEXELS_VIDEO -> pexelsVideos(key, words, page)
+            StockSite.PIXABAY_VIDEO -> pixabay(key, words, page, video = true)
+            StockSite.COMMONS_MEME -> commonsOpen("$words meme".trim(), page, video = false)
+            StockSite.OPENVERSE -> openverse("$words meme".trim(), page)
+            StockSite.PIXABAY_IMAGE -> pixabay(key, words, page, video = false)
+        }
+    }
+
+    /** A licence that binds what it is used in, forbids changing it or forbids selling it. */
+    private fun bound(licence: String) = Regex("SA|ND|NC|GFDL|GPL", RegexOption.IGNORE_CASE).containsMatchIn(licence.replace("CC0", ""))
+
+    /** Commons, pictures of any size or videos, under a licence a reel may use; a CC BY one is credited. */
+    private fun commonsOpen(query: String, page: Int, video: Boolean): List<StockPhoto> {
+        val asked = q(if (video) "$query filetype:video" else "$query filetype:bitmap filew:>299")
+        val found = json(
+            "https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=40&gsroffset=${(page - 1) * 40}" +
+                "&gsrsearch=$asked&prop=imageinfo&iiprop=url%7Csize%7Cmime%7Cextmetadata&iiextmetadatafilter=LicenseShortName%7CArtist&iiurlwidth=330",
+        )
+        val pages = found.optJSONObject("query")?.optJSONObject("pages") ?: return emptyList()
+        return pages.keys().asSequence().map { pages.getJSONObject(it) }.sortedBy { it.optInt("index") }.mapNotNull { p ->
+            val i = p.optJSONArray("imageinfo")?.optJSONObject(0) ?: return@mapNotNull null
+            val meta = i.optJSONObject("extmetadata")
+            fun of(name: String) = plain(meta?.optJSONObject(name)?.optString("value").orEmpty())
+            val licence = of("LicenseShortName")
+            if (licence.isBlank() || bound(licence)) return@mapNotNull null
+            val url = i.optString("url").substringBefore('?')
+            val ext = "." + url.substringAfterLast('.', "jpg").lowercase().take(4)
+            StockPhoto(
+                id = "commons-" + p.optLong("pageid"), small = i.optString("thumburl").ifBlank { return@mapNotNull null }, full = url,
+                width = i.optInt("width"), height = i.optInt("height"), by = of("Artist").ifBlank { "Unknown" }.take(80), licence = licence,
+                page = i.optString("descriptionurl"), credit = !Regex("CC0|public domain|PD", RegexOption.IGNORE_CASE).containsMatchIn(licence),
+                video = video, ext = ext,
+            )
+        }.toList()
+    }
+
+    /** Openverse pictures under CC0, public domain marks or CC BY. */
+    private fun openverse(query: String, page: Int): List<StockPhoto> {
+        val list = json("https://api.openverse.org/v1/images/?q=${q(query)}&license=cc0,pdm,by&page_size=40&page=$page").optJSONArray("results") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { r ->
+            val licence = r.optString("license").uppercase()
+            val url = r.optString("url").ifBlank { return@mapNotNull null }
+            StockPhoto(
+                "openverse-" + r.optString("id"), r.optString("thumbnail").ifBlank { url }, url, r.optInt("width"), r.optInt("height"),
+                r.optString("creator").ifBlank { "Unknown" }.take(80), if (licence == "PDM") "Public domain" else "CC ${licence} ${r.optString("license_version")}".trim(),
+                r.optString("foreign_landing_url"), credit = licence == "BY", ext = "." + url.substringAfterLast('.', "jpg").substringBefore('?').lowercase().take(4).ifBlank { "jpg" },
+            )
+        }
+    }
+
+    /** Films on the Internet Archive in the public domain or under CC0 or CC BY, in [language] (a code) when given. */
+    private fun archive(query: String, page: Int, language: String?): List<StockPhoto> {
+        val terms = buildList {
+            if (query.isNotBlank()) add("(${query.replace(Regex("[():]"), " ")})")
+            add("mediatype:movies")
+            // what an uploader marks public domain is believed only of films old enough to be: India's sixty years
+            add("licenseurl:*publicdomain*")
+            add("year:[1890 TO 1965]")
+            if (language != null) add("language:($language OR ${INDIAN_LANGUAGES.first { it.second == language }.first})")
+        }.joinToString(" AND ")
+        val docs = json(
+            "https://archive.org/advancedsearch.php?q=${q(terms)}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=creator&fl%5B%5D=licenseurl&rows=40&page=$page&output=json",
+        ).optJSONObject("response")?.optJSONArray("docs") ?: return emptyList()
+        return (0 until docs.length()).map { docs.getJSONObject(it) }.mapNotNull { d ->
+            val id = d.optString("identifier").ifBlank { return@mapNotNull null }
+            val licence = d.optString("licenseurl")
+            val by = (d.opt("creator") as? org.json.JSONArray)?.optString(0) ?: d.optString("creator")
+            StockPhoto(
+                "archive-$id", "https://archive.org/services/img/${Uri.encode(id)}", "archive:$id", 0, 0,
+                by.ifBlank { d.optString("title") }.take(80), if (licence.contains("publicdomain")) "Public domain" else "CC BY",
+                "https://archive.org/details/${Uri.encode(id)}", credit = !licence.contains("publicdomain"), video = true, ext = ".mp4",
+            )
+        }
+    }
+
+    /** The film file of Archive item [id] to bring in: an MP4 of it, the largest under the limit. */
+    private fun archiveFile(id: String): String {
+        val files = json("https://archive.org/metadata/${Uri.encode(id)}/files").optJSONArray("result") ?: throw IOException("That film has no files.")
+        val mp4 = (0 until files.length()).map { files.getJSONObject(it) }
+            .filter { it.optString("name").lowercase().endsWith(".mp4") && it.optString("size").toLongOrNull()?.let { s -> s in 1..VIDEO_LIMIT } == true }
+            .maxByOrNull { it.optString("size").toLong() } ?: throw IOException("That film has no MP4 small enough to bring in.")
+        return "https://archive.org/download/${Uri.encode(id)}/" + mp4.optString("name").split('/').joinToString("/") { Uri.encode(it) }
+    }
+
+    private fun pexelsVideos(key: String, query: String, page: Int): List<StockPhoto> {
+        val list = json("https://api.pexels.com/videos/search?query=${q(query)}&per_page=40&page=$page", mapOf("Authorization" to key)).optJSONArray("videos") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { v ->
+            val files = v.optJSONArray("video_files") ?: return@mapNotNull null
+            // the largest no wider than 4K
+            val file = (0 until files.length()).map { files.getJSONObject(it) }
+                .filter { it.optString("file_type") == "video/mp4" && maxOf(it.optInt("width"), it.optInt("height")) <= 3840 }
+                .maxByOrNull { it.optInt("width") * it.optInt("height") } ?: return@mapNotNull null
+            StockPhoto(
+                "pexelsv-" + v.optLong("id"), v.optString("image"), file.optString("link"), file.optInt("width"), file.optInt("height"),
+                v.optJSONObject("user")?.optString("name").orEmpty(), "Pexels", v.optString("url"), false, video = true, ext = ".mp4",
+            )
+        }
+    }
+
+    private fun pixabay(key: String, query: String, page: Int, video: Boolean): List<StockPhoto> {
+        val base = if (video) "https://pixabay.com/api/videos/" else "https://pixabay.com/api/"
+        val list = json("$base?key=${q(key)}&q=${q(query)}&per_page=40&page=$page&safesearch=true").optJSONArray("hits") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { h ->
+            if (video) {
+                val sizes = h.optJSONObject("videos") ?: return@mapNotNull null
+                val best = listOf("large", "medium", "small").mapNotNull { sizes.optJSONObject(it) }.firstOrNull { it.optString("url").isNotBlank() } ?: return@mapNotNull null
+                StockPhoto(
+                    "pixabayv-" + h.optLong("id"), sizes.optJSONObject("tiny")?.optString("thumbnail").orEmpty().ifBlank { best.optString("thumbnail") }, best.optString("url"),
+                    best.optInt("width"), best.optInt("height"), h.optString("user"), "Pixabay", h.optString("pageURL"), false, video = true, ext = ".mp4",
+                )
+            } else {
+                StockPhoto(
+                    "pixabay-" + h.optLong("id"), h.optString("previewURL"), h.optString("largeImageURL"), h.optInt("imageWidth"), h.optInt("imageHeight"),
+                    h.optString("user"), "Pixabay", h.optString("pageURL"), false, ext = "." + h.optString("largeImageURL").substringAfterLast('.', "jpg").lowercase().take(4),
+                )
+            }
+        }
     }
 
     private fun commons(query: String, page: Int, terms: String): List<StockPhoto> {
@@ -162,6 +316,7 @@ internal object Stock {
         val pages = found.optJSONObject("query")?.optJSONObject("pages") ?: return emptyList()
         return pages.keys().asSequence().map { pages.getJSONObject(it) }.sortedBy { it.optInt("index") }.mapNotNull { p ->
             val i = p.optJSONArray("imageinfo")?.optJSONObject(0) ?: return@mapNotNull null
+            i.put("url", i.optString("url").substringBefore('?'))
             val w = i.optInt("width")
             val h = i.optInt("height")
             val small = i.optString("thumburl")
@@ -242,23 +397,27 @@ internal object Stock {
         val dir = File(context.cacheDir, "stock").apply { mkdirs() }
         // what was brought in before was copied into its project then
         dir.listFiles()?.filter { it.lastModified() < System.currentTimeMillis() - 24 * 3_600_000L }?.forEach { it.delete() }
-        val file = File(dir, photo.id.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".jpg")
+        val ext = photo.ext.takeIf { Regex("\\.[a-z0-9]{2,4}").matches(it) } ?: if (photo.video) ".mp4" else ".jpg"
+        val file = File(dir, photo.id.replace(Regex("[^A-Za-z0-9_-]"), "_") + ext)
         if (file.length() > 0) return file
         val part = File(dir, file.name + ".part")
+        val limit = if (photo.video) VIDEO_LIMIT else 80L * 1024 * 1024
+        val what = if (photo.video) "video" else "photo"
+        val from = if (photo.full.startsWith("archive:")) archiveFile(photo.full.removePrefix("archive:")) else photo.full
         // a site asking for a pause is given one, twice at the most
-        var c = open(photo.full)
+        var c = open(from)
         for (wait in listOf(3L, 8L)) {
             if (c.responseCode != 429 && c.responseCode != 503) break
             val asked = c.getHeaderField("Retry-After")?.toLongOrNull()?.coerceIn(1, 15) ?: wait
             c.disconnect()
             Thread.sleep(asked * 1000)
-            c = open(photo.full)
+            c = open(from)
         }
         try {
-            if (c.responseCode == 429) throw IOException("The site is busy. Try that photo again in a minute.")
-            if (c.responseCode != 200) throw IOException("That photo could not be fetched (${c.responseCode}).")
+            if (c.responseCode == 429) throw IOException("The site is busy. Try that $what again in a minute.")
+            if (c.responseCode != 200) throw IOException("That $what could not be fetched (${c.responseCode}).")
             val total = c.contentLengthLong
-            if (total > 80L * 1024 * 1024) throw IOException("That photo is too large.")
+            if (total > limit) throw IOException("That $what is too large.")
             c.inputStream.use { input ->
                 part.outputStream().use { out ->
                     val piece = ByteArray(64 * 1024)
@@ -268,7 +427,7 @@ internal object Stock {
                         if (n < 0) break
                         out.write(piece, 0, n)
                         done += n
-                        if (done > 80L * 1024 * 1024) throw IOException("That photo is too large.")
+                        if (done > limit) throw IOException("That $what is too large.")
                         if (total > 0) progress(done.toFloat() / total)
                     }
                 }
@@ -279,27 +438,45 @@ internal object Stock {
         } finally {
             c.disconnect()
         }
-        val size = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(part.path, size)
-        if (size.outWidth <= 0) {
+        if (!photo.video) {
+            val size = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(part.path, size)
+            if (size.outWidth <= 0) {
+                part.delete()
+                throw IOException("What the site sent is not a picture.")
+            }
+        } else if (part.length() < 1024) {
             part.delete()
-            throw IOException("What the site sent is not a photo.")
+            throw IOException("What the site sent is not a video.")
         }
         part.renameTo(file)
         photo.told?.let { url -> runCatching { open(url, mapOf("Authorization" to "Client-ID ${key(context, site)}")).apply { responseCode; disconnect() } } }
         return file
     }
 
-    fun creditLine(p: StockPhoto) = "Photo: ${p.by}, ${p.licence}, ${p.page}"
+    fun creditLine(p: StockPhoto) = "${if (p.video) "Video" else "Picture"}: ${p.by}, ${p.licence}, ${p.page}"
+
+    /** The most a video brought in may be. */
+    const val VIDEO_LIMIT = 400L * 1024 * 1024
 }
 
-/** The Stock tab of the import page: a search over the sites, and what it finds, full HD or better. */
+/** The Stock tab of the import page: a search over the sites for photos (full HD or better), videos and memes. */
 @Composable
-internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
+internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: MediaKinds = MediaKinds.BOTH) {
+    // what the picker was asked for: pictures, videos or either
+    val kinds = StockKind.entries.filter {
+        when (wanted) {
+            MediaKinds.IMAGE -> it != StockKind.VIDEOS
+            MediaKinds.VIDEO -> it == StockKind.VIDEOS
+            MediaKinds.BOTH -> true
+        }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
-    var site by remember { mutableStateOf(StockSite.COMMONS_FREE) }
+    var kind by remember { mutableStateOf(kinds.first()) }
+    var site by remember { mutableStateOf(StockSite.entries.first { it.kind == kinds.first() }) }
+    var language by remember { mutableStateOf<Pair<String, String>?>(null) }
     var words by remember { mutableStateOf("") }
     var asked by remember { mutableStateOf("") }
     var keys by remember { mutableIntStateOf(0) }
@@ -312,11 +489,11 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
     var fetching by remember { mutableStateOf<String?>(null) }
     val needsKey = site.keyPage != null && remember(site, keys) { Stock.key(context, site) } == null
 
-    LaunchedEffect(site, asked, page, keys) {
-        if (asked.isBlank() || needsKey) return@LaunchedEffect
+    LaunchedEffect(site, asked, page, keys, language) {
+        if ((asked.isBlank() && language == null) || needsKey) return@LaunchedEffect
         busy = true
         problem = null
-        val result = withContext(Dispatchers.IO) { runCatching { Stock.search(context, site, asked, page) } }
+        val result = withContext(Dispatchers.IO) { runCatching { Stock.search(context, site, asked, page, language) } }
         busy = false
         result.onSuccess { more ->
             val have = found.mapTo(HashSet()) { it.id }
@@ -364,7 +541,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
             Glyph(LucideIcons.Search, Palette.TextSecondary, size = 16.dp)
             Spacer(Modifier.width(8.dp))
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                if (words.isEmpty()) Text("Search HD photos", style = Type.Body.copy(color = Palette.TextSecondary))
+                if (words.isEmpty()) Text(kind.hint, style = Type.Body.copy(color = Palette.TextSecondary))
                 BasicTextField(
                     words, { words = it.take(100) }, singleLine = true, textStyle = Type.Body.copy(color = Color.White), cursorBrush = SolidColor(Palette.Accent),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { start() }), modifier = Modifier.fillMaxWidth(),
@@ -372,8 +549,24 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
             }
             if (words.isNotEmpty()) Text("Search", style = Type.BodyStrong.copy(color = Palette.Accent, fontSize = 14.sp), modifier = Modifier.clickable { start() }.padding(8.dp))
         }
+        // photos, videos or memes; then the sites that have them; then a language of India, if wanted
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            kinds.forEach { k ->
+                Text(
+                    k.title,
+                    style = Type.BodyStrong.copy(fontSize = 14.sp, color = if (k == kind) Color.White else Palette.TextSecondary),
+                    modifier = Modifier.clickable(enabled = fetching == null) {
+                        if (k != kind) {
+                            kind = k
+                            site = StockSite.entries.first { it.kind == k }
+                            start()
+                        }
+                    }.padding(vertical = 6.dp),
+                )
+            }
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StockSite.entries.forEach { s ->
+            StockSite.entries.filter { it.kind == kind }.forEach { s ->
                 Box(
                     Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (s == site) Palette.Accent else Color(0xFF2A2A2A)).clickable(enabled = fetching == null) {
                         if (s != site) {
@@ -385,7 +578,22 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
                 ) { Text(s.title, style = Type.Small.copy(fontSize = 13.sp, color = if (s == site) Color.White else Palette.TextSecondary)) }
             }
         }
-        Text(site.about, style = Type.Tiny, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            (listOf<Pair<String, String>?>(null) + INDIAN_LANGUAGES).forEach { l ->
+                val on = l == language
+                Box(
+                    Modifier.height(26.dp).clip(RoundedCornerShape(13.dp)).then(if (on) Modifier.background(Color(0xFF3A3A3A)) else Modifier.border(1.dp, Color(0xFF3A3A3A), RoundedCornerShape(13.dp)))
+                        .clickable(enabled = fetching == null) {
+                            if (!on) {
+                                language = l
+                                start()
+                            }
+                        }.padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(l?.first ?: "Any language", style = Type.Tiny.copy(fontSize = 12.sp, color = if (on) Color.White else Palette.TextSecondary)) }
+            }
+        }
+        Text(site.about, style = Type.Tiny, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
         if (needsKey) {
             KeyForm(site) { key -> Stock.setKey(context, site, key); keys++ }
             return@Column
@@ -420,7 +628,12 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
                             modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color(0x66000000)).padding(horizontal = 4.dp, vertical = 2.dp),
                         )
                         Text(
-                            if (maxOf(p.width, p.height) >= 3840) "4K" else "HD", style = Type.Tiny.copy(color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
+                            when {
+                                p.video -> "Video"
+                                maxOf(p.width, p.height) >= 3840 -> "4K"
+                                maxOf(p.width, p.height) >= 1920 -> "HD"
+                                else -> "${maxOf(p.width, p.height)}"
+                            }, style = Type.Tiny.copy(color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
                             modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp, vertical = 1.dp),
                         )
                         if (multiple) Box(
@@ -434,14 +647,14 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit) {
             when {
                 busy && found.isEmpty() -> CircularProgressIndicator(color = Palette.Accent, strokeWidth = 2.dp, modifier = Modifier.align(Alignment.Center).size(28.dp))
                 problem != null && found.isEmpty() -> Text(problem!!, style = Type.Small, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(24.dp))
-                asked.isBlank() -> Text("Type what to look for. The photos come from the site you choose, and need the internet.", style = Type.Small, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(32.dp))
-                found.isEmpty() && !busy -> Text("No HD photos found", style = Type.Small, modifier = Modifier.align(Alignment.Center))
+                asked.isBlank() && language == null -> Text("Type what to look for, or pick a language. What is found comes from the site you choose, and needs the internet.", style = Type.Small, textAlign = TextAlign.Center, modifier = Modifier.align(Alignment.Center).padding(32.dp))
+                found.isEmpty() && !busy -> Text(if (kind == StockKind.PHOTOS) "No HD photos found" else "Nothing found", style = Type.Small, modifier = Modifier.align(Alignment.Center))
             }
             if (fetching != null) Box(Modifier.fillMaxSize().background(Color(0xAA000000)), contentAlignment = Alignment.Center) { Text("Fetching ${fetching}", style = Type.Body.copy(color = Color.White)) }
         }
         if (multiple) {
             Row(Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).height(58.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                val owed = chosen.filter { it.credit || it.licence == "Unsplash" || it.licence == "Pexels" }
+                val owed = chosen.filter { it.credit || it.licence == "Unsplash" || it.licence == "Pexels" || it.licence == "Pixabay" }
                 if (owed.isNotEmpty()) {
                     Text(
                         if (owed.any { it.credit }) "Copy credits (needed)" else "Copy credits",

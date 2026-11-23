@@ -619,15 +619,42 @@ fun AtmospherePanel(vm: EditorViewModel) {
                 val categories = remember(list) { list.map { it.category }.distinct() }
                 Tabs(categories, category) { category = it }
                 if (Trying.id != null && vm.clip(Trying.id!!) != null) {
-                    ValueSlider(
-                        value = Trying.strength * 100f, range = 0f..100f, label = { "${it.roundToInt()}" },
-                        onChange = { v ->
-                            Trying.strength = v / 100f
-                            Trying.id?.let { vm.patch(it, JSONObject().put("opacity", (v / 100f).toDouble()), "atmosphere") }
-                            Trying.warm?.takeIf { vm.clip(it) != null }?.let { vm.patch(it, JSONObject().put("opacity", min(1f, v / 100f * 1.1f).toDouble()), "atmosphere") }
-                        },
-                        onDone = { vm.endGesture() }, title = "Strength",
-                    )
+                    // one setting at a time: how strong, how big, which way turned, and where on each axis
+                    var setting by remember { mutableStateOf("Strength") }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Strength", "Scale", "Rotate", "X axis", "Y axis").forEach { name -> Choice(name, name == setting) { setting = name } }
+                    }
+                    val id = Trying.id!!
+                    val now = remember(id, vm.timeline?.revision) { vm.clipJson(id) }
+                    fun place(key: String, value: Double) =
+                        vm.command(JSONObject().put("op", "setClipTransform").put("clipId", id).put(key, value), "atmosphere")
+                    when (setting) {
+                        "Scale" -> ValueSlider(
+                            value = ((now?.optDouble("scale", 1.0) ?: 1.0) * 100).toFloat(), range = 20f..400f, label = { "${it.roundToInt()}%" },
+                            onChange = { place("scale", it / 100.0) }, onDone = { vm.endGesture() }, title = "Scale",
+                        )
+                        "Rotate" -> ValueSlider(
+                            value = (now?.optDouble("rotation", 0.0) ?: 0.0).toFloat().coerceIn(-180f, 180f), range = -180f..180f, label = { "${it.roundToInt()}°" },
+                            onChange = { place("rotation", it.toDouble()) }, onDone = { vm.endGesture() }, title = "Rotate",
+                        )
+                        "X axis" -> ValueSlider(
+                            value = ((now?.optDouble("offsetX", 0.0) ?: 0.0) * 100).toFloat().coerceIn(-100f, 100f), range = -100f..100f, label = { "${it.roundToInt()}" },
+                            onChange = { place("offsetX", it / 100.0) }, onDone = { vm.endGesture() }, title = "Left / right",
+                        )
+                        "Y axis" -> ValueSlider(
+                            value = ((now?.optDouble("offsetY", 0.0) ?: 0.0) * 100).toFloat().coerceIn(-100f, 100f), range = -100f..100f, label = { "${it.roundToInt()}" },
+                            onChange = { place("offsetY", it / 100.0) }, onDone = { vm.endGesture() }, title = "Up / down",
+                        )
+                        else -> ValueSlider(
+                            value = Trying.strength * 100f, range = 0f..100f, label = { "${it.roundToInt()}" },
+                            onChange = { v ->
+                                Trying.strength = v / 100f
+                                Trying.id?.let { vm.patch(it, JSONObject().put("opacity", (v / 100f).toDouble()), "atmosphere") }
+                                Trying.warm?.takeIf { vm.clip(it) != null }?.let { vm.patch(it, JSONObject().put("opacity", min(1f, v / 100f * 1.1f).toDouble()), "atmosphere") }
+                            },
+                            onDone = { vm.endGesture() }, title = "Strength",
+                        )
+                    }
                     val lit = Trying.file?.takeIf { presetFor(it.category).golden }
                     if (lit != null && clip != null) {
                         val again = { if (!Trying.busy) scope.launch { lay(vm, context, clip, lit) } }
@@ -658,6 +685,12 @@ fun AtmospherePanel(vm: EditorViewModel) {
                             val id = Trying.id ?: return@Choice
                             val now = vm.clipJson(id)?.optBoolean("flipH") ?: false
                             vm.patch(id, JSONObject().put("flipH", !now))
+                        }
+                        Choice("Flip", false) {
+                            // upside down, about the other axis
+                            val id = Trying.id ?: return@Choice
+                            val now = vm.clipJson(id)?.optBoolean("flipV") ?: false
+                            vm.patch(id, JSONObject().put("flipV", !now))
                         }
                         Choice(if (finding != null) "Finding people ${finding}" else "Behind people", front) {
                             val s = vm.session ?: return@Choice
