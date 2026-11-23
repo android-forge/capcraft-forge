@@ -148,6 +148,8 @@ CapCraft Forge is in beta.
 | Sound effects, voiceover, extract audio, voice effects, noise reduction and isolate voice | ✅ |
 | Remove background; find people and things in a photo, remove them or put them in an overlay (models downloaded once, run on the phone) | ✅ |
 | Exposure, people lit automatically, fine cutouts of branches, overlays of smoke, light and dust from your own folder | ✅ |
+| 20,000 graphics searched without the internet, with their timing; HD stock photos searched on the import page | 🚧 |
+| Reel to template: a video's cuts, transitions, moves and sound read on the phone, for your own media to go in | 🚧 |
 | Aspect ratios, backgrounds, cover, AutoCut, auto highlight, collage, projects as templates | ✅ |
 | Filler words removed, caption keywords and emojis, English under captions, one's own voice | ✅ |
 | Groups, compound clips, project files, screen recording, live photos, a Home widget, one's own sound folders | ✅ |

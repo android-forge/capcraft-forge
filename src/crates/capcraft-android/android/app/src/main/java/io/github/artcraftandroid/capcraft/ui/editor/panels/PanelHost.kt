@@ -104,6 +104,9 @@ fun PanelHost(vm: EditorViewModel) {
                 // the text sheet's sliders have solid thumbs, as the reference's do
                 is Panel.Text -> androidx.compose.runtime.CompositionLocalProvider(LocalSolidThumbs provides true) { TextPanel(vm, p.clipId, p.tab) }
                 Panel.Stickers -> StickersPanel(vm)
+                is Panel.Graphics -> GraphicsPanel(vm, p.query)
+                Panel.Timing -> TimingPanel(vm)
+                Panel.Slots -> SlotsPanel(vm)
                 Panel.Animation -> AnimationPanel(vm)
                 Panel.Crop -> CropPanel(vm)
                 is Panel.Background -> BackgroundPanel(vm, p.tab)

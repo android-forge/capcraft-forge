@@ -46,6 +46,7 @@ import io.github.artcraftandroid.capcraft.ui.LucideIcons
 import io.github.artcraftandroid.capcraft.ui.Palette
 import io.github.artcraftandroid.capcraft.ui.Type
 import io.github.artcraftandroid.capcraft.ui.editor.EditorViewModel
+import io.github.artcraftandroid.capcraft.ui.editor.Panel
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.PI
@@ -274,6 +275,13 @@ fun StickersPanel(vm: EditorViewModel) {
         }
         if (shown.isEmpty()) {
             Text(if (shelf == -1 && query.isBlank()) "Press and hold one to keep it here" else "No stickers found", style = Type.Small, modifier = Modifier.padding(24.dp))
+        }
+        if (query.isNotBlank()) {
+            // the library of graphics is searched by the same words
+            Row(Modifier.fillMaxWidth().clickable { vm.panel = Panel.Graphics(query) }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Glyph(LucideIcons.Shapes, Palette.Accent, size = 18.dp)
+                Text("  Find “${query.trim()}” in Graphics", style = Type.Body.copy(color = Palette.Accent))
+            }
         }
         ChoiceGrid(shown.size, Modifier.weight(1f)) { i ->
             val s = shown[i]

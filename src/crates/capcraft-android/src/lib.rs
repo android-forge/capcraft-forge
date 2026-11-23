@@ -65,6 +65,7 @@ pub mod pauses;
 pub mod peoplelight;
 mod pixels;
 pub mod playback;
+pub mod reel;
 pub mod reframe;
 mod scrubs;
 pub mod session;

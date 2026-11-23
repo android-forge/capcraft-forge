@@ -200,6 +200,7 @@ private val SHORTCUTS = listOf(
     Shortcut("audiotools", "Audio tools", LucideIcons.AudioLines),
     Shortcut("highlight", "Auto highlight", LucideIcons.Sparkles),
     Shortcut("screen", "Screen record", LucideIcons.Film),
+    Shortcut("reel", "Reel to template", LucideIcons.LayoutTemplate),
 )
 
 /** Photo tools' list: each a tool, with what it does in a line. */
@@ -344,13 +345,20 @@ fun HomeScreen(
         }
     }
 
+    val homeContext = LocalContext.current
+    // a video shared to the app, until it is said what it is for
+    var sharedVideo by remember { mutableStateOf<Uri?>(null) }
+
     // Files shared to the app become a project of their own.
     LaunchedEffect(shared) {
         if (shared.isNotEmpty()) {
             val uris = shared
             consumeShared()
+            // a video on its own may be wanted for how it was made
+            val video = uris.singleOrNull()?.takeIf { (homeContext.contentResolver.getType(it) ?: "").startsWith("video/") }
+            if (video != null) sharedVideo = video
             // shared files open plainly, whatever shortcut was last begun
-            startProject(uris, null)
+            else startProject(uris, null)
         }
     }
 
@@ -370,7 +378,6 @@ fun HomeScreen(
     var audioTools by remember { mutableStateOf(false) }
     var photoTools by remember { mutableStateOf(false) }
     // Shoot and record: the phone's camera records into our cache, and what it records starts a project
-    val homeContext = LocalContext.current
     var capture by remember { mutableStateOf<Uri?>(null) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { recorded ->
         val uri = capture
@@ -490,6 +497,9 @@ fun HomeScreen(
                                 "screen" -> recordScreen()
                                 "audiotools" -> audioTools = true
                                 "phototools" -> photoTools = true
+                                "reel" -> io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
+                                    io.github.artcraftandroid.capcraft.ui.common.MediaKinds.VIDEO, multiple = false,
+                                ) { uris -> startProject(uris, "reel") }
                                 else -> shortcut(it.id, it.videoOnly)
                             }
                         },
@@ -551,6 +561,22 @@ fun HomeScreen(
             }
         }
 
+        sharedVideo?.let { video ->
+            Scrim({ sharedVideo = null }, Alignment.BottomCenter) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)).background(Home.Sheet)
+                        .navigationBarsPadding().padding(bottom = 12.dp),
+                ) {
+                    Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp).size(36.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Home.Grabber))
+                    SheetRow(LucideIcons.Clapperboard, "Edit this video") { sharedVideo = null; startProject(listOf(video), null) }
+                    SheetRow(LucideIcons.LayoutTemplate, "Make a template from it") { sharedVideo = null; startProject(listOf(video), "reel") }
+                    Text(
+                        "A template keeps its cuts, transitions, moves and sound, for your own photos and videos to go in. It is read on this phone.",
+                        style = ink(12f, color = Home.Muted), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+        }
         if (deletingMany) {
             val picked = managing.orEmpty()
             HomeConfirm(
@@ -1339,6 +1365,7 @@ private fun LicencesScreen(onBack: () -> Unit) {
         "LICENSE-material-symbols.txt" to "Material Symbols",
         "NATIVE.txt" to "Native libraries",
         "FONTS.txt" to "Fonts",
+        "GRAPHICS.txt" to "Graphics",
         "RUST_CRATES.txt" to "Rust libraries",
         "LGPL-2.1.txt" to "GNU Lesser General Public License 2.1 (FFmpeg)",
         "GPL-3.0.txt" to "GNU General Public License 3 (espeak-ng)",

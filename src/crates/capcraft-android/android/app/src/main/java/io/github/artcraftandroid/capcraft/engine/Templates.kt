@@ -18,13 +18,16 @@ object Templates {
         val session = MobileSession.open(copy.path)
         try {
             val rows = session.view().rows
+            val reel = session.extra("capcraftReel").isNotEmpty()
+            val slots = session.slots().mapTo(HashSet()) { it.clipId }
             val places = rows.filter { it.kind == RowKind.MAIN || it.kind == RowKind.OVERLAY }
                 .sortedBy { it.kind != RowKind.MAIN }
                 .flatMap { row -> row.clips.sortedBy { it.startUs } }
                 .filter { it.kind == "video" || it.kind == "image" }
             places.zip(uris).forEach { (clip, uri) ->
                 val file = Media.importUri(context, copy.path, uri)
-                session.replaceMedia(clip.id, file.absolutePath)
+                // one made from a reel moves what goes in as the reel's own moved
+                if (reel && clip.id in slots) session.fillSlot(clip.id, file.absolutePath, true) else session.replaceMedia(clip.id, file.absolutePath)
             }
             session.save()
         } finally {

@@ -1061,9 +1061,7 @@ impl Speech {
         // the title or the caption they came from is not touched.
         let language = crate::saying::language(text);
         let said = match (language, family) {
-            ("en", Family::Supertonic) => {
-                crate::saying::in_words(&crate::saying::respell(text))
-            }
+            ("en", Family::Supertonic) => crate::saying::in_words(&crate::saying::respell(text)),
             ("en", _) => crate::saying::respell(text),
             _ => text.to_owned(),
         };

@@ -241,7 +241,7 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
         MediaKinds.VIDEO -> listOf("Videos")
         MediaKinds.IMAGE -> listOf("Photos")
         MediaKinds.BOTH -> listOf("Videos", "Photos")
-    } + listOfNotNull("Collage".takeIf { req.onCollage != null })
+    } + listOfNotNull("Collage".takeIf { req.onCollage != null }, "Stock".takeIf { req.kinds != MediaKinds.VIDEO })
     var tab by remember { mutableIntStateOf(0) }
     var album by remember { mutableStateOf<Long?>(null) }
     var albums by remember { mutableStateOf(false) }
@@ -263,6 +263,8 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
     // the Collage tab shows photos and videos together, and picks several
     val collage = tabs[tab] == "Collage"
     val multiple = req.multiple || collage
+    // photos from stock sites, fetched as they are added
+    val stock = tabs[tab] == "Stock"
     val shown = all.orEmpty().filter { (collage || it.video == videos) && (album == null || it.bucketId == album) }
 
     Column(
@@ -305,6 +307,10 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
                     if (i == tab) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(2.dp).background(Palette.Accent))
                 }
             }
+        }
+        if (stock) {
+            Box(Modifier.fillMaxWidth().weight(1f)) { StockPage(req.multiple, onDone) }
+            return@Column
         }
         if (partial) {
             Row(

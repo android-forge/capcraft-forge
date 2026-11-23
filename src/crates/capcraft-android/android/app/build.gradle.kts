@@ -297,6 +297,8 @@ android {
         includeInApk = false
         includeInBundle = false
     }
+    // the graphics are deflated already, and read from the middle of their file
+    androidResources { noCompress += "bin" }
     packaging {
         // the native libraries packed, most of the app's size: a third of it to download, and unpacked by the
         // phone as it installs
@@ -350,6 +352,7 @@ androidComponents {
                 File(repoDir, "CREDITS.md"),
                 File(repoDir, "licences/NATIVE.txt"),
                 File(repoDir, "licences/FONTS.txt"),
+                File(repoDir, "licences/GRAPHICS.txt"),
                 File(repoDir, "licences/RUST_CRATES.txt"),
                 File(repoDir, "licences/LGPL-2.1.txt"),
                 File(repoDir, "licences/GPL-3.0.txt"),
@@ -365,6 +368,7 @@ androidComponents {
                     "CREDITS.md" to "licences/CREDITS.md",
                     "NATIVE.txt" to "licences/NATIVE.txt",
                     "FONTS.txt" to "licences/FONTS.txt",
+                    "GRAPHICS.txt" to "licences/GRAPHICS.txt",
                     "RUST_CRATES.txt" to "licences/RUST_CRATES.txt",
                     "LGPL-2.1.txt" to "licences/LGPL-2.1.txt",
                     "GPL-3.0.txt" to "licences/GPL-3.0.txt",

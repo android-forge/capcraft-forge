@@ -288,8 +288,10 @@ private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
         vm.panel = Panel.Adjust
     },
     Tool("stickers", "Stickers", LucideIcons.Sticker) { vm.panel = Panel.Stickers },
+    Tool("graphics", "Graphics", LucideIcons.Shapes) { vm.panel = Panel.Graphics() },
     Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
     Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
+    Tool("slots", "Replace media", LucideIcons.Replace) { vm.panel = Panel.Slots },
     Tool("ratio", "Aspect ratio", LucideIcons.Square) { vm.panel = Panel.Ratio },
     Tool("autohighlight", "Auto highlight", LucideIcons.Sparkles) { vm.panel = Panel.AutoHighlight },
     Tool("preview", "Preview quality", LucideIcons.Gauge) { vm.panel = Panel.PreviewQuality },
@@ -309,6 +311,7 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
         Tool("addtext", "Add text", LucideIcons.Type) { vm.panel = Panel.Text(null) },
         Tool("autocaptions", "Auto Captions", LucideIcons.Captions) { vm.panel = Panel.Captions },
         Tool("stickers", "Stickers", LucideIcons.Sticker) { vm.panel = Panel.Stickers },
+        Tool("graphics", "Graphics", LucideIcons.Shapes) { vm.panel = Panel.Graphics() },
         Tool("draw", "Draw", LucideIcons.Paintbrush) { vm.panel = Panel.Draw },
         divider("d-textmore"),
         // a new title starts on the text panel's templates
@@ -417,6 +420,7 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
     // the curve between keyframes needs two of them
     val graphs = Tool("graphs", "Graphs", LucideIcons.Spline, enabled = clip.keysUs.distinct().size >= 2) { vm.panel = Panel.Graphs }
     val layer = Tool("layer", "Layers", LucideIcons.Layers) { vm.panel = Panel.Layer }
+    val timing = Tool("timing", "Timing", LucideIcons.Timer) { vm.panel = Panel.Timing }
     if (clip.kind == "image" && row == RowKind.TEXT) {
         // a sticker, in the reference's order: another sticker set apart, the clip's edits, then the rest
         return listOfNotNull(
@@ -426,6 +430,7 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             },
             divider("d-stickers"),
             split,
+            timing,
             Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation },
             duplicate,
             delete,
@@ -471,6 +476,7 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
                 add(divider("d-addoverlay"))
             }
             add(split)
+            if (!main) add(timing)
             // a picture with no sound of its own (none recorded, or taken out to a track) has no
             // Volume, and its Delete comes after Speed, as the reference lays such a clip's bar out
             val ownSound = video && (clip.audible || clip.muted) && !vm.extracted(clip)
@@ -600,6 +606,7 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
                 vm.edit(select = { clip.id }) { autoSplitText(clip.id) }
             },
             layer,
+            timing,
             Tool("basic", "Basic", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
             // several titles and stickers at once, starting with this one
             Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {

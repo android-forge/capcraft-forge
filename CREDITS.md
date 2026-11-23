@@ -22,6 +22,15 @@ Fonts not in the app are downloaded when wanted from Google Fonts' repository (S
 Remove objects uses YOLOX (Megvii, Apache-2.0), SlimSAM (Apache-2.0) and MI-GAN (Picsart AI Research, MIT), each downloaded
 when it is first used.
 
+Speech offers Supertonic 3 (Supertone Inc., OpenRAIL-M; its code MIT) as sherpa-onnx packages it, downloaded when wanted. Its
+licence forbids some uses, deceiving or harming people among them.
+
+Graphics come from Microsoft's Fluent Emoji and Fluent icons, Phosphor, Tabler, Flat Color Icons, Marketeq, Circle Flags, Health
+Icons (all MIT), Gil Barbara's logos (CC0; the marks are their owners'), and Streamline (CC BY 4.0), as Iconify packages them:
+[graphics/SOURCES.md](graphics/SOURCES.md). They are drawn by resvg (Apache-2.0 or MIT).
+
+Stock photos are their makers', fetched by the user from Wikimedia Commons, NASA, Pexels or Unsplash under those sites' terms.
+
 ## Changes in this build
 
 4K playback from proxies, and ten-bit HEVC on the phone's video chip, are by egagofur

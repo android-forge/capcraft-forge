@@ -63,10 +63,11 @@ pub mod outline;
 pub mod runtime;
 #[cfg(feature = "infer")]
 pub mod segment;
+pub mod shots;
 pub mod stabilize;
 pub mod store;
-pub mod window;
 pub mod strokes;
+pub mod window;
 
 pub use apply::{Mapping, cut, highlight};
 #[cfg(feature = "infer")]

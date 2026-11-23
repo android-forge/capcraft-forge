@@ -53,6 +53,19 @@ steam playstation xbox nintendo unity epic-games wikipedia yahoo bing duckduckgo
 kickstarter kickstarter-icon product-hunt buffer hootsuite mailchimp trello line wechat weibo vk""".split()
 
 
+# what people look for, beside what a graphic is called
+SYNONYMS = {
+    "firework": ["diwali", "newyear"], "fireworks": ["diwali", "newyear"], "firecracker": ["diwali"], "diya": ["diwali", "deepavali"], "sparkler": ["diwali"],
+    "bell": ["subscribe", "notification", "alert"], "heart": ["love", "like"], "thumbs": ["like"], "automobile": ["car"],
+    "television": ["tv"], "tv": ["television"], "motorcycle": ["bike"], "bicycle": ["bike"], "cellphone": ["mobile"], "smartphone": ["mobile", "phone"],
+    "airplane": ["plane", "flight", "aeroplane"], "film": ["movie", "cinema"], "movie": ["film", "cinema"], "rupee": ["inr", "india"],
+    "ballot": ["vote", "election"], "gift": ["present"], "present": ["gift"], "dollar": ["money", "usd"], "bulb": ["idea"], "trophy": ["winner", "win"],
+    "mosque": ["muslim", "islam", "eid"], "church": ["christian"], "temple": ["hindu"], "turban": ["sikh"], "cake": ["birthday"], "balloon": ["birthday", "party"],
+    "soccer": ["football"], "couple": ["wedding", "marriage"], "ring": ["wedding", "engagement"], "sun": ["summer", "weather"], "snowflake": ["winter", "cold"],
+    "umbrella": ["rain", "monsoon"], "curry": ["indian", "food"], "sari": ["saree", "indian"], "mask": ["theatre"], "microphone": ["podcast", "sing", "mic"],
+}
+
+
 def package(name, version):
     """The files of an npm package, as {path: bytes}."""
     os.makedirs(CACHE, exist_ok=True)
@@ -109,6 +122,8 @@ def tidy(body):
 
 def main():
     extra = extra_words()
+    names = json.loads(package("cldr-localenames-full", "49.0.0")["main/en/territories.json"])
+    countries = names["main"]["en"]["localeDisplayNames"]["territories"]
     blocks, where = [], []
     current, lines, totals = bytearray(), [], []
 
@@ -186,7 +201,10 @@ def main():
             if name in chars:
                 words += sorted(extra.get("emoji:" + chars[name], ()))
             if set_id == "circle-flags":
-                words += ["flag", "country"]
+                words += ["flag", "country"] + words_of(countries.get(plain.upper(), "").lower().replace("&", "").replace("\u2019", ""))
+            for have, more in SYNONYMS.items():
+                if have in words:
+                    words += more
             if set_id == "logos":
                 words += ["logo", "brand", "social"]
             # each word once, the name's own first
@@ -226,6 +244,16 @@ def main():
             f.write(f"| {title} | {n} | {name} | {'[' + author + '](' + url + ')' if url else author} | {licence} |\n")
         f.write("\nThe words they are found by come from the sets themselves, [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT), [Lucide](https://github.com/lucide-icons/lucide) (ISC), [Phosphor](https://github.com/phosphor-icons/core) (MIT) and [Unicode CLDR](https://cldr.unicode.org/) (Unicode-3.0).\n")
         f.write("\nGraphics under CC BY 4.0 ask for a credit where they are shown; the app says which do and copies the credit.\n")
+    mit = "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+    isc = "Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE."
+    with open(os.path.join(HERE, "../licences/GRAPHICS.txt"), "w") as f:
+        f.write("The graphics library. Brand logos are their owners' trademarks and stay so.\n")
+        for set_id, title, n, licence, author, url in totals:
+            f.write(f"\n{title} ({set_id}): {n} graphics, {licence}\nCopyright (c) {author}{' - ' + url if url else ''}\n")
+        f.write("\nCC-BY-4.0: https://creativecommons.org/licenses/by/4.0/legalcode - the graphics are as their authors made them, packed together. Credit them where they are shown.\n")
+        f.write("CC0-1.0: https://creativecommons.org/publicdomain/zero/1.0/legalcode\n")
+        f.write("\nThe words graphics are found by:\nTabler Icons, MIT, Copyright (c) 2020-2026 Pawel Kuna\nPhosphor Icons, MIT, Copyright (c) 2023 Phosphor Icons\nLucide, ISC, Copyright (c) Lucide Icons and Contributors\nUnicode CLDR, Unicode-3.0, Copyright (c) 1991-2026 Unicode, Inc. - https://www.unicode.org/license.txt\n")
+        f.write("\n\nMIT\n\n" + mit + "\n\n\nISC\n\n" + isc + "\n")
     print(sum(t[2] for t in totals), "graphics", len(index), "+", offset, "bytes")
 
 

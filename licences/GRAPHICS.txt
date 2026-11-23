@@ -1,0 +1,74 @@
+The graphics library. Brand logos are their owners' trademarks and stay so.
+
+Video (own): 257 graphics, AGPL-3.0-or-later
+Copyright (c) CapCraft contributors
+
+Emoji (fluent-emoji-flat): 3139 graphics, MIT
+Copyright (c) Microsoft Corporation - https://github.com/microsoft/fluentui-emoji
+
+Stickies (streamline-stickies-color): 200 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Circles (streamline-kameleon-color): 600 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Colour (streamline-ultimate-color): 958 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Plump (streamline-plump-color): 500 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Freehand (streamline-freehand-color): 997 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Cyber (streamline-cyber-color): 500 graphics, CC-BY-4.0
+Copyright (c) Streamline - https://github.com/webalys-hq/streamline-vectors
+
+Gradient (fluent-color): 197 graphics, MIT
+Copyright (c) Microsoft Corporation - https://github.com/microsoft/fluentui-system-icons
+
+Flat (flat-color-icons): 329 graphics, MIT
+Copyright (c) Icons8 - https://github.com/icons8/flat-Color-icons
+
+Two tone (marketeq): 590 graphics, MIT
+Copyright (c) Marketeq
+
+Flags (circle-flags): 417 graphics, MIT
+Copyright (c) HatScripts - https://github.com/HatScripts/circle-flags
+
+Brands (logos): 109 graphics, CC0-1.0
+Copyright (c) Gil Barbara - https://github.com/gilbarbara/logos
+
+Symbols (ph): 4536 graphics, MIT
+Copyright (c) Phosphor Icons - https://github.com/phosphor-icons/core
+
+Outline (tabler): 6132 graphics, MIT
+Copyright (c) Paweł Kuna - https://github.com/tabler/tabler-icons
+
+Health (healthicons): 775 graphics, MIT
+Copyright (c) Resolve to Save Lives - https://github.com/resolvetosavelives/healthicons
+
+CC-BY-4.0: https://creativecommons.org/licenses/by/4.0/legalcode - the graphics are as their authors made them, packed together. Credit them where they are shown.
+CC0-1.0: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+The words graphics are found by:
+Tabler Icons, MIT, Copyright (c) 2020-2026 Pawel Kuna
+Phosphor Icons, MIT, Copyright (c) 2023 Phosphor Icons
+Lucide, ISC, Copyright (c) Lucide Icons and Contributors
+Unicode CLDR, Unicode-3.0, Copyright (c) 1991-2026 Unicode, Inc. - https://www.unicode.org/license.txt
+
+
+MIT
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+ISC
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

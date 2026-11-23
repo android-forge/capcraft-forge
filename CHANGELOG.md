@@ -33,6 +33,15 @@ dated, as the licence asks; `#` numbers are the original project's.
   main and overlay photos.
 - Exposure in Adjust. Light people: people given the light they want, the rest left alone. Fine cutout: branches and other fine
   things cut from the sky. Atmosphere: overlays of the user's own, laid with a preset for their kind, behind people if asked.
-- A much smaller app (38 MB, from 116): ONNX Runtime linked once, FFmpeg without what an editor of files never uses, the native
+- A much smaller app (38 MB, from 116; 43 with the graphics): ONNX Runtime linked once, FFmpeg without what an editor of files never uses, the native
   libraries packed, the less-used fonts downloaded when wanted. The baseline profile is in, so it starts and scrolls smoothly.
+- Speech that tells "live" in "broadcast live" from "how you live": Supertonic 3 voices, and words spelt as they sound for the
+  voices that look them up.
+- Graphics: 20,236 emoji, stickers, icons, flags, logos and shapes for video, kept in the app and found by words without the
+  internet; `graphics/build.py` packs them. Timing: when a graphic, title or overlay comes on and goes.
+- Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA, and Pexels and Unsplash with a key of
+  one's own.
+- Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
+  to go in. A video shared to the app may be made one.
+- Golden light in Atmosphere: rays, lights and window beams yellow, and the picture warmed by them.
 - Photographs (CC0) in the Home screen's header, and README screenshots of this build.

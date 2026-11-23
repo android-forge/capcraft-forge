@@ -63,6 +63,12 @@ sealed interface Panel {
     data object Animation : Panel
     data object Crop : Panel
     data object Stickers : Panel
+    /** The graphics library, opened on a search for [query]. */
+    data class Graphics(val query: String = "") : Panel
+    /** The places media go in a template, to be filled with the user's own. */
+    data object Slots : Panel
+    /** When a clip over the video comes on screen and goes. */
+    data object Timing : Panel
     data object Voiceover : Panel
     data object SoundFx : Panel
     data object Transcript : Panel
@@ -217,6 +223,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 incoming.isEmpty() -> {}
                 then == "collage" -> startCollage(incoming)
                 then == "autocut" -> startAutoCut(incoming)
+                then == "reel" -> startReel(incoming)
                 else -> addToMain(incoming, atEnd = true) { openTool(then) }
             }
         }
@@ -308,6 +315,39 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                 scheduleSave()
                 message = "Your video is ready - change anything you like"
             }.onFailure { fail(it) }
+        }
+    }
+
+    /** A template from a finished video: its shots, transitions and sound read and laid out, for other media to go in. */
+    private fun startReel(uris: List<Uri>) {
+        val s = session ?: return
+        val uri = uris.firstOrNull() ?: return
+        viewModelScope.launch {
+            busy = "Reading the video"
+            val file = withContext(Threads.commands) { runCatching { Media.importUri(getApplication(), path, uri) } }
+            file.onFailure { busy = null; fail(it) }
+            val video = file.getOrNull() ?: return@launch
+            val listener = object : io.github.artcraftandroid.capcraft.core.SpeechListener {
+                override fun onProgress(fraction: Float, stage: String) {
+                    viewModelScope.launch { if (busy != null) busy = "Reading the video ${(fraction * 100).toInt()}%" }
+                }
+
+                override fun onDone(result: TimelineView?) {
+                    viewModelScope.launch {
+                        busy = null
+                        result?.let { applyView(it) }
+                        panel = Panel.Slots
+                    }
+                }
+
+                override fun onFailed(message: String) {
+                    viewModelScope.launch {
+                        busy = null
+                        this@EditorViewModel.message = message
+                    }
+                }
+            }
+            withContext(Threads.commands) { runCatching { s.makeFromReel(video.absolutePath, listener) } }.onFailure { busy = null; fail(it) }
         }
     }
 
