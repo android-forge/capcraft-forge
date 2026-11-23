@@ -7,7 +7,7 @@ Not legal advice. Work through this for every release.
 - [x] A name: CapCraft Forge. It still has CapCraft in it: ask the original authors, or change it.
 - [ ] An icon of its own, and no use of CapCut's.
 - [x] An application id of its own in `app/build.gradle.kts`: another key cannot update the original's app.
-- [ ] A signing key of its own, backed up, never committed; its values as the release workflow's secrets.
+- [x] A signing key of its own, backed up, never committed; its values as the release workflow's secrets.
 - [x] README images and links that are this build's, and not the original's store badges.
 - [ ] Make this repository public, or point `SOURCE_URL` in `HomeScreen.kt` at a public one: whoever gets the APK must get its source.
 - [ ] Ask Concat whether its model mirror may be used by this build.

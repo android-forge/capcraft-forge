@@ -25,14 +25,33 @@
   <img alt="Target: Android 16 (API 36)" src="https://img.shields.io/badge/target-Android%2016%20%28API%2036%29-blue?style=flat">
   <img alt="License: AGPL-3.0-or-later" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue?style=flat">
   <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-lightblue?style=flat">
+  <a href="https://github.com/praveenkrishna16n-sys/capcraft-forge/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/praveenkrishna16n-sys/capcraft-forge?style=flat&label=release"></a>
 </p>
 
 <p align="center">
+  <a href="#get-the-app">Get the app</a> ·
   <a href="#made-for-reels">Made for reels</a> ·
   <a href="#what-capcraft-forge-adds">What Forge adds</a> ·
+  <a href="#your-privacy">Privacy</a> ·
   <a href="#still-to-do">Still to do</a> ·
-  <a href="#building-instructions">Building</a>
+  <a href="#building-instructions">Building</a> ·
+  <a href="#reporting-problems-and-helping">Helping</a>
 </p>
+
+<br>
+
+A free video editor for reels, shorts and stories that runs entirely on your phone: a timeline with keyframes,
+captions, cutouts, colour, templates and HD export. A full-featured, open-source alternative to the editors that want
+a subscription.
+
+Forge is a community build of **ArtCraft's CapCraft** (the ArtCraft Team's CapCraft for Android, 0.0.4-beta): everything
+in ArtCraft CapCraft is here, with [the bug fixes and features below](#what-capcraft-forge-adds) on top. It is not made
+or endorsed by the ArtCraft Team.
+
+- **Free, with no ads and no watermark.** No account, no sign-in, no trial.
+- **On your phone.** Cutouts, captions, voices and depth are worked out on the device; your videos are never uploaded.
+- **Made for reels.** Titles behind the person, beat cuts, reel templates, golden light, 20,236 graphics found offline.
+- **Open source** under the AGPL: read it, build it, change it.
 
 <br>
 
@@ -46,6 +65,33 @@
 <td align="center"><sub>The editor: preview, timeline and tools</sub></td>
 </tr>
 </table>
+
+<br>
+
+## Get the app
+
+1. On your phone, open the [latest release](https://github.com/praveenkrishna16n-sys/capcraft-forge/releases/latest)
+   and download `capcraft-forge-<version>.apk`.
+2. Open it, and allow your browser or file manager to install apps when Android asks.
+3. That's all: there is no account to make.
+
+It needs **Android 10 or newer** on a **64-bit ARM** phone (nearly every phone made since 2017). The app is about 45 MB;
+the models for cutouts, depth and speech are downloaded the first time each is used, so you only fetch what you use.
+CapCraft Forge installs beside the original CapCraft, as an app of its own. To update it, download the next release's
+APK and install it over the one you have; your projects stay.
+
+<details>
+  <summary>Check that an APK is genuine</summary>
+
+  Every release from 0.0.5 on is signed with the same key. Its certificate's SHA-256 fingerprint is
+
+  ```
+  15:68:75:C4:FC:B1:30:18:8A:C2:97:32:62:61:D6:BE:64:E4:65:B4:8A:3A:50:3E:18:79:C6:48:C5:65:77:56
+  ```
+
+  `apksigner verify --print-certs capcraft-forge-<version>.apk` prints it, as do apps such as AppVerifier on the phone.
+  An APK signed with any other key is not from this project.
+</details>
 
 <br>
 
@@ -176,6 +222,18 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 | HDR export in ten-bit HEVC | ✅ |
 | Photo and live photo export from any project | ✅ |
 
+## Your privacy
+
+CapCraft Forge has no account, no analytics, no ads and no tracking. Your photos, videos and projects stay on your
+phone, and every effect, cutout, caption and voice is made there.
+
+It goes online only when you ask it to: to download a model (from GitHub or Hugging Face) or a font (from Google
+Fonts) the first time it is used, to search the stock
+photos and videos (your search words go to Wikimedia Commons, NASA, the Internet Archive or Unsplash, as you pick), and
+to open a site you choose. With those downloaded, editing and export work with the phone offline.
+
+<br>
+
 ## Still to do
 
 | Feature | Notes |
@@ -222,17 +280,23 @@ Build time dependencies:
   ```
 </details>
 
-*Builds are only tested in WSL Ubuntu on Windows 11.*
+*Builds are tested on macOS (Apple silicon) and on Ubuntu 24.04, where the release workflow builds every release.*
+
+<br>
+
+## Reporting problems and helping
+
+- **Something wrong?** [Open an issue](https://github.com/praveenkrishna16n-sys/capcraft-forge/issues) with your phone's
+  model, its Android version, the app's version (Me › About CapCraft Forge) and the steps that show it. A screen recording helps.
+- **An idea?** Open an issue too; [Still to do](#still-to-do) lists what is planned already.
+- **Code?** Pull requests are welcome. Keep each to one change, say how you tested it on a phone, and keep your commits
+  your own: they are credited in [CREDITS.md](CREDITS.md).
+- **Liked it?** A star on GitHub helps other people find it.
+
+Problems in this build are this project's to fix: please report them here, not to the original CapCraft.
 
 <br>
 
 ## License
 
 [AGPL-3.0-or-later](LICENSE). CapCraft Forge is not affiliated with, endorsed by or connected to ByteDance or CapCut.
-
-<br>
-
-## Misc info for myself
-
-Try to use [semantic commit](https://kapeli.com/cheat_sheets/Semantic_Commits.docset/Contents/Resources/Documents/index)
-messages. Use `feat:` / `fix:` / `chore:` / `docs:` / etc.
