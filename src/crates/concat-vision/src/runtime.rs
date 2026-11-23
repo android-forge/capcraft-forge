@@ -146,6 +146,15 @@ impl Model {
         Ok(Model { session })
     }
 
+    /// Loads a model from a file to run on the CPU alone: for a small one
+    /// whose answers an accelerator's lower precision would spoil, as it does
+    /// a reader of letters'.
+    pub fn from_file_on_cpu(path: &std::path::Path) -> Result<Model, String> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        Model::build(&bytes, &[], vec![ort::ep::CPU::default().build()])
+    }
+
     /// Loads a model from a file.
     pub fn from_file(path: &std::path::Path) -> Result<Model, String> {
         let bytes = std::fs::read(path)

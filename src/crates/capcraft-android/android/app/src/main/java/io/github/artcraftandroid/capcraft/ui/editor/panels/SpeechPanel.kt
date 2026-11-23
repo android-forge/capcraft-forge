@@ -72,6 +72,7 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
     var voiceList by remember { mutableStateOf<List<Voice>>(emptyList()) }
     var model by remember { mutableIntStateOf(0) }
     var voice by remember { mutableStateOf<Int?>(null) }
+    var manner by remember { mutableIntStateOf(0) }
     var job by remember { mutableStateOf<Job>(Job.Idle) }
     var refresh by remember { mutableIntStateOf(0) }
     // captions made before, which new ones replace unless this is unticked
@@ -200,6 +201,20 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                     }
                 }
             }
+            if (!captions && clipId == null) {
+                Spacer(Modifier.height(12.dp))
+                Text("Manner", style = Type.Small)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MANNERS.forEachIndexed { i, m ->
+                        Chip(m.name, i == manner) {
+                            manner = i
+                            // a manner reads best in the voice it was made for, when that one is there
+                            m.voice?.let { wanted -> voiceList.firstOrNull { it.name == wanted && it.family == chosen?.family }?.let { voice = it.id } }
+                        }
+                    }
+                }
+            }
             if (captions && existing > 0) {
                 Spacer(Modifier.height(8.dp))
                 CheckChip("Clear current captions", replace) { replace = !replace }
@@ -252,7 +267,12 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
                                     val at = vm.playhead
                                     scope.launch(Threads.commands) {
                                         runCatching {
-                                            if (clipId == null) s.speakText(words, at, target.id, v, listener) else s.textToSpeech(clipId, target.id, v, listener)
+                                            val m = MANNERS[manner]
+                                            when {
+                                                clipId != null -> s.textToSpeech(clipId, target.id, v, listener)
+                                                manner == 0 -> s.speakText(words, at, target.id, v, listener)
+                                                else -> s.speakStyled(words, at, target.id, v, m.speed, m.pauses, m.effects, listener)
+                                            }
                                         }.onFailure { e -> launch(Dispatchers.Main) { job = Job.Idle; vm.message = e.userMessage } }
                                     }
                                 }
@@ -272,6 +292,21 @@ fun SpeechPanel(vm: EditorViewModel, captions: Boolean, clipId: String?) {
         }
     }
 }
+
+/** A way of reading: its pace and breaths, the voice it suits, and what is done to the sound after. */
+private class Manner(val name: String, val speed: Float, val pauses: Float, val voice: String?, val effects: String)
+
+private val MANNERS = listOf(
+    Manner("Natural", 1f, 0.2f, null, "[]"),
+    // slow and low, with a hall's long tail: a film trailer's voice
+    Manner(
+        "Epic narrator", 0.86f, 0.55f, "supertonic_m5",
+        """[{"id":"concat.deep","params":{"pitch":-2,"body":5}},{"id":"concat.bass","params":{"gain":4}},{"id":"concat.hall","params":{"size":45}}]""",
+    ),
+    Manner("Storyteller", 0.92f, 0.45f, "supertonic_m2", """[{"id":"concat.deep","params":{"pitch":-1,"body":3}},{"id":"concat.room","params":{"size":30}}]"""),
+    Manner("Announcer", 1.06f, 0.25f, "supertonic_m1", """[{"id":"concat.bass","params":{"gain":3}}]"""),
+    Manner("Calm", 0.9f, 0.5f, "supertonic_f2", "[]"),
+)
 
 @Composable
 private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {

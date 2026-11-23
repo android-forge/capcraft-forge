@@ -88,9 +88,33 @@ pub struct Held {
     pub bottom: f64,
 }
 
+/// How the pictures sit in the frame.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Framing {
+    /// Filling it.
+    #[default]
+    Full,
+    /// In a band between black bars, from `top` to `bottom` (fractions).
+    Bars {
+        /// Where the band starts.
+        top: f64,
+        /// Where it ends.
+        bottom: f64,
+    },
+    /// In a band over a blurred copy of themselves.
+    Blurred {
+        /// Where the band starts.
+        top: f64,
+        /// Where it ends.
+        bottom: f64,
+    },
+}
+
 /// What was read.
 #[derive(Debug, Clone, Default)]
 pub struct Reading {
+    /// How the pictures sit in the frame.
+    pub framing: Framing,
     /// The shots, end to end.
     pub shots: Vec<Shot>,
     /// When the picture flashes within a shot, seconds.
@@ -404,6 +428,7 @@ impl Reader {
         }
         let held = self.held(&shots);
         Reading {
+            framing: self.framing(),
             shots,
             flashes,
             held,
@@ -977,6 +1002,70 @@ impl Reader {
         (moves, edited, shakes)
     }
 
+    /// Whether the pictures fill the frame, or sit in a band of it over bars
+    /// or over a blur of themselves.
+    fn framing(&self) -> Framing {
+        let (w, h) = (self.w, self.h);
+        let looks: Vec<&Look> = self.looks.iter().step_by(3).collect();
+        if looks.is_empty() || h < 16 {
+            return Framing::Full;
+        }
+        // each row: how often it is black, and how much detail it has
+        let mut dark = vec![0usize; h];
+        let mut detail = vec![0f32; h];
+        for look in &looks {
+            for y in 1..h - 1 {
+                let row = &look.luma[y * w..(y + 1) * w];
+                if row.iter().all(|v| *v < 26) {
+                    dark[y] += 1;
+                }
+                let mut sum = 0u32;
+                for x in 1..w - 1 {
+                    let at = y * w + x;
+                    let v = i32::from(look.luma[at]) * 4
+                        - i32::from(look.luma[at - 1])
+                        - i32::from(look.luma[at + 1])
+                        - i32::from(look.luma[at - w])
+                        - i32::from(look.luma[at + w]);
+                    sum += v.unsigned_abs();
+                }
+                detail[y] += sum as f32 / (w - 2) as f32;
+            }
+        }
+        let n = looks.len();
+        let black = |y: usize| dark[y] * 10 > n * 9;
+        let top = (1..h / 2).take_while(|y| black(*y)).count();
+        let bottom = (h / 2..h - 1).rev().take_while(|y| black(*y)).count();
+        let edge = |rows: usize| rows as f64 / h as f64;
+        if top + 1 >= h / 12 && bottom + 1 >= h / 12 {
+            return Framing::Bars {
+                top: edge(top + 1),
+                bottom: 1.0 - edge(bottom + 1),
+            };
+        }
+        // a blurred fill has little detail above and below a band that has much
+        let mut middle: Vec<f32> = detail[h * 2 / 5..h * 3 / 5].to_vec();
+        middle.sort_by(f32::total_cmp);
+        let sharp = middle[middle.len() / 2];
+        if sharp < n as f32 * 1.5 {
+            return Framing::Full;
+        }
+        let soft = |y: usize| detail[y] < sharp * 0.22;
+        let top = (1..h / 2).take_while(|y| soft(*y)).count();
+        let bottom = (h / 2..h - 1).rev().take_while(|y| soft(*y)).count();
+        // and is not black, nor a plain colour
+        let lit = |from: usize, to: usize| {
+            looks.iter().map(|l| l.luma[from * w..to * w].iter().map(|v| u32::from(*v)).sum::<u32>() as f32 / ((to - from) * w) as f32).sum::<f32>() / n as f32 > 30.0
+        };
+        if top >= h / 10 && bottom >= h / 10 && lit(1, top) && lit(h - bottom, h - 1) && detail[1..top].iter().any(|d| *d > n as f32 * 0.4) {
+            return Framing::Blurred {
+                top: edge(top + 1),
+                bottom: 1.0 - edge(bottom + 1),
+            };
+        }
+        Framing::Full
+    }
+
     /// What keeps its place over the cuts.
     fn held(&self, shots: &[Shot]) -> Vec<Held> {
         const CELL: usize = 4;
@@ -1373,6 +1462,46 @@ mod tests {
             .map(|i| scene(9, 1.15, if i / 3 % 2 == 0 { 0.03 } else { -0.03 }, 0.0))
             .collect();
         assert!(read(&shaken).shots[0].shakes);
+    }
+
+    #[test]
+    fn bars_and_a_blurred_fill_are_told() {
+        let band = |seed: u32, blur: bool| {
+            let inner = scene(seed, 1.0, 0.0, 0.0);
+            let mut out = vec![0u8; W * H * 3];
+            for y in 0..H {
+                for x in 0..W {
+                    let inside = (36..92).contains(&y);
+                    for c in 0..3 {
+                        out[(y * W + x) * 3 + c] = if inside {
+                            // the picture squeezed into the band
+                            inner[(((y - 36) * H / 56) * W + x) * 3 + c]
+                        } else if blur {
+                            (90 + (x as i32 + y as i32) as u8 / 4) / 1 + c as u8 * 20
+                        } else {
+                            0
+                        };
+                    }
+                }
+            }
+            out
+        };
+        for (blur, wanted) in [(false, "Bars"), (true, "Blurred")] {
+            let mut frames = Vec::new();
+            for seed in 1..4 {
+                for _ in 0..20 {
+                    frames.push(band(seed, blur));
+                }
+            }
+            let got = read(&frames).framing;
+            let (top, bottom) = match got {
+                Framing::Bars { top, bottom } if wanted == "Bars" => (top, bottom),
+                Framing::Blurred { top, bottom } if wanted == "Blurred" => (top, bottom),
+                other => panic!("{wanted}: {other:?}"),
+            };
+            assert!((top - 36.0 / 128.0).abs() < 0.03 && (bottom - 92.0 / 128.0).abs() < 0.03, "{got:?}");
+        }
+        assert_eq!(read(&vec![scene(3, 1.0, 0.0, 0.0); 30]).framing, Framing::Full);
     }
 
     #[test]

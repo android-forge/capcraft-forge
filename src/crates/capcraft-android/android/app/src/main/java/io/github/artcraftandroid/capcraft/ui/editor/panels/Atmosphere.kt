@@ -67,7 +67,8 @@ import io.github.artcraftandroid.capcraft.ui.editor.EditorViewModel
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.exp
-import kotlin.math.ln
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -220,32 +221,89 @@ internal fun laid(preset: Preset, seen: Seen, scene: Scene, frameAspect: Float, 
         }
     }
     val adjust = JSONObject()
-    if (!golden && seen.peak < 0.7f) adjust.put("exposure", (ln(0.8f / seen.peak.coerceAtLeast(0.05f)) / ln(2f)).coerceAtMost(if (preset.light) 2f else 1.3f).toDouble())
     // its light the colour of the picture's own, and of what it is: fewer kelvin is warmer
     val warm = (scene.warm * 0.6f + preset.warmth * 0.6f).coerceIn(-1f, 1f)
     if (!golden && preset.light && abs(warm) > 0.08f) adjust.put("temperature", (6500 - warm * 2200).roundToInt())
     return Laid("screen", opacity.toDouble(), scale.toDouble(), x.toDouble(), y.toDouble(), 0.0, flip, if (adjust.length() == 0) "" else adjust.toString())
 }
 
-/** The colour of golden light [l] bright (0 to 1), each channel 0 to 1: amber where it is faint, yellow in the beam, near white at its heart. */
-internal fun goldenAt(l: Float): FloatArray {
+/**
+ * A colour of light: what it is where faint, in the beam and at its heart (red, green, blue, 0 to 1), and what it
+ * makes of the picture away from it and close to it, to multiply the picture by.
+ */
+internal class Tint(val name: String, val faint: FloatArray, val beam: FloatArray, val heart: FloatArray, val away: FloatArray, val close: FloatArray)
+
+private fun c(r: Float, g: Float, b: Float) = floatArrayOf(r, g, b)
+
+internal val TINTS = listOf(
+    Tint("Golden", c(1f, 0.46f, 0.08f), c(1f, 0.66f, 0.24f), c(1f, 0.92f, 0.66f), c(0.9f, 0.665f, 0.43f), c(1f, 0.83f, 0.55f)),
+    Tint("Sunset", c(1f, 0.3f, 0.06f), c(1f, 0.5f, 0.16f), c(1f, 0.85f, 0.6f), c(0.88f, 0.58f, 0.42f), c(1f, 0.74f, 0.5f)),
+    Tint("Warm white", c(1f, 0.75f, 0.5f), c(1f, 0.9f, 0.75f), c(1f, 0.98f, 0.92f), c(0.95f, 0.88f, 0.78f), c(1f, 0.95f, 0.86f)),
+    Tint("Pink", c(1f, 0.35f, 0.55f), c(1f, 0.55f, 0.72f), c(1f, 0.9f, 0.93f), c(0.9f, 0.72f, 0.8f), c(1f, 0.84f, 0.88f)),
+    Tint("Blue hour", c(0.25f, 0.45f, 1f), c(0.5f, 0.72f, 1f), c(0.9f, 0.96f, 1f), c(0.72f, 0.8f, 0.95f), c(0.86f, 0.92f, 1f)),
+)
+
+/** The colour of light of [tint] [l] bright (0 to 1), each channel 0 to 1: faint, in the beam, near white at its heart. */
+internal fun tintAt(tint: Tint, l: Float): FloatArray {
     val t = (l / 0.55f).coerceIn(0f, 1f)
     val u = ((l - 0.55f) / 0.45f).coerceIn(0f, 1f)
-    fun mix(amber: Float, gold: Float, heart: Float) = l * ((amber * (1 - t) + gold * t) * (1 - u) + heart * u)
-    return floatArrayOf(mix(1f, 1f, 1f), mix(0.46f, 0.66f, 0.92f), mix(0.08f, 0.24f, 0.66f))
+    return FloatArray(3) { k -> l * ((tint.faint[k] * (1 - t) + tint.beam[k] * t) * (1 - u) + tint.heart[k] * u) }
+}
+
+/**
+ * Where an overlay's black is: a little above the level most of its dark is at, so that its grain and the noise
+ * of its file go with it. Below that it is taken away, and so leaves the picture under it as it was.
+ */
+internal fun blackOf(small: Bitmap): Float {
+    val w = small.width
+    val h = small.height
+    val px = IntArray(w * h).also { small.getPixels(it, 0, w, 0, 0, w, h) }
+    val counts = IntArray(256)
+    for (p in px) counts[((p shr 16 and 255) * 77 + (p shr 8 and 255) * 150 + (p and 255) * 29) shr 8]++
+    var seen = 0
+    var quarter = 0
+    while (quarter < 255 && seen + counts[quarter] < px.size / 4) seen += counts[quarter++]
+    return ((quarter + 4) / 255f).coerceAtMost(0.16f)
+}
+
+/**
+ * [picture] with what is below [black] gone to black, and the rest lifted by [lift]: an overlay whose dark leaves
+ * the picture under it untouched however it is brightened.
+ */
+internal fun cleaned(picture: Bitmap, black: Float, lift: Float): Bitmap {
+    val w = picture.width
+    val h = picture.height
+    val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val floor = black * 255f
+    val table = IntArray(256) { v ->
+        val t = ((v - floor) / (255f - floor)).coerceAtLeast(0f)
+        // a soft toe, so what is just above black fades in rather than steps
+        val toe = if (t < 0.06f) t * t / 0.12f else t - 0.03f
+        (toe * lift * 255f).roundToInt().coerceIn(0, 255)
+    }
+    val row = IntArray(w)
+    for (y in 0 until h) {
+        picture.getPixels(row, 0, w, 0, y, w, 1)
+        for (x in 0 until w) {
+            val p = row[x]
+            row[x] = (0xFF shl 24) or (table[p shr 16 and 255] shl 16) or (table[p shr 8 and 255] shl 8) or table[p and 255]
+        }
+        out.setPixels(row, 0, w, 0, y, w, 1)
+    }
+    return out
 }
 
 /**
  * [picture], an overlay of light on black, made the sun's: its beams yellow whatever colour they were, lifted
  * where they are faint, and a glow about their heart, [reach] pixels of it to one of the frame's shorter sides.
  */
-internal fun golden(picture: Bitmap, seen: Seen, reach: Float): Bitmap {
+internal fun golden(picture: Bitmap, seen: Seen, reach: Float, tint: Tint = TINTS[0], glowing: Float = 1f, black: Float = 0f): Bitmap {
     val w = picture.width
     val h = picture.height
     val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val lift = min(1f / seen.peak.coerceAtLeast(0.2f), 2.2f) * 0.8f
     val colors = IntArray(256) { i ->
-        val c = goldenAt(i / 255f)
+        val c = tintAt(tint, i / 255f)
         (0xFF shl 24) or ((c[0] * 255).roundToInt() shl 16) or ((c[1] * 255).roundToInt() shl 8) or (c[2] * 255).roundToInt()
     }
     // the glow by the square of the distance, so that no pixel takes a square root
@@ -253,7 +311,7 @@ internal fun golden(picture: Bitmap, seen: Seen, reach: Float): Bitmap {
     val far = 6f
     val glow = FloatArray(steps + 1) { i ->
         val d2 = i * far / steps
-        (0.6 * exp(-d2 / (0.24 * 0.24)) + 0.26 * exp(-d2 / (0.7 * 0.7))).toFloat()
+        (glowing * (0.6 * exp(-d2 / (0.24 * 0.24)) + 0.26 * exp(-d2 / (0.7 * 0.7)))).toFloat()
     }
     val cx = seen.heart * w
     val cy = seen.heartY * h
@@ -263,7 +321,7 @@ internal fun golden(picture: Bitmap, seen: Seen, reach: Float): Bitmap {
         val dy = (y - cy) / reach
         for (x in 0 until w) {
             val p = row[x]
-            val light = ((p shr 16 and 255) * 77 + (p shr 8 and 255) * 150 + (p and 255) * 29) / 65280f
+            val light = ((((p shr 16 and 255) * 77 + (p shr 8 and 255) * 150 + (p and 255) * 29) / 65280f - black) / (1f - black)).coerceAtLeast(0f)
             val dx = (x - cx) / reach
             val g = glow[((dx * dx + dy * dy) * steps / far).toInt().coerceAtMost(steps)]
             // half a level of noise keeps the glow from showing steps
@@ -277,7 +335,7 @@ internal fun golden(picture: Bitmap, seen: Seen, reach: Float): Bitmap {
 }
 
 /** The warmth that golden light from ([x], [y]) of a frame [w] by [h] gives the picture, to multiply it by. */
-internal fun warmth(w: Int, h: Int, x: Float, y: Float): Bitmap {
+internal fun warmth(w: Int, h: Int, x: Float, y: Float, tint: Tint = TINTS[0], amount: Float = 1f): Bitmap {
     val px = IntArray(w * h)
     val reach = min(w, h).toFloat()
     for (j in 0 until h) for (i in 0 until w) {
@@ -286,7 +344,8 @@ internal fun warmth(w: Int, h: Int, x: Float, y: Float): Bitmap {
         val near = exp(-(dx * dx + dy * dy) / 0.81f)
         val noise = ((i * 73856093 xor j * 19349663) and 255) / 255f - 0.5f
         fun at(away: Float, close: Float) = ((away * (1 - near) + close * near) * 255f + 0.5f + noise).toInt().coerceIn(0, 255)
-        px[j * w + i] = (0xFF shl 24) or (at(0.9f, 1f) shl 16) or (at(0.665f, 0.83f) shl 8) or at(0.43f, 0.55f)
+        fun of(k: Int) = at(1f - (1f - tint.away[k]) * amount, 1f - (1f - tint.close[k]) * amount)
+        px[j * w + i] = (0xFF shl 24) or (of(0) shl 16) or (of(1) shl 8) or of(2)
     }
     return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
 }
@@ -305,10 +364,18 @@ internal object OverlayFolders {
         prefs(context).edit().putString("folder", tree?.toString()).apply()
     }
 
-    /** Whether light of the sun's kind is laid golden. */
-    fun golden(context: Context): Boolean = prefs(context).getBoolean("golden", true)
+    /** The colour light of the sun's kind is laid in: one of [TINTS] by name, or "Original" as the overlay has it. */
+    fun tint(context: Context): String = prefs(context).getString("tint", null) ?: if (prefs(context).getBoolean("golden", true)) TINTS[0].name else "Original"
 
-    fun setGolden(context: Context, on: Boolean) = prefs(context).edit().putBoolean("golden", on).apply()
+    fun setTint(context: Context, name: String) = prefs(context).edit().putString("tint", name).apply()
+
+    /** How much the light glows about its heart, 0 to 1.5. */
+    fun glow(context: Context): Float = prefs(context).getFloat("glow", 1f)
+
+    /** How much the light warms the picture, 0 to 1. */
+    fun warmth(context: Context): Float = prefs(context).getFloat("warmth", 1f)
+
+    fun setLook(context: Context, glow: Float, warmth: Float) = prefs(context).edit().putFloat("glow", glow).putFloat("warmth", warmth).apply()
 
     private val PICTURES = setOf("jpg", "jpeg", "png", "webp")
 
@@ -385,7 +452,10 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
     val at = vm.playhead.coerceIn(clip.startUs, clip.startUs + clip.durationUs - 1)
     val old = listOfNotNull(Trying.id, Trying.warm).filter { vm.clip(it) != null }
     val preset = presetFor(file.category)
-    val sun = preset.golden && OverlayFolders.golden(context)
+    val tint = TINTS.firstOrNull { it.name == OverlayFolders.tint(context) }
+    val sun = preset.golden && tint != null
+    val glowing = OverlayFolders.glow(context)
+    val warming = OverlayFolders.warmth(context)
     val result = withContext(Threads.commands) {
         runCatching {
             if (old.isNotEmpty()) s.delete(old)
@@ -400,11 +470,12 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
             val frame = t.width.toFloat() / t.height.toFloat()
             val look = seen(small)
             val how = laid(preset, look, scene, frame, sun)
+            val black = blackOf(small)
             var warm = ""
             if (sun) {
                 // what of the picture the frame shows, its shorter side
                 val tall = if (look.aspect >= frame) picture.height.toFloat() else picture.width / frame
-                val made = golden(picture, look, min(tall, tall * frame))
+                val made = golden(picture, look, min(tall, tall * frame), tint ?: TINTS[0], glowing, black)
                 out.outputStream().use { made.compress(Bitmap.CompressFormat.JPEG, 94, it) }
                 val fitW = if (look.aspect >= frame) 1f else look.aspect / frame
                 val fitH = if (look.aspect >= frame) frame / look.aspect else 1f
@@ -414,10 +485,12 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
                 val gw = if (frame >= 1f) 640 else (640 * frame).roundToInt()
                 val gh = if (frame >= 1f) (640 / frame).roundToInt() else 640
                 val shade = Media.uniqueFile(dir, "Golden light.jpg")
-                shade.outputStream().use { warmth(gw, gh, hx, hy).compress(Bitmap.CompressFormat.JPEG, 95, it) }
-                warm = s.layOver(clip.id, shade.absolutePath, Laid("multiply", 0.9, 1.01, 0.0, 0.0, 0.0, false, "")).createdId
+                shade.outputStream().use { warmth(gw, gh, hx, hy, tint ?: TINTS[0], warming).compress(Bitmap.CompressFormat.JPEG, 95, it) }
+                if (warming > 0.02f) warm = s.layOver(clip.id, shade.absolutePath, Laid("multiply", 0.9, 1.01, 0.0, 0.0, 0.0, false, "")).createdId
             } else {
-                out.outputStream().use { picture.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+                // brightened here, after its black is taken away, so the black stays black
+                val lift = if (look.peak < 0.7f) min(0.8f / look.peak.coerceAtLeast(0.05f), if (preset.light) 4f else 2.5f) else 1f
+                out.outputStream().use { cleaned(picture, black, lift).compress(Bitmap.CompressFormat.JPEG, 94, it) }
             }
             // the people stay in front of the next one tried, where they were of the last
             val stay = Trying.behind
@@ -555,17 +628,32 @@ fun AtmospherePanel(vm: EditorViewModel) {
                         },
                         onDone = { vm.endGesture() }, title = "Strength",
                     )
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val now = Trying.file
-                        if (now != null && presetFor(now.category).golden) {
-                            val sun = Trying.warm != null
-                            Choice("Golden", sun) {
-                                if (clip != null && !Trying.busy) {
-                                    OverlayFolders.setGolden(context, !sun)
-                                    scope.launch { lay(vm, context, clip, now) }
+                    val lit = Trying.file?.takeIf { presetFor(it.category).golden }
+                    if (lit != null && clip != null) {
+                        val again = { if (!Trying.busy) scope.launch { lay(vm, context, clip, lit) } }
+                        val tintName = remember(Trying.id) { OverlayFolders.tint(context) }
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            (TINTS.map { it.name } + "Original").forEach { name ->
+                                Choice(name, name == tintName) {
+                                    OverlayFolders.setTint(context, name)
+                                    again()
                                 }
                             }
                         }
+                        if (tintName != "Original") {
+                            var glow by remember { mutableFloatStateOf(OverlayFolders.glow(context)) }
+                            var warming by remember { mutableFloatStateOf(OverlayFolders.warmth(context)) }
+                            ValueSlider(
+                                value = glow * 100f, range = 0f..150f, label = { "${it.roundToInt()}" },
+                                onChange = { glow = it / 100f }, onDone = { OverlayFolders.setLook(context, glow, warming); again() }, title = "Glow",
+                            )
+                            ValueSlider(
+                                value = warming * 100f, range = 0f..100f, label = { "${it.roundToInt()}" },
+                                onChange = { warming = it / 100f }, onDone = { OverlayFolders.setLook(context, glow, warming); again() }, title = "Warm photo",
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Choice("Mirror", false) {
                             val id = Trying.id ?: return@Choice
                             val now = vm.clipJson(id)?.optBoolean("flipH") ?: false

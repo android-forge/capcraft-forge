@@ -41,6 +41,10 @@ pub enum ModelId {
     Detect,
     /// MI-GAN: the gap a thing taken out of a picture leaves, filled.
     Erase,
+    /// PaddleOCR's PP-OCRv3 finder: where the lines of words in a picture are.
+    WordsFind,
+    /// PaddleOCR's English PP-OCRv5 reader: what a line of words says.
+    WordsRead,
 }
 
 /// One model as the table describes it.
@@ -64,7 +68,7 @@ pub struct ModelSpec {
 }
 
 /// Every downloadable model.
-pub const MODELS: [ModelSpec; 7] = [
+pub const MODELS: [ModelSpec; 9] = [
     ModelSpec {
         id: ModelId::Person,
         file: "rvm-mobilenetv3.onnx",
@@ -121,6 +125,22 @@ pub const MODELS: [ModelSpec; 7] = [
         sha256: "593eba0b7e04730f1b61c0a3cbca68d97d8d6a7ff5c6a44a7b9d7fcd880fc5ae",
         licence: "MIT",
     },
+    ModelSpec {
+        id: ModelId::WordsFind,
+        file: "ppocr-v3-det-en.onnx",
+        upstream: "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/en_PP-OCRv3_det_infer.onnx",
+        bytes: 2_423_224,
+        sha256: "f139598bc2af4e4b6fe98dec11574e30edfdd91fc94ac1425c18ace3bd5a866b",
+        licence: "Apache-2.0",
+    },
+    ModelSpec {
+        id: ModelId::WordsRead,
+        file: "ppocr-v5-rec-en.onnx",
+        upstream: "https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65/languages/english/rec.onnx",
+        bytes: 7_830_888,
+        sha256: "4e16deb22c4da6468bdca539b2cd3c8687825538b67109177c47d359ab994cd7",
+        licence: "Apache-2.0",
+    },
 ];
 
 impl ModelId {
@@ -142,6 +162,8 @@ impl ModelId {
             ModelId::Enhance => "realesr-general-x4v3",
             ModelId::Detect => "yolox-s",
             ModelId::Erase => "migan-512-places2",
+            ModelId::WordsFind => "ppocr-v3-det-en",
+            ModelId::WordsRead => "ppocr-v5-rec-en",
         }
     }
 }

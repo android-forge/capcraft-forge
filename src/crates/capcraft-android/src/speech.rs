@@ -577,6 +577,42 @@ impl MobileSession {
         }
         speak_onto(self, text, crate::seconds(at_us), model_id, voice, listener)
     }
+
+    /// [`MobileSession::speak_text`] in a manner: read at `speed` (1 is the
+    /// voice's own) with `pauses` between sentences (0 to 1), the sound then
+    /// given `effects`, a JSON list of audio effects (`[{"id", "params"}]`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn speak_styled(
+        self: Arc<Self>,
+        text: String,
+        at_us: i64,
+        model_id: String,
+        voice: i32,
+        speed: f32,
+        pauses: f32,
+        effects: String,
+        listener: Arc<dyn SpeechListener>,
+    ) -> Result<(), MobileError> {
+        if text.trim().is_empty() {
+            return Err(MobileError::Failed(
+                "There are no words to read.".to_owned(),
+            ));
+        }
+        let manner = Manner {
+            speed,
+            pauses: Some(pauses),
+            effects: serde_json::from_str(&effects).ok(),
+        };
+        speak_in(self, text, crate::seconds(at_us), model_id, voice, manner, listener)
+    }
+}
+
+/// How a reading is made: its pace and breaths, and what is done to its
+/// sound.
+struct Manner {
+    speed: f32,
+    pauses: Option<f32>,
+    effects: Option<serde_json::Value>,
 }
 
 /// Reads `text` aloud on a thread of its own and puts the reading on an
@@ -587,6 +623,24 @@ fn speak_onto(
     start: f64,
     model_id: String,
     voice: i32,
+    listener: Arc<dyn SpeechListener>,
+) -> Result<(), MobileError> {
+    let manner = Manner {
+        speed: 1.0,
+        pauses: None,
+        effects: None,
+    };
+    speak_in(session, text, start, model_id, voice, manner, listener)
+}
+
+/// [`speak_onto`] in a [`Manner`].
+fn speak_in(
+    session: Arc<MobileSession>,
+    text: String,
+    start: f64,
+    model_id: String,
+    voice: i32,
+    manner: Manner,
     listener: Arc<dyn SpeechListener>,
 ) -> Result<(), MobileError> {
     let dirs = context()?.dirs.clone();
@@ -600,8 +654,8 @@ fn speak_onto(
                 voice,
                 reference,
                 text,
-                speed: 1.0,
-                pauses: None,
+                speed: manner.speed,
+                pauses: manner.pauses,
                 steps: None,
                 project,
             };
@@ -619,7 +673,19 @@ fn speak_onto(
             };
             let placed = session
                 .import(spoken.path)
-                .and_then(|media| session.add_audio(media.id, crate::micros(start)));
+                .and_then(|media| session.add_audio(media.id, crate::micros(start)))
+                .and_then(|view| match &manner.effects {
+                    Some(effects) if !view.created_id.is_empty() => serde_json::from_value(serde_json::json!({
+                        "op": "updateClip", "clipId": view.created_id, "patch": {"filters": effects},
+                    }))
+                    .map_err(|error| MobileError::Failed(error.to_string()))
+                    .and_then(|command| session.run(vec![command]))
+                    .map(|after| crate::session::TimelineView {
+                        created_id: view.created_id.clone(),
+                        ..after
+                    }),
+                    _ => Ok(view),
+                });
             match placed {
                 Ok(view) => listener.on_done(Some(view)),
                 Err(error) => listener.on_failed(error.to_string()),

@@ -12,7 +12,9 @@ use concat_core::{FrameRate, Rational};
 use concat_media::{DecodeOptions, Decoder, FrameSource};
 use concat_project::Command;
 use concat_project::commands::TrimEdge;
-use concat_vision::shots::{Join, Reader, Reading, WIDTH};
+use concat_vision::models::ModelId;
+use concat_vision::shots::{Framing, Join, Reader, Reading, WIDTH};
+use concat_vision::words::{Words, colours};
 use serde_json::{Value, json};
 
 use crate::session::{MobileSession, TimelineView};
@@ -192,13 +194,15 @@ impl MobileSession {
     }
 
     /// Puts the picture or video in `path` (in the project's media) in slot
-    /// `clip_id`, filling the frame for as long as the slot lasts; with
-    /// `moves`, moving as the reel's picture did there.
+    /// `clip_id`, filling the frame (or the band the reel's pictures sat in)
+    /// for as long as the slot lasts; with `moves`, moving as the reel's
+    /// picture did there, and with `match_colours`, in its colours.
     pub fn fill_slot(
         &self,
         clip_id: String,
         path: String,
         moves: bool,
+        match_colours: bool,
     ) -> Result<TimelineView, MobileError> {
         let summary = concat_host::media::probe(&path)?;
         let item = summary.to_new_media();
@@ -261,16 +265,25 @@ impl MobileSession {
         }
 
         // the frame filled, whatever the picture's shape
+        let mut kept = self.reel();
+        // the band the reel's pictures sat in, over bars or a blur: all of the frame unless so
+        let band = kept
+            .get("band")
+            .and_then(Value::as_array)
+            .and_then(|band| Some((band.first()?.as_f64()?, band.get(1)?.as_f64()?)))
+            .filter(|(top, bottom)| bottom - top > 0.1)
+            .unwrap_or((0.0, 1.0));
         let cover = if size.0 > 0 && size.1 > 0 && frame.0 > 0 && frame.1 > 0 {
             let (a, b) = (
                 f64::from(frame.0) / f64::from(size.0),
                 f64::from(frame.1) / f64::from(size.1),
             );
-            (a.max(b) / a.min(b)).min(8.0)
+            // fitted is how the engine first shows it; covered fills the band
+            (a.max(b * (band.1 - band.0)) / a.min(b)).min(8.0)
         } else {
             1.0
         };
-        let mut kept = self.reel();
+        let middle = (band.0 + band.1) / 2.0 - 0.5;
         let slot = kept
             .get("slots")
             .and_then(|slots| slots.get(&clip_id))
@@ -285,7 +298,7 @@ impl MobileSession {
             clip_id: here.clone(),
             scale: Some(cover),
             offset_x: Some(0.0),
-            offset_y: Some(0.0),
+            offset_y: Some(middle),
             rotation: None,
             stretch_x: None,
             stretch_y: None,
@@ -297,7 +310,7 @@ impl MobileSession {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if moves && (still || edited) {
+        if moves && (still || edited) && band == (0.0, 1.0) {
             for place in &path_of {
                 let of = |i: usize| place.get(i).and_then(Value::as_f64).unwrap_or(0.0);
                 for (property, value) in [
@@ -312,12 +325,19 @@ impl MobileSession {
                 }
             }
         }
+        let mut looks = Vec::new();
         if moves && slot.get("shakes").and_then(Value::as_bool).unwrap_or(false) {
-            commands.extend(command(json!({
-                "op": "updateClip", "clipId": here,
-                "patch": {"videoEffects": [{"id": "capcraft.shake", "params": {"amount": 14}}]},
-            })));
+            looks.push(json!({"id": "capcraft.shake", "params": {"amount": 14}}));
         }
+        // the colours of the reel's own picture there
+        if match_colours
+            && let Some(params) = slot.get("ref").and_then(|r| matched(r, &path_now(self, &here)?, still).ok())
+        {
+            looks.push(json!({"id": "capcraft.color-match", "params": params}));
+        }
+        commands.extend(command(json!({
+            "op": "updateClip", "clipId": here, "patch": {"videoEffects": looks},
+        })));
         // its own sound stays out of the reel's
         if !still {
             commands.extend(command(json!({
@@ -337,6 +357,97 @@ impl MobileSession {
             value: Some(kept),
         });
         self.run(commands)
+    }
+
+    /// Reads the words the reel shows, on a thread of its own (the finder
+    /// and reader fetched first, about ten megabytes), and puts each line as
+    /// a title where and when it was, in its colour, size and outline.
+    pub fn read_reel_words(self: Arc<Self>, listener: Arc<dyn SpeechListener>) -> Result<(), MobileError> {
+        let kept = self.reel();
+        let path = kept
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| MobileError::Failed("This project was not made from a video.".to_owned()))?;
+        STOP.store(false, Ordering::Relaxed);
+        std::thread::Builder::new()
+            .name("capcraft-reel-words".to_owned())
+            .spawn(move || {
+                let done = (|| {
+                    let mut words = {
+                        let mut tell = |f: f32| listener.on_progress(f * 0.2, "download".to_owned());
+                        let find = crate::objects::fetched(ModelId::WordsFind, &mut tell)?;
+                        let read = crate::objects::fetched(ModelId::WordsRead, &mut tell)?;
+                        Words::load(&find, &read)?
+                    };
+                    let titles = read_titles(&path, &mut words, &|f| {
+                        listener.on_progress(0.2 + f * 0.75, "work".to_owned());
+                        !STOP.load(Ordering::Relaxed)
+                    })?;
+                    Ok::<_, String>(titles)
+                })();
+                let placed = done.map_err(MobileError::Failed).and_then(|titles| {
+                    if titles.is_empty() {
+                        return Err(MobileError::Failed("No words were found in the video.".to_owned()));
+                    }
+                    self.place_titles(&titles)
+                });
+                match placed {
+                    Ok(view) => listener.on_done(Some(view)),
+                    Err(error) => listener.on_failed(error.to_string()),
+                }
+            })
+            .map_err(|error| MobileError::Failed(format!("could not start: {error}")))?;
+        Ok(())
+    }
+
+    /// Puts the reel's sound on two rows, on a thread of its own: its voice
+    /// (as Isolate voice finds it) and the rest, its music, with the voice
+    /// taken out of it.
+    pub fn separate_reel_sound(self: Arc<Self>, listener: Arc<dyn SpeechListener>) -> Result<(), MobileError> {
+        let kept = self.reel();
+        let path = kept
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| MobileError::Failed("This project was not made from a video.".to_owned()))?;
+        let sound = self
+            .with_session(|session| {
+                let project = session.project();
+                Ok(project
+                    .active()
+                    .clips
+                    .iter()
+                    .filter(|clip| clip.kind == concat_project::model::ClipKind::Audio)
+                    .find(|clip| project.media.iter().any(|item| item.id == clip.media_id && item.path == path))
+                    .map(|clip| (clip.id.clone(), clip.start)))
+            })?
+            .ok_or_else(|| MobileError::Failed("The video's sound is no longer on the timeline.".to_owned()))?;
+        let folder = self.with_session(|session| Ok(std::path::PathBuf::from(session.path()).join("media")))?;
+        STOP.store(false, Ordering::Relaxed);
+        std::thread::Builder::new()
+            .name("capcraft-reel-sound".to_owned())
+            .spawn(move || {
+                let made = (|| {
+                    let model = crate::voice::model(&mut |f| listener.on_progress(f * 0.2, "download".to_owned()))?;
+                    separate(&path, &model, &folder, &|f| {
+                        listener.on_progress(0.2 + f * 0.75, "work".to_owned());
+                        !STOP.load(Ordering::Relaxed)
+                    })
+                })();
+                let placed = made.map_err(MobileError::Failed).and_then(|(music, voice)| {
+                    let view = self.replace_media(sound.0.clone(), music.to_string_lossy().into_owned())?;
+                    let _ = view;
+                    let speech = self.import_sound(voice.to_string_lossy().into_owned())?;
+                    self.add_audio(speech.id, micros(sound.1))
+                });
+                match placed {
+                    Ok(view) => listener.on_done(Some(view)),
+                    Err(error) => listener.on_failed(error.to_string()),
+                }
+            })
+            .map_err(|error| MobileError::Failed(format!("could not start: {error}")))?;
+        Ok(())
     }
 
     /// Whether the reel had words or a mark over its cuts that titles have
@@ -396,11 +507,271 @@ impl MobileSession {
     }
 }
 
+/// The file clip `id` shows.
+fn path_now(session: &MobileSession, id: &str) -> Option<String> {
+    session
+        .with_session(|s| {
+            let project = s.project();
+            Ok(project
+                .active()
+                .clips
+                .iter()
+                .find(|clip| clip.id == id)
+                .and_then(|clip| project.media.iter().find(|item| item.id == clip.media_id))
+                .map(|item| item.path.clone()))
+        })
+        .ok()
+        .flatten()
+}
+
+/// The colour match that gives the picture in `path` the colours of the
+/// reel's picture `reference` (`[file, seconds]`), with its strength.
+fn matched(reference: &Value, path: &str, still: bool) -> Result<Value, MobileError> {
+    let (file, at) = (
+        reference.get(0).and_then(Value::as_str).unwrap_or_default(),
+        reference.get(1).and_then(Value::as_f64).unwrap_or(0.0),
+    );
+    let to = concat_host::media::still_at(file, at, 160)?;
+    let own = if still {
+        0.0
+    } else {
+        concat_host::media::probe(path)?.to_new_media().duration.unwrap_or(0.0) / 2.0
+    };
+    let from = concat_host::media::still_at(path, own, 160)?;
+    let params = crate::colormatch::color_match(crate::Picture::of(to), crate::Picture::of(from))?;
+    let mut params: Value = serde_json::from_str(&params).map_err(|error| MobileError::Failed(error.to_string()))?;
+    params["strength"] = json!(80);
+    Ok(params)
+}
+
+/// A line of words the reel showed: what, from when to when, where
+/// (fractions of the frame: left, top, right, bottom), its colour and outline.
+struct Title {
+    text: String,
+    start: f64,
+    end: f64,
+    rect: [f64; 4],
+    ink: String,
+    outline: Option<String>,
+}
+
+/// The lines of words the video in `path` shows, read twice a second and
+/// followed while they stay.
+fn read_titles(path: &str, words: &mut Words, step: &dyn Fn(f32) -> bool) -> Result<Vec<Title>, String> {
+    const EVERY: f64 = 0.5;
+    let info = concat_media::probe(path).map_err(|error| error.to_string())?;
+    let video = info.video.as_ref().ok_or("That file has no picture.")?;
+    let seconds = info.duration.map_or(0.0, |d| d.as_f64());
+    let (w, h) = (f64::from(video.width.max(1)), f64::from(video.height.max(1)));
+    let k = (720.0 / w.max(h)).min(1.0);
+    let options = DecodeOptions::default()
+        .scaled_to(((w * k) as u32 / 2 * 2).max(2), ((h * k) as u32 / 2 * 2).max(2))
+        .at_rate(FrameRate::new(Rational::new(2, 1)))
+        .eight_bit(true)
+        .threaded(4);
+    let mut decoder = Decoder::open(path, &options).map_err(|error| error.to_string())?;
+    let mut titles: Vec<(Title, f64)> = Vec::new();
+    let mut at = 0.0;
+    let wanted = (seconds / EVERY).max(1.0);
+    let mut seen = 0.0;
+    while let Some(frame) = decoder.next_frame().map_err(|error| error.to_string())? {
+        let (fw, fh) = (f64::from(frame.width()), f64::from(frame.height()));
+        for line in words.lines(&frame)? {
+            if line.sure < 0.75 || !line.text.chars().any(char::is_alphanumeric) {
+                continue;
+            }
+            let r = line.rect;
+            let rect = [
+                f64::from(r.x) / fw,
+                f64::from(r.y) / fh,
+                f64::from(r.x + r.width) / fw,
+                f64::from(r.y + r.height) / fh,
+            ];
+            let same = titles.iter_mut().find(|(title, last)| {
+                (at - *last - EVERY).abs() < 0.01
+                    && title.text.eq_ignore_ascii_case(&line.text)
+                    && overlap(&title.rect, &rect) > 0.4
+            });
+            match same {
+                Some((title, last)) => {
+                    title.end = at + EVERY / 2.0;
+                    *last = at;
+                }
+                None => {
+                    let (ink, outline) = colours(&frame, r);
+                    titles.push((
+                        Title { text: line.text, start: (at - EVERY / 2.0).max(0.0), end: at + EVERY / 2.0, rect, ink, outline },
+                        at,
+                    ));
+                }
+            }
+        }
+        at += EVERY;
+        seen += 1.0;
+        if !step((seen / wanted).min(1.0) as f32) {
+            return Err("Cancelled.".to_owned());
+        }
+    }
+    Ok(titles.into_iter().map(|(title, _)| title).filter(|t| t.end - t.start >= 0.5 || t.text.len() > 2).collect())
+}
+
+fn overlap(a: &[f64; 4], b: &[f64; 4]) -> f64 {
+    let w = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+    let h = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+    let area = |r: &[f64; 4]| (r[2] - r[0]) * (r[3] - r[1]);
+    w * h / area(a).min(area(b)).max(1e-9)
+}
+
+/// The sound of `path` as its voice and the rest, written to `folder`: the
+/// rest first.
+fn separate(path: &str, model: &std::path::Path, folder: &std::path::Path, step: &dyn Fn(f32) -> bool) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    use concat_media::{AudioDecoder, AudioOptions, SampleFormat};
+    use sherpa_onnx::{OfflineSpeechDenoiser, OfflineSpeechDenoiserConfig, OfflineSpeechDenoiserGtcrnModelConfig, OfflineSpeechDenoiserModelConfig};
+    const RATE: u32 = 44_100;
+    let denoiser = OfflineSpeechDenoiser::create(&OfflineSpeechDenoiserConfig {
+        model: OfflineSpeechDenoiserModelConfig {
+            gtcrn: OfflineSpeechDenoiserGtcrnModelConfig { model: Some(model.to_string_lossy().into_owned()) },
+            num_threads: 2,
+            ..Default::default()
+        },
+    })
+    .ok_or("The voice model would not load.")?;
+    let read = |rate: u32, channels: u16| -> Result<Vec<f32>, String> {
+        AudioDecoder::open(
+            path,
+            &AudioOptions { start: None, duration: None, filters: Vec::new(), rate, channels, format: SampleFormat::F32, stream: None },
+        )
+        .and_then(|mut d| d.collect_f32())
+        .map_err(|error| error.to_string())
+    };
+    let low = denoiser.sample_rate().max(8_000) as u32;
+    let heard = read(low, 1)?;
+    if heard.is_empty() {
+        return Err("The video has no sound.".to_owned());
+    }
+    let mut voice = Vec::with_capacity(heard.len());
+    let chunk = low as usize * 30;
+    for (i, part) in heard.chunks(chunk).enumerate() {
+        voice.extend_from_slice(&denoiser.run(part, low as i32).samples);
+        if !step(((i + 1) * chunk).min(heard.len()) as f32 / heard.len() as f32 * 0.7) {
+            return Err("Cancelled.".to_owned());
+        }
+    }
+    let whole = read(RATE, 2)?;
+    let frames = whole.len() / 2;
+    // the voice at the music's rate
+    let ratio = f64::from(low) / f64::from(RATE);
+    let at = |i: usize| -> f32 {
+        let t = i as f64 * ratio;
+        let k = t as usize;
+        let f = (t - k as f64) as f32;
+        let a = voice.get(k).copied().unwrap_or(0.0);
+        let b = voice.get(k + 1).copied().unwrap_or(a);
+        a + (b - a) * f
+    };
+    let voiced: Vec<f32> = (0..frames).map(at).collect();
+    // how much of the voice each stretch holds, taken out of both sides
+    let mut music = whole.clone();
+    let block = 2048;
+    let mut gain = 0f32;
+    for start in (0..frames).step_by(block) {
+        let end = (start + block).min(frames);
+        let (mut mv, mut vv) = (0f32, 0f32);
+        for i in start..end {
+            let mono = (whole[i * 2] + whole[i * 2 + 1]) / 2.0;
+            mv += mono * voiced[i];
+            vv += voiced[i] * voiced[i];
+        }
+        let wanted = if vv > 1e-6 { (mv / vv).clamp(0.0, 1.2) } else { 0.0 };
+        gain = gain * 0.6 + wanted * 0.4;
+        for i in start..end {
+            music[i * 2] -= gain * voiced[i];
+            music[i * 2 + 1] -= gain * voiced[i];
+        }
+    }
+    if !step(0.9) {
+        return Err("Cancelled.".to_owned());
+    }
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let music_file = folder.join(format!("reel-music-{stamp}.wav"));
+    let voice_file = folder.join(format!("reel-voice-{stamp}.wav"));
+    wav(&music_file, &music, RATE, 2)?;
+    wav(&voice_file, &voiced, RATE, 1)?;
+    step(1.0);
+    Ok((music_file, voice_file))
+}
+
+/// `samples` (-1 to 1, the channels taking turns) as a sixteen-bit WAV file.
+fn wav(path: &std::path::Path, samples: &[f32], rate: u32, channels: u16) -> Result<(), String> {
+    use std::io::Write;
+    let data = samples.len() as u32 * 2;
+    let mut out = Vec::with_capacity(44 + data as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2 * u32::from(channels)).to_le_bytes());
+    out.extend_from_slice(&(2 * channels).to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data.to_le_bytes());
+    for sample in samples {
+        out.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes());
+    }
+    std::fs::File::create(path)
+        .and_then(|mut file| file.write_all(&out))
+        .map_err(|error| format!("{}: {error}", path.display()))
+}
+
 fn command(value: Value) -> Option<Command> {
     serde_json::from_value(value).ok()
 }
 
 impl MobileSession {
+    /// Puts each of `titles` as a title, and keeps that the reel's words have
+    /// been put.
+    fn place_titles(&self, titles: &[Title]) -> Result<TimelineView, MobileError> {
+        let mut view = self.view();
+        for title in titles {
+            let [left, top, right, bottom] = title.rect;
+            let mut style = json!({
+                "content": title.text,
+                "fontSize": ((bottom - top) * 0.62).clamp(0.015, 0.12),
+                "fontWeight": 800.0,
+                "color": title.ink,
+                "shadow": false,
+            });
+            if let Some(outline) = &title.outline {
+                style["strokeColor"] = json!(outline);
+                style["strokeWidth"] = json!(((bottom - top) * 0.06).clamp(0.001, 0.008));
+            }
+            view = self.add_text(micros(title.start), micros((title.end - title.start).max(0.3)), style.to_string())?;
+            let made = view.created_id.clone();
+            if made.is_empty() {
+                continue;
+            }
+            view = self.run(vec![Command::SetClipTransform {
+                clip_id: made,
+                scale: None,
+                offset_x: Some((left + right) / 2.0 - 0.5),
+                offset_y: Some((top + bottom) / 2.0 - 0.5),
+                rotation: None,
+                stretch_x: None,
+                stretch_y: None,
+            }])?;
+        }
+        let mut kept = self.reel();
+        if kept.is_object() {
+            kept["worded"] = json!(true);
+            view = self.run(vec![Command::SetTimelineExtra { key: REEL.to_owned(), value: Some(kept) }])?;
+        }
+        Ok(view)
+    }
+
     /// What was read of the reel this timeline was made from, or an empty
     /// object.
     fn reel(&self) -> Value {
@@ -464,7 +835,10 @@ impl MobileSession {
                 .collect();
             slots.insert(
                 clip,
-                json!({"moves": places, "edited": shot.edited, "shakes": shot.shakes, "filled": false}),
+                json!({
+                    "moves": places, "edited": shot.edited, "shakes": shot.shakes, "filled": false,
+                    "ref": [path, (shot.start + shot.end) / 2.0],
+                }),
             );
         }
         let held: Vec<Value> = reading
@@ -472,9 +846,13 @@ impl MobileSession {
             .iter()
             .map(|one| json!([one.start, one.end, one.left, one.top, one.right, one.bottom]))
             .collect();
+        let band = match reading.framing {
+            Framing::Full => Value::Null,
+            Framing::Bars { top, bottom } | Framing::Blurred { top, bottom } => json!([top, bottom]),
+        };
         commands.push(Command::SetTimelineExtra {
             key: REEL.to_owned(),
-            value: Some(json!({"slots": slots, "held": held, "worded": false})),
+            value: Some(json!({"slots": slots, "held": held, "worded": false, "band": band, "path": path})),
         });
 
         // the sound on a row of its own, under the whole, and the shots silent
@@ -491,6 +869,10 @@ impl MobileSession {
         if sound {
             let music = self.import_sound(path.to_owned())?;
             self.add_audio(music.id, 0)?;
+        }
+        // its pictures over a blur of themselves: so will the ones put in
+        if matches!(reading.framing, Framing::Blurred { .. }) {
+            self.set_background(json!({"kind": "blur", "level": 3}).to_string())?;
         }
         for at in &reading.flashes {
             self.add_layer(

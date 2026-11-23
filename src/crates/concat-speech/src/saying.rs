@@ -275,9 +275,14 @@ fn live(about: &About) -> Option<bool> {
             "also",
             "not",
         ],
-    ) && is(second, BE)
-    {
-        return Some(true);
+    ) {
+        if is(second, BE) {
+            return Some(true);
+        }
+        // "I now live", "they still live"
+        if is(second, SUBJECT) || is(second, &["he", "she", "it"]) {
+            return Some(false);
+        }
     }
     if is(before, BE) || is(before, DONE) {
         return Some(true);

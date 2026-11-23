@@ -29,6 +29,9 @@ Graphics come from Microsoft's Fluent Emoji and Fluent icons, Phosphor, Tabler, 
 Icons (all MIT), Gil Barbara's logos (CC0; the marks are their owners'), and Streamline (CC BY 4.0), as Iconify packages them:
 [graphics/SOURCES.md](graphics/SOURCES.md). They are drawn by resvg (Apache-2.0 or MIT).
 
+Reel to template reads words with PaddleOCR's PP-OCRv3 finder and English PP-OCRv5 reader (Apache-2.0, PaddlePaddle), as
+converted to ONNX by RapidAI and monkt, downloaded when wanted.
+
 Stock photos are their makers', fetched by the user from Wikimedia Commons, NASA, Pexels or Unsplash under those sites' terms.
 
 ## Changes in this build

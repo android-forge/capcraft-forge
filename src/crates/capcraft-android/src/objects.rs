@@ -132,7 +132,7 @@ pub fn objects_download() -> u64 {
 }
 
 /// The model's file, downloaded first where it is not here.
-fn fetched(id: ModelId, report: &mut dyn FnMut(f32)) -> Result<PathBuf, String> {
+pub(crate) fn fetched(id: ModelId, report: &mut dyn FnMut(f32)) -> Result<PathBuf, String> {
     let data = context().map_err(|error| error.to_string())?.dirs.data.clone();
     let file = model_file(&data, id);
     if installed(&data, id) {

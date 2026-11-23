@@ -27,7 +27,7 @@ object Templates {
             places.zip(uris).forEach { (clip, uri) ->
                 val file = Media.importUri(context, copy.path, uri)
                 // one made from a reel moves what goes in as the reel's own moved
-                if (reel && clip.id in slots) session.fillSlot(clip.id, file.absolutePath, true) else session.replaceMedia(clip.id, file.absolutePath)
+                if (reel && clip.id in slots) session.fillSlot(clip.id, file.absolutePath, true, true) else session.replaceMedia(clip.id, file.absolutePath)
             }
             session.save()
         } finally {

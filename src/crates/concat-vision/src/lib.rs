@@ -68,6 +68,7 @@ pub mod stabilize;
 pub mod store;
 pub mod strokes;
 pub mod window;
+pub mod words;
 
 pub use apply::{Mapping, cut, highlight};
 #[cfg(feature = "infer")]

@@ -72,6 +72,30 @@ fun SlotsPanel(vm: EditorViewModel) {
         value = session?.let { s -> withContext(Threads.commands) { runCatching { s.reelWords().toInt() }.getOrDefault(0) } } ?: 0
     }
     var moves by remember { mutableStateOf(true) }
+    var colours by remember { mutableStateOf(true) }
+    // a long job on the reel: reading its words, or parting its sound
+    var working by remember { mutableStateOf<String?>(null) }
+    val listener = remember {
+        object : io.github.artcraftandroid.capcraft.core.SpeechListener {
+            override fun onProgress(fraction: Float, stage: String) {
+                scope.launch { working = (if (stage == "download") "Downloading " else "Working ") + "${(fraction * 100).toInt()}%" }
+            }
+
+            override fun onDone(result: io.github.artcraftandroid.capcraft.core.TimelineView?) {
+                scope.launch {
+                    working = null
+                    result?.let { vm.applyView(it) }
+                }
+            }
+
+            override fun onFailed(message: String) {
+                scope.launch {
+                    working = null
+                    vm.message = message
+                }
+            }
+        }
+    }
     var filling by remember { mutableStateOf<String?>(null) }
 
     fun fill(places: List<Slot>, uris: List<Uri>) {
@@ -88,7 +112,7 @@ fun SlotsPanel(vm: EditorViewModel) {
                         filling = "${i + 1} of ${places.size}"
                         val uri = uris[i % uris.size]
                         val file = files.getOrPut(uri) { Media.importUri(context, vm.path, uri).absolutePath }
-                        view = s.fillSlot(place.clipId, file, moves)
+                        view = s.fillSlot(place.clipId, file, moves, colours)
                     }
                     view
                 }
@@ -108,13 +132,30 @@ fun SlotsPanel(vm: EditorViewModel) {
             val empty = slots.filter { !it.filled }
             if (empty.isNotEmpty() && empty.size < slots.size) Pick("Fill the rest (${empty.size})", false) { MediaPick.open(MediaKinds.BOTH, multiple = true) { uris -> fill(empty, uris) } }
             if (slots.any { it.moves }) Pick("Camera moves", moves) { moves = !moves }
-            if (words > 0) Pick(if (words == 1) "Add its title" else "Add its $words titles", false) {
-                vm.edit { addReelWords() }
-                vm.message = "Titles added where the video had them"
+            Pick("Match colours", colours) { colours = !colours }
+            if (words > 0 || session?.extra("capcraftReel")?.contains("\"worded\":false") == true) {
+                Pick("Read its words", false) {
+                    val s = session ?: return@Pick
+                    if (working == null) {
+                        working = "Starting"
+                        scope.launch(Threads.commands) { runCatching { s.readReelWords(listener) }.onFailure { e -> launch { working = null; vm.message = e.userMessage } } }
+                    }
+                }
+                if (words > 0) Pick("Title boxes only", false) {
+                    vm.edit { addReelWords() }
+                    vm.message = "Titles added where the video had words"
+                }
+            }
+            if (session?.extra("capcraftReel")?.contains("\"path\"") == true) Pick("Separate voice and music", false) {
+                val s = session ?: return@Pick
+                if (working == null) {
+                    working = "Starting"
+                    scope.launch(Threads.commands) { runCatching { s.separateReelSound(listener) }.onFailure { e -> launch { working = null; vm.message = e.userMessage } } }
+                }
             }
         }
         Text(
-            filling?.let { "Filling $it" } ?: "${slots.size} place${if (slots.size == 1) "" else "s"}. Tap one to put a photo or video there.",
+            working ?: filling?.let { "Filling $it" } ?: "${slots.size} place${if (slots.size == 1) "" else "s"}. Tap one to put a photo or video there.",
             style = Type.Tiny, modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
         )
         LazyVerticalGrid(
