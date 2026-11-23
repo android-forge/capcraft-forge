@@ -3,7 +3,9 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
-## Unreleased
+## 0.0.5 (23 November 2026)
+
+The first release of CapCraft Forge.
 
 ### 22 November 2026
 - Opacity can be changed on keyframes, masks follow keyframes, and mask changes are no longer undone by the next (#46, #47; pull request #48).
