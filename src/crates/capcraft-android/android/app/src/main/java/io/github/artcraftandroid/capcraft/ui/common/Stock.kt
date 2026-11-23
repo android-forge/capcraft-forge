@@ -114,6 +114,7 @@ internal val MEME_SITES = listOf(
     "indianmemetemplates.com" to "https://indianmemetemplates.com",
     "memes.co.in" to "https://memes.co.in",
     "videomemes.in" to "https://videomemes.in",
+    "memestamil.in" to "https://memestamil.in",
 )
 
 /** The languages of India a search can be narrowed to: its name, and the code archives file it under. */

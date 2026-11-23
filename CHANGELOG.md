@@ -45,7 +45,7 @@ dated, as the licence asks; `#` numbers are the original project's.
   used commercially (public domain, CC0, CC BY credited, and the sites' own licences). Among the memes, GIPHY GIFs (silent
   videos, credited, "Powered by GIPHY", with a key of one's own) and Imgflip's most used templates, whose makers keep their
   rights: their use is the user's to judge. Pexels videos among the memes too. tamilmemes.co.in, indianmemetemplates.com,
-  memes.co.in and videomemes.in open in the browser, as their downloads go through their own pages. YouTube and Klipy are left out, as their
+  memes.co.in, videomemes.in and memestamil.in open in the browser, as their downloads go through their own pages. YouTube and Klipy are left out, as their
   API terms forbid keeping copies.
 - Beats: the main track's clips cut so each change lands on a beat, or all made one length, in one tap.
 - Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down.
