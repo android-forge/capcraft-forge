@@ -444,6 +444,11 @@ private object Trying {
     var warm by mutableStateOf<String?>(null)
     /** The shadow a light in 3D casts of the people. */
     var shadow by mutableStateOf<String?>(null)
+    /** How the light now laid looks, for its shadow to be traced again when it is moved. */
+    var seen: Seen? = null
+    var frame = 1f
+    var intensity = 0.8
+    var key = 0xFFC468FFu
     var strength by mutableFloatStateOf(0.7f)
     var busy by mutableStateOf(false)
     /** The last one laid is behind the people. */
@@ -521,10 +526,24 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
                     copy = runCatching { JSONObject(s.extra("capcraftBody")).optJSONObject(clip.id)?.optString("copy") }.getOrNull()?.takeIf { it.isNotEmpty() }
                 }
                 if (copy != null) {
-                    runCatching { s.castShadow(copy, hx.toDouble(), hy.toDouble(), how.opacity) }.onSuccess { v -> view = v; shadow = v.createdId }
+                    // the person lit in the light's own colour, from its side
+                    val beam = (tint ?: TINTS.first { it.name == "Warm white" }).beam
+                    val key = ((beam[0] * 255).roundToInt() shl 24 or ((beam[1] * 255).roundToInt() shl 16) or ((beam[2] * 255).roundToInt() shl 8) or 0xFF).toUInt()
+                    // as strong as the light: the overlay's strength and how bright its heart is
+                    val intensity = (how.opacity * (look.peak * 1.25f).coerceIn(0.3f, 1f).toDouble()).coerceIn(0.1, 1.0)
+                    Trying.seen = look
+                    Trying.frame = frame
+                    Trying.intensity = intensity
+                    Trying.key = key
+                    runCatching { s.castShadow(copy, hx.toDouble(), hy.toDouble(), intensity, key) }.onSuccess { v -> view = v; shadow = v.createdId }
                     view = s.restack(copy, 99)
                     if (warm.isNotEmpty()) view = s.restack(warm, 99)
                 }
+            } else if (copy != null && preset.light) {
+                // light laid flat: no shadow, no light on the people
+                view = s.unlightPerson(copy)
+                if (stay) view = s.restack(copy, 99)
+                if (stay && warm.isNotEmpty()) view = s.restack(warm, 99)
             } else if (stay && copy != null) {
                 view = s.restack(copy, 99)
                 // the people stand in the same light
@@ -542,6 +561,44 @@ private suspend fun lay(vm: EditorViewModel, context: Context, clip: ClipView, f
         Trying.file = file
         Trying.strength = done.how.opacity.toFloat()
     }.onFailure { vm.message = it.userMessage }
+}
+
+/**
+ * The shadow of the light now laid traced again, from where its brightest point is now that it has
+ * been scaled, turned or moved: in 3D, with the people cut out.
+ */
+private fun recast(vm: EditorViewModel, context: Context, clip: ClipView?, scope: kotlinx.coroutines.CoroutineScope) {
+    val s = vm.session ?: return
+    val id = Trying.id ?: return
+    val look = Trying.seen ?: return
+    val file = Trying.file ?: return
+    if (clip == null || !presetFor(file.category).light || !OverlayFolders.depth(context)) return
+    val copy = bodyOf(vm, clip.id)?.first ?: return
+    val j = vm.clipJson(id) ?: return
+    val scale = j.optDouble("scale", 1.0).toFloat()
+    val x = j.optDouble("offsetX", 0.0).toFloat()
+    val y = j.optDouble("offsetY", 0.0).toFloat()
+    val frame = Trying.frame
+    val fitW = if (look.aspect >= frame) 1f else look.aspect / frame
+    val fitH = if (look.aspect >= frame) frame / look.aspect else 1f
+    val heart = if (j.optBoolean("flipH")) 1f - look.heart else look.heart
+    val heartY = if (j.optBoolean("flipV")) 1f - look.heartY else look.heartY
+    val hx = 0.5f + x + (heart - 0.5f) * fitW * scale
+    val hy = 0.5f + y + (heartY - 0.5f) * fitH * scale
+    Trying.busy = true
+    scope.launch {
+        val view = withContext(Threads.commands) {
+            runCatching {
+                var v = s.castShadow(copy, hx.toDouble(), hy.toDouble(), Trying.intensity, Trying.key)
+                Trying.shadow = v.createdId.ifEmpty { null }
+                v = s.restack(copy, 99)
+                Trying.warm?.let { w -> v = s.restack(w, 99) }
+                v
+            }
+        }
+        Trying.busy = false
+        view.onSuccess { vm.applyView(it) }.onFailure { vm.message = it.userMessage }
+    }
 }
 
 /**
@@ -661,19 +718,19 @@ fun AtmospherePanel(vm: EditorViewModel) {
                     when (setting) {
                         "Scale" -> ValueSlider(
                             value = ((now?.optDouble("scale", 1.0) ?: 1.0) * 100).toFloat(), range = 20f..400f, label = { "${it.roundToInt()}%" },
-                            onChange = { place("scale", it / 100.0) }, onDone = { vm.endGesture() }, title = "Scale",
+                            onChange = { place("scale", it / 100.0) }, onDone = { vm.endGesture(); recast(vm, context, clip, scope) }, title = "Scale",
                         )
                         "Rotate" -> ValueSlider(
                             value = (now?.optDouble("rotation", 0.0) ?: 0.0).toFloat().coerceIn(-180f, 180f), range = -180f..180f, label = { "${it.roundToInt()}°" },
-                            onChange = { place("rotation", it.toDouble()) }, onDone = { vm.endGesture() }, title = "Rotate",
+                            onChange = { place("rotation", it.toDouble()) }, onDone = { vm.endGesture(); recast(vm, context, clip, scope) }, title = "Rotate",
                         )
                         "X axis" -> ValueSlider(
                             value = ((now?.optDouble("offsetX", 0.0) ?: 0.0) * 100).toFloat().coerceIn(-100f, 100f), range = -100f..100f, label = { "${it.roundToInt()}" },
-                            onChange = { place("offsetX", it / 100.0) }, onDone = { vm.endGesture() }, title = "Left / right",
+                            onChange = { place("offsetX", it / 100.0) }, onDone = { vm.endGesture(); recast(vm, context, clip, scope) }, title = "Left / right",
                         )
                         "Y axis" -> ValueSlider(
                             value = ((now?.optDouble("offsetY", 0.0) ?: 0.0) * 100).toFloat().coerceIn(-100f, 100f), range = -100f..100f, label = { "${it.roundToInt()}" },
-                            onChange = { place("offsetY", it / 100.0) }, onDone = { vm.endGesture() }, title = "Up / down",
+                            onChange = { place("offsetY", it / 100.0) }, onDone = { vm.endGesture(); recast(vm, context, clip, scope) }, title = "Up / down",
                         )
                         else -> ValueSlider(
                             value = Trying.strength * 100f, range = 0f..100f, label = { "${it.roundToInt()}" },

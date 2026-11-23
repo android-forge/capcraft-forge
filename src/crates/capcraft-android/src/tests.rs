@@ -2232,20 +2232,91 @@ fn a_light_casts_the_persons_shadow_away_from_it() {
     session.add_to_main(vec![media.id.clone()], 0).unwrap();
     let person = session.add_overlay(media.id, 0).unwrap().created_id;
     // a light high on the left: the shadow falls right and down
-    let first = session.cast_shadow(person.clone(), 0.15, 0.1, 0.9).expect("cast").created_id;
+    let first = session.cast_shadow(person.clone(), 0.15, 0.1, 0.9, 0xFFC4_68FF).expect("cast").created_id;
     assert!(!first.is_empty());
-    session.cast_shadow(person.clone(), 0.15, 0.1, 0.9).expect("cast again");
+    session.cast_shadow(person.clone(), 0.15, 0.1, 0.9, 0xFFC4_68FF).expect("cast again");
     let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
     let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
     let shadows: Vec<&serde_json::Value> = clips.iter().filter(|c| c["blend"] == "multiply").collect();
     assert_eq!(shadows.len(), 1, "the second light's shadow is in place of the first: {doc}");
     let shadow = shadows[0];
-    assert!(shadow["offsetX"].as_f64().unwrap_or(0.0) > 0.02 && shadow["offsetY"].as_f64().unwrap_or(0.0) > 0.01, "{shadow}");
-    assert!(shadow["videoEffects"].as_array().unwrap().iter().any(|e| e["id"] == "concat.gaussian-blur"));
+    let traced = doc["media"].as_array().unwrap().iter().any(|m| m["id"] == shadow["mediaId"] && m["path"].as_str().is_some_and(|p| p.contains("Shadows ")));
+    if !traced {
+        // no depth to be had: a soft dark copy of the person, pushed away from the light
+        assert!(shadow["offsetX"].as_f64().unwrap_or(0.0) > 0.02 && shadow["offsetY"].as_f64().unwrap_or(0.0) > 0.01, "{shadow}");
+        assert!(shadow["videoEffects"].as_array().unwrap().iter().any(|e| e["id"] == "concat.gaussian-blur"));
+    }
     let kept: serde_json::Value = serde_json::from_str(&session.extra(crate::atmosphere::SHADOWS.to_owned())).unwrap();
     assert_eq!(kept[&person], shadow["id"]);
+    // the person lit from the top left: from the left is 0, from above 90
+    let lit = clips.iter().find(|c| c["id"] == person.as_str()).unwrap();
+    let relight = lit["videoEffects"].as_array().unwrap().iter().find(|e| e["id"] == "capcraft.relight").expect("lit");
+    let angle = relight["params"]["angle"].as_f64().unwrap();
+    assert!(angle > 20.0 && angle < 80.0, "{relight}");
     // the person stands in front of their shadow
     let view = session.view();
     let row_of = |id: &str| view.rows.iter().position(|r| r.clips.iter().any(|c| c.id == id)).unwrap();
     assert!(row_of(&person) > row_of(shadow["id"].as_str().unwrap()), "rows are listed from the bottom up");
+    // flat light again: no shadow, no light on the person
+    session.unlight_person(person.clone()).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&session.document()).unwrap();
+    let clips = doc.pointer("/timelines/0/clips").or_else(|| doc.get("clips")).and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    assert!(!clips.iter().any(|c| c["blend"] == "multiply"));
+    assert!(!doc.to_string().contains("capcraft.relight"));
+}
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg"]
+fn a_photo_persons_copy_lies_over_it_among_other_overlays() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Copy".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let photo = std::path::Path::new(&made.path).join("photo.jpg");
+    std::fs::copy(std::path::Path::new(&dir).join("photo.jpg"), &photo).unwrap();
+    let media = session.import(photo.to_string_lossy().into_owned()).unwrap();
+    let main = session.add_to_main(vec![media.id.clone(), media.id.clone()], 0).unwrap();
+    let mut clips: Vec<_> = main.rows.iter().flat_map(|r| r.clips.clone()).collect();
+    clips.sort_by_key(|c| c.start_us);
+    let first = clips[0].id.clone();
+    // the first cut short, and something else over the timeline later on
+    session.run(vec![serde_json::from_value(serde_json::json!({"op": "trimClip", "clipId": first, "edge": "end", "delta": -3.7, "ripple": true})).unwrap()]).unwrap();
+    session.add_overlay(media.id.clone(), 1_500_000).unwrap();
+    struct Quiet;
+    impl crate::speech::SpeechListener for Quiet {
+        fn on_progress(&self, _: f32, _: String) {}
+        fn on_done(&self, _: Option<crate::session::TimelineView>) {}
+        fn on_failed(&self, _: String) {}
+    }
+    session.clone().body_effect(first.clone(), "tint:4280949503:70".to_owned(), std::sync::Arc::new(Quiet)).ok();
+    let bodies: serde_json::Value = serde_json::from_str(&session.extra(crate::body::BODY.to_owned())).unwrap();
+    let copy = bodies[&first]["copy"].as_str().expect("a copy").to_owned();
+    let view = session.view();
+    let all: Vec<_> = view.rows.iter().flat_map(|r| r.clips.clone()).collect();
+    let (c, f) = (all.iter().find(|c| c.id == copy).unwrap(), all.iter().find(|c| c.id == first).unwrap());
+    assert_eq!((c.start_us, c.duration_us), (f.start_us, f.duration_us), "the copy lies over its clip");
+    // and a light laid over it, and its shadow
+    let light = session.lay_over(first.clone(), photo.to_string_lossy().into_owned(), crate::atmosphere::Laid { blend: "screen".to_owned(), opacity: 0.8, scale: 1.0, x: 0.0, y: 0.0, rotation: 0.0, flip: false, adjust: String::new() }).unwrap().created_id;
+    let l = session.view().rows.iter().flat_map(|r| r.clips.clone()).find(|c| c.id == light).unwrap();
+    assert_eq!((l.start_us, l.duration_us), (f.start_us, f.duration_us), "the light lies over the clip");
+    let shadow = session.cast_shadow(copy, 0.2, 0.2, 0.8, 0xFFC4_68FF).unwrap().created_id;
+    let s = session.view().rows.iter().flat_map(|r| r.clips.clone()).find(|c| c.id == shadow).unwrap();
+    assert_eq!((s.start_us, s.duration_us), (f.start_us, f.duration_us), "the shadow lies over the clip");
+}
+
+#[test]
+#[ignore = "needs REEL_DIR with photo.jpg, and the internet the first time"]
+fn depth_shadows_are_traced_from_a_photo() {
+    let Ok(dir) = std::env::var("REEL_DIR") else { return };
+    start();
+    let made = create_project("Depth".to_owned(), 1080, 1920, 30).expect("made");
+    let session = MobileSession::open(made.path.clone()).expect("opened");
+    let photo = std::path::Path::new(&dir).join("photo.jpg").to_string_lossy().into_owned();
+    match session.traced_shadows(&photo, 0.0, 0.8, 0.15, 0.9, 0xFFC4_68FF) {
+        Ok(file) => {
+            eprintln!("traced: {file}");
+            assert!(std::path::Path::new(&file).is_file());
+        }
+        Err(error) => panic!("no depth: {error}"),
+    }
 }

@@ -20,7 +20,7 @@ each, and its licence, is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
 
 Fonts not in the app are downloaded when wanted from Google Fonts' repository (SIL Open Font License; Kosugi Maru Apache-2.0).
 Remove objects uses YOLOX (Megvii, Apache-2.0), SlimSAM (Apache-2.0) and MI-GAN (Picsart AI Research, MIT), each downloaded
-when it is first used.
+when it is first used. Atmosphere's 3D light reads depth with Depth Anything V2 Small (Apache-2.0), downloaded the same way.
 
 Speech offers Supertonic 3 (Supertone Inc., OpenRAIL-M; its code MIT) as sherpa-onnx packages it, downloaded when wanted. Its
 licence forbids some uses, deceiving or harming people among them.

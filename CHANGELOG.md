@@ -44,11 +44,17 @@ dated, as the licence asks; `#` numbers are the original project's.
   Internet Archive, and Commons videos; only what may be changed and used commercially.
 - Beats: the main track's clips cut so each change lands on a beat, or all made one length, in one tap.
 - Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down. Light
-  laid in 3D puts the people in front of it and casts their shadow away from it; 2D lays it flat, as before. The last
-  Golden light settings (glow 80, warm photo 66) are the defaults.
+  laid in 3D reads the photo's depth (Depth Anything V2 Small, fetched on first use), puts the scene back in 3D, and traces
+  from the light's brightest point what each part of it would be shaded by, so shadows fall with the scene's own shapes and
+  sizes; they fade where the photo's own lamps already light it, are as dark as the light is strong, and take the colour of
+  the light still reaching in. The people are lit from the light's side in its colour (Relight), and the shadow is traced
+  again when the light is scaled, turned or moved. 2D lays it flat, as before. The last Golden light settings (glow 80,
+  warm photo 66) are the defaults.
 - People in colour: Body effects turn the people grey (or, inverted, all but them), or tint them (angry red, cold blue, sick green), with the amount
   set and grown from the clip's start to the playhead. A Tint effect does it.
 - Remove background: Invert keeps the background and takes the person away.
+- People effects and Atmosphere overlays on a photo now lie over the clip they are for, rather than at the end of the
+  timeline, when another overlay is further along.
 - Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
   to go in. A video shared to the app may be made one.
 - Golden light in Atmosphere: rays, lights and window beams yellow, and the picture warmed by them; the colour (golden,

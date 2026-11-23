@@ -41,6 +41,7 @@ pub mod colormatch;
 pub mod compound;
 pub mod cutout;
 pub mod deflicker;
+pub(crate) mod depthlight;
 pub mod enhance;
 pub mod export;
 pub mod fillers;

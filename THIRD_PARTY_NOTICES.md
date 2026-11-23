@@ -232,6 +232,12 @@ except the first:
   MIT, Picsart AI Research), in the ONNX export one of its authors publishes
   at https://huggingface.co/andraniksargsyan/migan (MIT), downloaded on first
   use. Fills in what was behind a thing removed. Used by CapCraft Forge.
+- Depth Anything V2 Small (https://github.com/DepthAnything/Depth-Anything-V2,
+  Apache-2.0; the Base and Large models are under other terms and not used),
+  in the int8 ONNX export at
+  https://huggingface.co/onnx-community/depth-anything-v2-small (Apache-2.0),
+  downloaded on first use. Reads how near each part of a photo is, for light
+  in Atmosphere that casts shadows as the scene would. Used by CapCraft Forge.
 
 Downloaded models live in the app's data directory under `cutout-models`
 and are never bundled; the three that are downloaded come from Concat's own

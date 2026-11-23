@@ -45,6 +45,9 @@ pub enum ModelId {
     WordsFind,
     /// PaddleOCR's English PP-OCRv5 reader: what a line of words says.
     WordsRead,
+    /// Depth Anything V2 Small: how near each part of a picture is, for
+    /// light that casts shadows as the scene would.
+    Depth,
 }
 
 /// One model as the table describes it.
@@ -68,7 +71,7 @@ pub struct ModelSpec {
 }
 
 /// Every downloadable model.
-pub const MODELS: [ModelSpec; 9] = [
+pub const MODELS: [ModelSpec; 10] = [
     ModelSpec {
         id: ModelId::Person,
         file: "rvm-mobilenetv3.onnx",
@@ -141,6 +144,14 @@ pub const MODELS: [ModelSpec; 9] = [
         sha256: "4e16deb22c4da6468bdca539b2cd3c8687825538b67109177c47d359ab994cd7",
         licence: "Apache-2.0",
     },
+    ModelSpec {
+        id: ModelId::Depth,
+        file: "depth-anything-v2-small-int8.onnx",
+        upstream: "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/model_int8.onnx",
+        bytes: 27_258_801,
+        sha256: "01aa7a23de3f4a0ee1a2bb9997e6918104c85a9f95dea46d27b9b3fb0c6b9001",
+        licence: "Apache-2.0",
+    },
 ];
 
 impl ModelId {
@@ -164,6 +175,7 @@ impl ModelId {
             ModelId::Erase => "migan-512-places2",
             ModelId::WordsFind => "ppocr-v3-det-en",
             ModelId::WordsRead => "ppocr-v5-rec-en",
+            ModelId::Depth => "depth-anything-v2-small",
         }
     }
 }

@@ -293,8 +293,9 @@ impl MobileSession {
             .media
             .iter()
             .find(|item| item.id == clip.media_id)
-            .and_then(|item| item.duration)
-            .unwrap_or(clip.duration)
+            // a picture is placed at a still's length
+            .map(|item| if item.kind == concat_project::model::MediaKind::Image { crate::session::STILL_SECONDS } else { item.duration.unwrap_or(clip.duration) })
+            .unwrap_or(crate::session::STILL_SECONDS)
             .max(clip.duration);
         let track = match lanes::free_lane(&timeline, RowKind::Overlay, clip.start, whole) {
             Some(track) => track,

@@ -151,7 +151,7 @@ adds the following; [CHANGELOG.md](CHANGELOG.md) dates each change.
 | Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA | ✅ |
 | Unsplash among the stock photos, with a key of your own | 🧪 |
 | People grey or tinted (anger red rising over the clip), and Invert on Remove background | 🧪 |
-| Atmosphere light in 3D: the people in front of it, their shadow cast away from it; or flat, in 2D | 🧪 |
+| Atmosphere light in 3D: the photo's depth read on the phone, shadows traced from the light (faded where the photo is lit already, in the light's strength and colour), the people lit from its side; or flat, in 2D | 🧪 |
 | Stock videos on the import page, narrowed to a language of India: public domain films (1965 and before) on the Internet Archive, and Commons. Only what may be changed and used commercially | 🧪 |
 | Sound FX from your own folders of sounds | ✅ |
 

@@ -33,7 +33,7 @@ const STICKER_SCALE: f64 = 0.35;
 
 /// How long a still (or a file of unknown length) runs when placed: the
 /// engine's own default.
-const STILL_SECONDS: f64 = 5.0;
+pub(crate) const STILL_SECONDS: f64 = 5.0;
 
 /// What the monitor's picture is doing, which says which copy of each file
 /// a frame is read from.
