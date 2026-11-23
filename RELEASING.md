@@ -13,7 +13,7 @@ Not legal advice. Work through this for every release.
 - [ ] Ask Concat whether its model mirror may be used by this build.
 
 ## Every release
-- [ ] Set a version of its own (it is still the original's 0.0.4-beta).
+- [x] Set a version of its own: 0.0.5 (version code 599), after the original's 0.0.4-beta, so it installs over it.
 - [ ] Update CHANGELOG.md with what changed and when.
 - [ ] Run `src/scripts/licences.py <ffmpeg source>` and commit what it changes.
 - [ ] Credit anyone whose work was added in CREDITS.md, and keep their commits as theirs.
