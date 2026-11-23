@@ -105,6 +105,16 @@ internal enum class StockKind(val title: String, val hint: String) {
     MEMES("Memes", "Search meme pictures"),
 }
 
+/**
+ * Meme sites with no feed an app may read: their downloads go through their own pages (with their ads and terms),
+ * so they are opened in the browser, and what is downloaded there is added from the phone's own videos and photos.
+ */
+internal val MEME_SITES = listOf(
+    "tamilmemes.co.in" to "https://tamilmemes.co.in",
+    "indianmemetemplates.com" to "https://indianmemetemplates.com",
+    "memes.co.in" to "https://memes.co.in",
+)
+
 /** The languages of India a search can be narrowed to: its name, and the code archives file it under. */
 internal val INDIAN_LANGUAGES = listOf(
     "Hindi" to "hin", "Tamil" to "tam", "Telugu" to "tel", "Malayalam" to "mal", "Kannada" to "kan", "Bengali" to "ben",
@@ -131,6 +141,7 @@ internal enum class StockSite(val title: String, val kind: StockKind, val keyPag
     PIXABAY_IMAGE("Pixabay", StockKind.MEMES, "https://pixabay.com/api/docs/", "Pictures and illustrations provided by Pixabay.", "PIXABAY"),
     // what these two hold is mostly from films and shows whose makers keep their rights: its use is the user's to judge
     GIPHY("GIPHY", StockKind.MEMES, "https://developers.giphy.com/dashboard/", "Powered by GIPHY. GIFs, brought in as silent videos, credited to whoever put them there. Many are from films and shows whose makers keep their rights: how you use them is for you to judge.", moving = true),
+    PEXELS_MEME("Pexels videos", StockKind.MEMES, "https://www.pexels.com/api/", "Videos provided by Pexels, free to use: try \"indian memes\".", "PEXELS", moving = true),
     IMGFLIP("Imgflip", StockKind.MEMES, null, "Imgflip's most used meme templates, put there by its users. Most come from films, shows and photos whose makers keep their rights: how you use them is for you to judge."),
 }
 
@@ -198,6 +209,7 @@ internal object Stock {
             StockSite.PIXABAY_IMAGE -> pixabay(key, words, page, video = false)
             StockSite.GIPHY -> giphy(key, query, page, language)
             StockSite.IMGFLIP -> imgflip(words, page)
+            StockSite.PEXELS_MEME -> pexelsVideos(key, words.ifBlank { "memes" }, page)
         }
     }
 
@@ -641,6 +653,19 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
             }
         }
         Text(site.about, style = Type.Tiny, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+        if (kind == StockKind.MEMES) {
+            // the sites that keep their downloads on their own pages
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("On the web:", style = Type.Tiny.copy(fontSize = 12.sp))
+                MEME_SITES.forEach { (name, url) ->
+                    Text(
+                        name, style = Type.Tiny.copy(fontSize = 12.sp, color = Palette.Accent),
+                        modifier = Modifier.clip(RoundedCornerShape(13.dp)).clickable { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }.padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            Text("Those open in the browser: download there, then add it from Videos or Photos.", style = Type.Tiny.copy(fontSize = 11.sp), modifier = Modifier.padding(horizontal = 14.dp))
+        }
         if (needsKey) {
             KeyForm(site) { key -> Stock.setKey(context, site, key); keys++ }
             return@Column
