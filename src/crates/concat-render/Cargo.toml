@@ -20,6 +20,12 @@ pollster.workspace = true
 # an effect's probes check them.
 half = "2"
 
+# Zero-copy frames on a phone: the decoder's hardware buffers imported into
+# the compositor's own Vulkan device (see src/android_import.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+ash = "0.38"
+libc = "0.2"
+
 [dev-dependencies]
 # The pass test compiles a real package shader through the catalogue's
 # stitching, so what the test runs is what a package would run.

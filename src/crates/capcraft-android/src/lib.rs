@@ -153,6 +153,12 @@ pub fn init(files_dir: String, cache_dir: String) -> Result<(), MobileError> {
     // behind playing a camera's files, and a stream the chip refuses, or a
     // reader past the few it has room for, decodes in software anyway.
     concat_media::set_hardware_decode(true);
+    // More readers on the decoder chip where the phone has the memory for
+    // them: a playing clip holds two or three of its own.
+    if total_memory().is_some_and(|bytes| bytes >= 7 * 1024 * 1024 * 1024) {
+        // Four, not more: an Adreno 825 phone refused a fifth 4K session.
+        concat_media::set_mediacodec_readers(4);
+    }
     // Readers nobody has asked a frame of for ten seconds are closed, looked
     // at every five, as the desktop editor does: each holds buffers, one on
     // the chip holds one of its few decoders, and the playhead leaves files
@@ -282,4 +288,17 @@ impl Picture {
             rgba,
         }
     }
+}
+
+/// The phone's memory in bytes, from the kernel's MemTotal.
+fn total_memory() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kilobytes: u64 = meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kilobytes * 1024)
 }

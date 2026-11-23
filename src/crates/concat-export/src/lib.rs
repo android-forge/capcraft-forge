@@ -1745,9 +1745,66 @@ fn render_picture(
     reporter: &mut Reporter<'_>,
 ) -> Result<(), String> {
     let effect_offset = quantise(request.effect_time_offset, rate);
+    #[cfg(target_os = "android")]
+    let mut surface_video = None;
+    let surface_eligible = !request.hdr
+        && !request.ten_bit
+        && !request.codec.keeps_alpha()
+        && matches!(request.codec, VideoCodec::H264 | VideoCodec::Hevc);
     let mut compositor = match compositor {
         Some(lent) => lent,
-        None => best_compositor()?,
+        None => {
+            #[cfg(target_os = "android")]
+            if surface_eligible {
+                let mime = match request.codec {
+                    VideoCodec::H264 => "video/avc",
+                    VideoCodec::Hevc => "video/hevc",
+                    _ => unreachable!(),
+                };
+                let bitrate = android_surface_bitrate(request, rate);
+                match concat_media::surface_encoder::SurfaceEncoder::open(
+                    destination,
+                    request.width,
+                    request.height,
+                    rate.fps().as_f64(),
+                    bitrate,
+                    mime,
+                    request.color_range,
+                ) {
+                    Ok(encoder) => match WgpuCompositor::with_android_surface(
+                        encoder.native_window(),
+                        request.width,
+                        request.height,
+                    ) {
+                        Ok((gpu, target)) => {
+                            log::info!(
+                                "export: using direct Vulkan surface output to Android MediaCodec at {bitrate} bps"
+                            );
+                            // The surface must drop before its ANativeWindow
+                            // owner on early-return paths too.
+                            surface_video = Some((target, encoder));
+                            gpu
+                        }
+                        Err(error) => {
+                            log::warn!("export: direct Android GPU output unavailable ({error}); using FFmpeg readback");
+                            drop(encoder);
+                            best_compositor()?
+                        }
+                    },
+                    Err(error) => {
+                        log::warn!("export: direct Android encoder unavailable ({error}); using FFmpeg readback");
+                        best_compositor()?
+                    }
+                }
+            } else {
+                best_compositor()?
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                let _ = surface_eligible;
+                best_compositor()?
+            }
+        }
     };
     // Which chip and API the file is drawn on: the first thing a report of
     // an export gone wrong needs to say, and until now could not (#202).
@@ -1825,28 +1882,29 @@ fn render_picture(
         } else {
             "rendering"
         };
-        let mut encoder = if hdr {
-            Encoder::create_hdr(
-                destination,
-                request.width,
-                request.height,
-                rate,
-                &options,
-                signal,
-            )
-        } else {
-            Encoder::create(destination, request.width, request.height, rate, &options)
-        }
-        .map_err(|error| failed_encoding(&error, &options))?;
-        log::info!(
-            "export: encoding with {} ({})",
-            encoder.encoder_name(),
-            if encoder.on_hardware() {
-                "hardware"
+        let mut encoder = if surface_video.is_none() {
+            let encoder = if hdr {
+                Encoder::create_hdr(
+                    destination,
+                    request.width,
+                    request.height,
+                    rate,
+                    &options,
+                    signal,
+                )
             } else {
-                "software"
+                Encoder::create(destination, request.width, request.height, rate, &options)
             }
-        );
+            .map_err(|error| failed_encoding(&error, &options))?;
+            log::info!(
+                "export: encoding with {} ({})",
+                encoder.encoder_name(),
+                if encoder.on_hardware() { "hardware" } else { "software" }
+            );
+            Some(encoder)
+        } else {
+            None
+        };
 
         // When progress was last said; see `progress_due`.
         let mut said = std::time::Instant::now();
@@ -1996,26 +2054,37 @@ fn render_picture(
             // that died under it is black, and is drawn again on the device
             // that takes over. Both drawings borrow it - the layers' pictures
             // were never copied, and now their passes are not either.
-            let mut composed = composite_treated(
-                &mut EffectClock {
-                    inner: &mut compositor,
-                    offset: effect_offset,
-                },
-                &frame_plan,
-                &treatments,
-                &transitions,
-            );
-            while compositor.lost() {
-                losses += 1;
-                let adapter = compositor.adapter_info();
-                log::error!(
-                    "export: the GPU device on {} was lost drawing frame {index} of {total_frames} \
-                 ({:.3}s into the cut); the frame is drawn again on the next device",
-                    adapter.name,
-                    time.as_f64(),
+            #[cfg(target_os = "android")]
+            let rendered_to_surface = if let Some((target, surface_encoder)) = surface_video.as_mut() {
+                let frame = target.acquire_frame((time.as_f64() * 1_000_000_000.0).round() as i64)?;
+                let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let drawn = composite_treated_into(
+                    &mut EffectClock {
+                        inner: &mut compositor,
+                        offset: effect_offset,
+                    },
+                    &frame_plan,
+                    &treatments,
+                    &transitions,
+                    &view,
                 );
-                compositor = recovered(losses, hdr)?;
-                composed = composite_treated(
+                if !drawn {
+                    return Err("GPU could not render this frame to the Android encoder surface".into());
+                }
+                target.present_frame(&mut compositor, frame)?;
+                surface_encoder.wait_for_samples(index as usize + 1)?;
+                if compositor.lost() {
+                    return Err("Android export GPU was lost during direct surface rendering".into());
+                }
+                true
+            } else {
+                false
+            };
+            #[cfg(not(target_os = "android"))]
+            let rendered_to_surface = false;
+
+            if !rendered_to_surface {
+                let mut composed = composite_treated(
                     &mut EffectClock {
                         inner: &mut compositor,
                         offset: effect_offset,
@@ -2024,14 +2093,38 @@ fn render_picture(
                     &treatments,
                     &transitions,
                 );
-            }
-            if let Err(error) = encoder.write_frame(&composed) {
-                // The stopped encoder is closed before the file is opened
-                // again, so the chip has its session back.
-                drop(encoder);
-                again_in_software(&error, &mut options, index, total_frames)?;
-                reporter.emit(0, total_frames, RENDERING_IN_SOFTWARE);
-                continue 'pass;
+                while compositor.lost() {
+                    losses += 1;
+                    let adapter = compositor.adapter_info();
+                    log::error!(
+                        "export: the GPU device on {} was lost drawing frame {index} of {total_frames} \
+                     ({:.3}s into the cut); the frame is drawn again on the next device",
+                        adapter.name,
+                        time.as_f64(),
+                    );
+                    compositor = recovered(losses, hdr)?;
+                    composed = composite_treated(
+                        &mut EffectClock {
+                            inner: &mut compositor,
+                            offset: effect_offset,
+                        },
+                        &frame_plan,
+                        &treatments,
+                        &transitions,
+                    );
+                }
+                if let Err(error) = encoder
+                    .as_mut()
+                    .expect("FFmpeg encoder exists outside surface mode")
+                    .write_frame(&composed)
+                {
+                    // The stopped encoder is closed before the file is opened
+                    // again, so the chip has its session back.
+                    drop(encoder);
+                    again_in_software(&error, &mut options, index, total_frames)?;
+                    reporter.emit(0, total_frames, RENDERING_IN_SOFTWARE);
+                    continue 'pass;
+                }
             }
 
             // Retire decoders whose clip has finished, so a long timeline does not
@@ -2045,6 +2138,14 @@ fn render_picture(
             }
         }
 
+        #[cfg(target_os = "android")]
+        if let Some((target, surface_encoder)) = surface_video.take() {
+            drop(target);
+            surface_encoder.finish()?;
+            return Ok(());
+        }
+
+        let mut encoder = encoder.expect("FFmpeg encoder exists outside surface mode");
         match encoder.finish() {
             Ok(()) => return Ok(()),
             Err(error) => {
@@ -2054,6 +2155,19 @@ fn render_picture(
             }
         }
     }
+}
+
+#[cfg(target_os = "android")]
+fn android_surface_bitrate(request: &ExportRequest, rate: FrameRate) -> u32 {
+    if request.rate_mode != RateMode::Vbr && request.bitrate_kbps > 0 {
+        return request.bitrate_kbps.saturating_mul(1_000).clamp(250_000, 100_000_000);
+    }
+    // MediaCodec's surface encoders do not expose CRF. Approximate the
+    // requested quality with a resolution/frame-rate-scaled VBR target.
+    let pixel_rate =
+        f64::from(request.width) * f64::from(request.height) * rate.fps().as_f64();
+    let quality = 2.0_f64.powf((23.0 - f64::from(request.crf)) / 6.0);
+    (pixel_rate * 0.12 * quality).round().clamp(250_000.0, 100_000_000.0) as u32
 }
 
 /// The stage an export reports while it renders again on the CPU's
@@ -2152,6 +2266,50 @@ impl Compositor for EffectClock<'_> {
         self.inner.render(&shifted)
     }
 
+    fn render_into_view(&mut self, plan: &FramePlan, target: &wgpu::TextureView) -> bool {
+        if self.offset == Rational::ZERO {
+            return self.inner.render_into_view(plan, target);
+        }
+        let mut shifted = plan.clone();
+        shifted.time += self.offset;
+        for layer in &mut shifted.layers {
+            layer.clip_start += self.offset;
+        }
+        self.inner.render_into_view(&shifted, target)
+    }
+
+    fn present_surface(&mut self, frame: wgpu::SurfaceTexture) -> bool {
+        self.inner.present_surface(frame)
+    }
+
+    fn render_transition_into_view(
+        &mut self,
+        from: &FramePlan,
+        to: &FramePlan,
+        pass: &concat_core::shader::TransitionPass,
+        overlays: &FramePlan,
+        target: &wgpu::TextureView,
+    ) -> bool {
+        let shift = |plan: &FramePlan, offset: Rational| {
+            if offset == Rational::ZERO {
+                return plan.clone();
+            }
+            let mut shifted = plan.clone();
+            shifted.time += offset;
+            for layer in &mut shifted.layers {
+                layer.clip_start += offset;
+            }
+            shifted
+        };
+        self.inner.render_transition_into_view(
+            &shift(from, self.offset),
+            &shift(to, self.offset),
+            pass,
+            &shift(overlays, self.offset),
+            target,
+        )
+    }
+
     fn combine(
         &mut self,
         width: u32,
@@ -2217,6 +2375,65 @@ fn composite_treated(
     let mut plan = plan.clone();
     plan.treatments = planned;
     compositor.render(&plan)
+}
+
+/// Applies live adjustment layers and draws straight into an encoder surface.
+fn composite_treated_into(
+    compositor: &mut dyn Compositor,
+    plan: &FramePlan,
+    treatments: &[Treatment],
+    transitions: &[TransitionSpan],
+    target: &wgpu::TextureView,
+) -> bool {
+    let time = plan.time;
+    let mut live: Vec<&Treatment> = treatments
+        .iter()
+        .filter(|treatment| treatment.covers(time))
+        .collect();
+    live.sort_by_key(|treatment| treatment.track);
+    let planned: Vec<PlannedTreatment> = live
+        .iter()
+        .map(|treatment| PlannedTreatment {
+            track: treatment.track,
+            effects: treatment.passes_at(time),
+            strength: treatment.strength_at(time),
+            clip_start: treatment.start.as_f64() as f32,
+            clip_length: (treatment.end - treatment.start).as_f64() as f32,
+        })
+        .collect();
+    if let Some(span) = transitions.iter().find(|span| span.covers(time))
+        && combine_transition_into_view(compositor, plan, span, &planned, target)
+    {
+        return true;
+    }
+    let mut plan = plan.clone();
+    plan.treatments = planned;
+    compositor.render_into_view(&plan, target)
+}
+
+/// Builds both transition stages and the treatment/layer stack above them,
+/// keeping the whole combination in GPU textures through the output view.
+fn combine_transition_into_view(
+    compositor: &mut dyn Compositor,
+    plan: &FramePlan,
+    span: &TransitionSpan,
+    treatments: &[PlannedTreatment],
+    target: &wgpu::TextureView,
+) -> bool {
+    let Some(pass) = Catalogue::builtin().transition_pass(&span.id, &span.params, span.progress(plan.time)) else {
+        return false;
+    };
+    let (below, over): (Vec<PlannedTreatment>, Vec<PlannedTreatment>) = treatments
+        .iter()
+        .cloned()
+        .partition(|treatment| treatment.track < span.to_track);
+    let (mut from, mut to) = transition_stages(plan, span);
+    from.treatments = below.clone();
+    to.treatments = below;
+    let mut overlays = plan.clone();
+    overlays.layers.retain(|layer| layer.track > span.to_track);
+    overlays.treatments = over;
+    compositor.render_transition_into_view(&from, &to, &pass, &overlays, target)
 }
 
 /// The two pictures a packaged transition combines: the outgoing stack,
@@ -2491,6 +2708,12 @@ fn frame_request(
         // clip, unless a cutout has to cut it in eight bits.
         .at_any_size(true)
         .deep_when_untreated(!plan.built.cutouts.contains_key(&layer.clip))
+        // A playing picture may come straight from a phone's decoder on the
+        // GPU: everything but a cutout, which cuts the pixels on the CPU, is
+        // drawn there anyway.
+        .on_gpu_when(
+            reading == concat_media::Reading::Proxy && !plan.built.cutouts.contains_key(&layer.clip),
+        )
 }
 
 /// [`preview_sources`] for one instant of a plan already built, each file

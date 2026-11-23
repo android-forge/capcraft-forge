@@ -25,6 +25,9 @@ pub fn filmstrip(
     } else {
         seconds(to_us)
     };
+    // Each tile is a frame of the file decoded on the cores: a reel's 4K
+    // clips coming up while it played took them from the play.
+    concat_host::preview::wait_while_playing();
     let frame = concat_host::media::filmstrip_between(
         &path,
         seconds(from_us).max(0.0),
@@ -38,6 +41,7 @@ pub fn filmstrip(
 /// One frame of a video file at `at_us` (or a still image), `width` across.
 #[uniffi::export]
 pub fn still(path: String, at_us: i64, width: u32) -> Result<Picture, MobileError> {
+    concat_host::preview::wait_while_playing();
     let frame = concat_host::media::still_at(&path, seconds(at_us).max(0.0), width.max(2))?;
     Ok(Picture::of(frame))
 }

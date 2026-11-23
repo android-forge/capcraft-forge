@@ -804,6 +804,16 @@ impl Decoder {
                         })
                     })
                     .and_then(|name| hardware::mediacodec_seat().map(|seat| (name, seat)));
+                // Diagnostic: every reader a phone opens, and where it decodes.
+                log::info!(
+                    "decoder: {} {}x{} -> {:?}{}{}",
+                    path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                    coded.0,
+                    coded.1,
+                    options.size,
+                    if wrapped.is_some() { " on the chip" } else { " IN SOFTWARE" },
+                    if small { " (small picture)" } else if options.keyframes_only { " (keyframes only)" } else { "" },
+                );
                 match wrapped {
                     Some((name, seat)) => {
                         match Self::open_codec(path, &stream, options, Codec::Named(name)) {

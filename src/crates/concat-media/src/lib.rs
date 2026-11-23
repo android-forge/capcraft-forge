@@ -26,14 +26,18 @@ pub mod prefetch;
 pub mod probe;
 pub mod samples;
 pub mod scrub;
+#[cfg(target_os = "android")]
+mod surface;
 pub mod svg;
+#[cfg(target_os = "android")]
+pub mod surface_encoder;
 pub mod treat;
 
 pub use decode::{ColorRange, ColorSignal, DecodeOptions, Decoder, FrameSource, SeekableSource};
 pub use encode::{EncodeOptions, Encoder, FrameSink, RateMode, VideoCodec, jpeg};
 pub use error::{Error, Result};
 pub use ffi::{init, linked_version};
-pub use hardware::{HwDevice, HwPolicy, hardware_decode, set_hardware_decode};
+pub use hardware::{HwDevice, HwPolicy, hardware_decode, set_hardware_decode, set_mediacodec_readers};
 pub use peaks::{Peaks, Pyramid};
 pub use pool::{CacheStats, FrameCache, FrameRequest, ReaderPool, Reading};
 pub use prefetch::{Cursor, Direction, Moment, Prefetcher, Priority};

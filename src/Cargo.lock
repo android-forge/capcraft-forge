@@ -656,6 +656,7 @@ dependencies = [
  "concat-vision",
  "log",
  "serde",
+ "wgpu",
 ]
 
 [[package]]
@@ -694,6 +695,8 @@ dependencies = [
  "ffmpeg-the-third",
  "libc",
  "log",
+ "ndk",
+ "ndk-sys",
  "resvg 0.48.1",
  "thiserror 2.0.20",
 ]
@@ -713,10 +716,12 @@ dependencies = [
 name = "concat-render"
 version = "0.2.8"
 dependencies = [
+ "ash",
  "concat-core",
  "concat-effects",
  "concat-vision",
  "half",
+ "libc",
  "log",
  "pollster",
  "wgpu",

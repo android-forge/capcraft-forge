@@ -85,6 +85,13 @@ pub(crate) fn give_way() {
     }
 }
 
+/// For other work that would take the cores or the chip from a play - a
+/// timeline's filmstrip tiles, each a 4K frame decoded on the cores - a wait
+/// until the play stops. See [`give_way`].
+pub fn wait_while_playing() {
+    give_way();
+}
+
 /// A frame request: the instant and the size, with the clips coming from
 /// the session that owns them.
 #[derive(Clone, Copy, Debug)]

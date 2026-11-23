@@ -63,6 +63,11 @@ const ROLL_FORWARD_FRAMES: i64 = 60;
 /// a 4K file does not hold a decoder per playback worker.
 const READERS_PER_KEY: usize = 3;
 
+/// How long a warm reader rests before its seat on the decoder chip may be
+/// taken for another: longer than playback opens the clip after a cut ahead of
+/// reaching it (a second), so the reader waiting there keeps its seat.
+const SEAT_IDLE: std::time::Duration = std::time::Duration::from_millis(1500);
+
 /// What one frame request asks for; see [`ReaderPool::frame`].
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FrameRequest {
@@ -112,6 +117,13 @@ pub struct FrameRequest {
     /// go straight to the GPU. Only with `any_size`, since a fit here is
     /// FFmpeg on eight bits. See [`DecodeOptions::deep`].
     pub deep: bool,
+    /// The frame may come as a picture on the GPU (see
+    /// [`Frame::on_gpu`]): the caller is the preview's compositor drawing a
+    /// playing picture nothing on the CPU treats. On a phone with an importer
+    /// it is then read by the platform's decoder into GPU memory, with no copy
+    /// through the CPU; anywhere else nothing changes. Only with `any_size`
+    /// and no `pre` or `chain`.
+    pub gpu: bool,
 }
 
 impl FrameRequest {
@@ -132,7 +144,14 @@ impl FrameRequest {
             range: None,
             any_size: false,
             deep: false,
+            gpu: false,
         }
+    }
+
+    /// Lets the frame come on the GPU when `gpu`; see [`FrameRequest::gpu`].
+    pub fn on_gpu_when(mut self, gpu: bool) -> Self {
+        self.gpu = gpu;
+        self
     }
 
     /// Reads the file as `range`, whatever it says. See
@@ -247,6 +266,9 @@ struct SourceKey {
     /// [`DecodeOptions::eight_bit`]): a picture a few levels off the one
     /// read in full, so the playhead at rest never takes it for its own.
     eight: bool,
+    /// Read for a GPU (see [`FrameRequest::gpu`]): the frame may hold no
+    /// pixels, so nothing that needs them ever finds it under another key.
+    gpu: bool,
 }
 
 /// A treated frame's identity: the source frame and what was done to it.
@@ -298,7 +320,7 @@ impl<K: Hash + Eq + Clone> FrameCache<K> {
     }
 
     fn insert(&mut self, key: K, frame: Arc<Frame>) {
-        let bytes = frame.pixels().len();
+        let bytes = frame.held_bytes();
         // A frame larger than the whole budget would evict everything and
         // still not fit; hold it once without caching it.
         if bytes > self.budget {
@@ -306,7 +328,7 @@ impl<K: Hash + Eq + Clone> FrameCache<K> {
         }
         self.tick += 1;
         if let Some((previous, _)) = self.frames.insert(key, (frame, self.tick)) {
-            self.held -= previous.pixels().len();
+            self.held -= previous.held_bytes();
         }
         self.held += bytes;
         while self.held > self.budget {
@@ -319,7 +341,7 @@ impl<K: Hash + Eq + Clone> FrameCache<K> {
                 break;
             };
             if let Some((evicted, _)) = self.frames.remove(&oldest) {
-                self.held -= evicted.pixels().len();
+                self.held -= evicted.held_bytes();
             }
         }
     }
@@ -334,7 +356,7 @@ impl<K: Hash + Eq + Clone> FrameCache<K> {
             .collect();
         for key in gone {
             if let Some((frame, _)) = self.frames.remove(&key) {
-                self.held -= frame.pixels().len();
+                self.held -= frame.held_bytes();
             }
         }
     }
@@ -427,8 +449,51 @@ fn level_for(source: (u32, u32), cover: (u32, u32)) -> (u32, u32) {
 }
 
 /// One warm reader: a decoder plus where its *next* frame will land.
+/// A reader's decoder: FFmpeg's, or on a phone the platform's straight into
+/// GPU memory (see [`crate::surface`]).
+enum Decoding {
+    Ffmpeg(Decoder),
+    #[cfg(target_os = "android")]
+    Surface(crate::surface::SurfaceDecoder),
+}
+
+impl Decoding {
+    fn next_frame(&mut self) -> Result<Option<Frame>> {
+        match self {
+            Decoding::Ffmpeg(decoder) => decoder.next_frame(),
+            #[cfg(target_os = "android")]
+            Decoding::Surface(decoder) => decoder.next_frame(),
+        }
+    }
+
+    fn position(&self) -> Option<Rational> {
+        match self {
+            Decoding::Ffmpeg(decoder) => decoder.position(),
+            #[cfg(target_os = "android")]
+            Decoding::Surface(decoder) => decoder.position(),
+        }
+    }
+
+    fn seek(&mut self, to: Rational) -> Result<()> {
+        match self {
+            Decoding::Ffmpeg(decoder) => decoder.seek(to),
+            #[cfg(target_os = "android")]
+            Decoding::Surface(decoder) => decoder.seek(to),
+        }
+    }
+
+    /// The device it decodes on, `None` in software.
+    fn hardware(&self) -> Option<crate::hardware::HwDevice> {
+        match self {
+            Decoding::Ffmpeg(decoder) => decoder.hardware(),
+            #[cfg(target_os = "android")]
+            Decoding::Surface(_) => Some(crate::hardware::HwDevice::MediaCodec),
+        }
+    }
+}
+
 struct Reader {
-    decoder: Decoder,
+    decoder: Decoding,
     /// The frame index `next_frame` will produce, in the media's own rate,
     /// or `i64::MIN` right after a seek, when only the timestamps know.
     next_index: i64,
@@ -449,10 +514,48 @@ impl Reader {
         range: Option<ColorRange>,
         deep: bool,
         eight: bool,
+        gpu: bool,
         rate: FrameRate,
         still: bool,
         index: i64,
+        free_a_seat: &dyn Fn() -> bool,
     ) -> Result<Self> {
+        // A playing picture nothing treats, on a phone that can: the platform's
+        // decoder straight into GPU memory. Anything it does not take is read
+        // the usual way below.
+        #[cfg(target_os = "android")]
+        // `deep` asks for a wide source's own light; the zero-copy decoder
+        // refuses a wide or ten-bit file of its own accord.
+        if gpu && !still && chain.is_none() && pre.is_none() {
+            let start = rate.time_of_frame(index);
+            let mut opened = crate::surface::SurfaceDecoder::open(path, (width, height), start);
+            // The phone out of decoder sessions: an idle reader gives its up,
+            // and the open is tried once more before the usual road.
+            if matches!(&opened, Err(crate::error::Error::Ffi { operation: "zero-copy start", .. }))
+                && free_a_seat()
+            {
+                opened = crate::surface::SurfaceDecoder::open(path, (width, height), start);
+            }
+            match opened {
+                Ok(Some(decoder)) => {
+                    log::info!(
+                        "decoder: {} {}x{} on the zero-copy road",
+                        path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                        decoder.size().0,
+                        decoder.size().1
+                    );
+                    return Ok(Self {
+                        decoder: Decoding::Surface(decoder),
+                        next_index: i64::MIN,
+                        last: None,
+                        ahead: None,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => log::warn!("{}: zero-copy decoder: {error}", path.display()),
+            }
+        }
+        let _ = (gpu, free_a_seat);
         // Unpaced, so every source frame comes out with its own timestamp
         // and the index is read from that; a seek lands on the keyframe at
         // or before the target and the pull rolls forward from there.
@@ -476,7 +579,7 @@ impl Reader {
         if let Some(pre) = pre {
             options = options.prefiltered(pre);
         }
-        let decoder = Decoder::open(path, &options)?;
+        let decoder = Decoding::Ffmpeg(Decoder::open(path, &options)?);
         Ok(Self {
             decoder,
             next_index: i64::MIN,
@@ -581,6 +684,7 @@ type ReaderKey = (
     Option<String>,
     Option<String>,
     Option<ColorRange>,
+    bool,
     bool,
     bool,
 );
@@ -1034,6 +1138,15 @@ impl ReaderPool {
                 deep,
                 request.proxy || request.scrub || request.paused,
             );
+        // On the GPU only where nothing here treats the frame, and never a
+        // still: a photograph is decoded once and kept.
+        let gpu = cfg!(target_os = "android")
+            && request.gpu
+            && request.any_size
+            && request.pre.is_none()
+            && request.chain.is_none()
+            && !(deep && facts.wide)
+            && !facts.still;
         Ok((
             facts,
             SourceKey {
@@ -1044,6 +1157,7 @@ impl ReaderPool {
                 range,
                 deep,
                 eight,
+                gpu,
             },
         ))
     }
@@ -1134,6 +1248,7 @@ impl ReaderPool {
             range,
             deep: deep && chain.is_none() && pre.is_none(),
             eight: false,
+            gpu: false,
         };
         if chain.is_none() && pre.is_none() {
             return self.source_frame(&facts, &source_key);
@@ -1164,7 +1279,7 @@ impl ReaderPool {
             return Ok(frame);
         }
         let shared = self.reader(
-            path, width, height, chain, pre, range, false, false, &facts, index,
+            path, width, height, chain, pre, range, false, false, false, &facts, index,
         )?;
         let mut reader = shared.lock().map_err(|_| crate::error::Error::NoFrame {
             path: path.to_path_buf(),
@@ -1201,8 +1316,8 @@ impl ReaderPool {
             return Ok(frame);
         }
         let shared = self.reader(
-            path, key.width, key.height, None, None, key.range, key.deep, key.eight, facts,
-            key.index,
+            path, key.width, key.height, None, None, key.range, key.deep, key.eight, key.gpu,
+            facts, key.index,
         )?;
         let mut reader = shared.lock().map_err(|_| crate::error::Error::NoFrame {
             path: path.to_path_buf(),
@@ -1408,6 +1523,7 @@ impl ReaderPool {
         range: Option<ColorRange>,
         deep: bool,
         eight: bool,
+        gpu: bool,
         facts: &MediaFacts,
         target: i64,
     ) -> Result<Arc<Mutex<Reader>>> {
@@ -1420,7 +1536,17 @@ impl ReaderPool {
             range,
             deep,
             eight,
+            gpu,
         );
+        // A zero-copy reader decodes at several times the rate a play asks
+        // for, so it rolls up to two seconds ahead to a frame rather than
+        // another one opening: each is a session on the decoder chip, and the
+        // phone ran out of them at four 4K readers a clip.
+        let roll = if gpu {
+            facts.roll.max((facts.rate.fps().as_f64() * 2.0).round() as i64)
+        } else {
+            facts.roll
+        };
         {
             let mut readers = self
                 .readers
@@ -1428,11 +1554,18 @@ impl ReaderPool {
                 .map_err(|_| crate::error::Error::NoFrame {
                     path: path.to_path_buf(),
                 })?;
-            if let Some(reader) = readers.claim(&key, target, facts.roll) {
+            if let Some(reader) = readers.claim(&key, target, roll) {
                 return Ok(reader);
             }
         }
 
+        // Every seat on the phone's decoder chip taken, by readers the
+        // playhead may well have left: the one this opens would read on the
+        // cores, and a 4K clip there played at a frame a second. An idle
+        // reader on the chip gives its seat up instead.
+        if gpu || crate::hardware::mediacodec_full() {
+            self.free_a_seat();
+        }
         // Opened outside the lock: opening a file and seeking it is the slow
         // part, and nobody else needs to wait for it. A decode in flight on
         // an evicted reader finishes on its own handle.
@@ -1445,9 +1578,11 @@ impl ReaderPool {
             range,
             deep,
             eight,
+            gpu,
             facts.rate,
             facts.still,
             target,
+            &|| self.free_a_seat(),
         )?));
         let mut readers = self
             .readers
@@ -1455,7 +1590,7 @@ impl ReaderPool {
             .map_err(|_| crate::error::Error::NoFrame {
                 path: path.to_path_buf(),
             })?;
-        if let Some(reader) = readers.claim(&key, target, facts.roll) {
+        if let Some(reader) = readers.claim(&key, target, roll) {
             // Someone else opened a reader for this ground meanwhile, or
             // filled the key; theirs wins.
             return Ok(reader);
@@ -1470,6 +1605,61 @@ impl ReaderPool {
             touched: std::time::Instant::now(),
         });
         Ok(opened)
+    }
+
+    /// Closes the least recently asked for warm reader that decodes on
+    /// MediaCodec, is used by nobody now and has rested [`SEAT_IDLE`], so its
+    /// seat on the chip comes free for a reader about to open. Readers close
+    /// on their own after ten idle seconds (see [`ReaderPool::close_idle`]),
+    /// which is three cuts of a reel of short clips: until then they held
+    /// the chip's three seats and every clip after them decoded on the cores.
+    /// Returns whether one closed.
+    fn free_a_seat(&self) -> bool {
+        let Ok(mut readers) = self.readers.lock() else {
+            return false;
+        };
+        let idle = |warm: &Warm| {
+            Arc::strong_count(&warm.reader) == 1
+                && warm.touched.elapsed() >= SEAT_IDLE
+                && warm.reader.try_lock().is_ok_and(|reader| {
+                    reader.decoder.hardware() == Some(crate::hardware::HwDevice::MediaCodec)
+                })
+        };
+        // `warm` runs from the least recently asked for.
+        match readers.warm.iter().position(idle) {
+            Some(at) => {
+                let warm = readers.warm.remove(at);
+                log::info!(
+                    "decoder seat freed: {} idle {:.1} s",
+                    warm.key.0.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                    warm.touched.elapsed().as_secs_f64()
+                );
+                true
+            }
+            None => {
+                // Diagnostic: why no reader could give its seat up.
+                let chip: Vec<String> = readers
+                    .warm
+                    .iter()
+                    .filter_map(|warm| {
+                        let on_chip = match warm.reader.try_lock() {
+                            Ok(reader) => reader.decoder.hardware().is_some(),
+                            Err(_) => return Some("busy".to_owned()),
+                        };
+                        on_chip.then(|| {
+                            format!(
+                                "{} idle {:.1}s users {}",
+                                warm.key.0.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                                warm.touched.elapsed().as_secs_f64(),
+                                Arc::strong_count(&warm.reader) - 1
+                            )
+                        })
+                    })
+                    .collect();
+                log::info!("decoder seats full, none free: {} warm, on the chip: {chip:?}", readers.warm.len());
+                false
+            }
+        }
     }
 
     /// Drops every warm reader, cached frame and adopted proxy - for when
@@ -1660,6 +1850,7 @@ pub(crate) mod tests {
             range: None,
             deep: false,
             eight: false,
+            gpu: false,
         };
         cache.insert(key(0), Arc::new(Frame::black(2, 2)));
         cache.insert(key(1), Arc::new(Frame::black(2, 2)));
@@ -1721,6 +1912,7 @@ pub(crate) mod tests {
                 range: None,
                 deep: false,
                 eight: false,
+                gpu: false,
             },
             Arc::new(Frame::black(2, 2)),
         );

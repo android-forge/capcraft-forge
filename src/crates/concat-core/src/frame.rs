@@ -19,7 +19,9 @@
 //! type of its own gave way to that, since a second type would have run
 //! through the frame pool, the plan and every cache for one reader.
 
+use std::any::Any;
 use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Bytes per pixel of an eight-bit frame, the format nearly everything uses.
@@ -80,6 +82,10 @@ pub struct Frame {
     depth: Depth,
     /// What the values mean.
     signal: Signal,
+    /// The picture held on a GPU instead of in `pixels`, which is then empty:
+    /// a decoder's frame handed straight to the compositor that made it. See
+    /// [`Frame::on_gpu`].
+    gpu: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl Clone for Frame {
@@ -93,6 +99,7 @@ impl Clone for Frame {
             id: mint(),
             depth: self.depth,
             signal: self.signal,
+            gpu: self.gpu.clone(),
         }
     }
 }
@@ -105,6 +112,11 @@ impl PartialEq for Frame {
             && self.depth == other.depth
             && self.signal == other.signal
             && self.pixels == other.pixels
+            && match (&self.gpu, &other.gpu) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
@@ -137,6 +149,7 @@ impl Frame {
             id: mint(),
             depth: Depth::Eight,
             signal: Signal::Sdr,
+            gpu: None,
         }
     }
 
@@ -149,6 +162,7 @@ impl Frame {
             id: mint(),
             depth: Depth::Eight,
             signal: Signal::Sdr,
+            gpu: None,
         }
     }
 
@@ -164,6 +178,7 @@ impl Frame {
             id: mint(),
             depth: Depth::Eight,
             signal: Signal::Sdr,
+            gpu: None,
         })
     }
 
@@ -177,7 +192,40 @@ impl Frame {
             id: mint(),
             depth: Depth::Sixteen,
             signal,
+            gpu: None,
         })
+    }
+
+    /// A frame whose picture is on a GPU: `width` by `height`, eight-bit SDR,
+    /// `picture` whatever the compositor that will draw it knows how to read
+    /// (a texture on its own device). Its [`Frame::pixels`] are empty, so it
+    /// may only go where a GPU draws it: the pool hands these out to the
+    /// preview's playing pictures and nothing else.
+    pub fn on_gpu(width: u32, height: u32, picture: Arc<dyn Any + Send + Sync>) -> Self {
+        Self {
+            width,
+            height,
+            pixels: Vec::new(),
+            id: mint(),
+            depth: Depth::Eight,
+            signal: Signal::Sdr,
+            gpu: Some(picture),
+        }
+    }
+
+    /// The picture on a GPU, for a frame made with [`Frame::on_gpu`].
+    pub fn gpu(&self) -> Option<&Arc<dyn Any + Send + Sync>> {
+        self.gpu.as_ref()
+    }
+
+    /// The bytes the picture takes, wherever it is held: what a cache of
+    /// frames counts against its budget.
+    pub fn held_bytes(&self) -> usize {
+        if self.gpu.is_some() {
+            Self::byte_len(self.width, self.height)
+        } else {
+            self.pixels.len()
+        }
     }
 
     /// Eight bits a channel, or sixteen.
@@ -316,6 +364,7 @@ impl fmt::Debug for Frame {
             .field("bytes", &self.pixels.len())
             .field("depth", &self.depth)
             .field("signal", &self.signal)
+            .field("on_gpu", &self.gpu.is_some())
             .finish()
     }
 }

@@ -873,6 +873,65 @@ pub struct WgpuCompositor {
     /// How many errors the device has reported that no scope caught, as its
     /// handler counts them; see [`Compositor::render`].
     uncaught: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The raw Vulkan device under `device`, found the first time a zero-copy
+    /// frame comes: what tells this compositor's frames from another's.
+    #[cfg(target_os = "android")]
+    raw_device: Option<u64>,
+}
+
+/// An Android MediaCodec input surface configured on the compositor's
+/// Vulkan adapter. The caller owns the ANativeWindow for this value's life.
+#[cfg(target_os = "android")]
+pub struct AndroidSurfaceTarget {
+    surface: wgpu::Surface<'static>,
+    window: *mut std::ffi::c_void,
+    _native_window_library: NativeWindowLibrary,
+    set_timestamp: unsafe extern "C" fn(*mut std::ffi::c_void, i64) -> i32,
+}
+
+#[cfg(target_os = "android")]
+struct NativeWindowLibrary(*mut std::ffi::c_void);
+
+#[cfg(target_os = "android")]
+impl Drop for NativeWindowLibrary {
+    fn drop(&mut self) {
+        unsafe { libc::dlclose(self.0) };
+    }
+}
+
+#[cfg(target_os = "android")]
+impl AndroidSurfaceTarget {
+    /// Acquires one surface image and assigns its exact media timestamp.
+    pub fn acquire_frame(&self, presentation_time_ns: i64) -> Result<wgpu::SurfaceTexture, String> {
+        let timestamp = unsafe { (self.set_timestamp)(self.window, presentation_time_ns) };
+        if timestamp != 0 {
+            return Err(format!("setting MediaCodec frame timestamp returned {timestamp}"));
+        }
+        Ok(match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                // Present this one; configuring while it is held is invalid.
+                frame
+            }
+            wgpu::CurrentSurfaceTexture::Timeout => return Err("MediaCodec surface timed out".into()),
+            wgpu::CurrentSurfaceTexture::Occluded => return Err("MediaCodec surface is occluded".into()),
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => return Err("MediaCodec surface was lost or outdated".into()),
+            wgpu::CurrentSurfaceTexture::Validation => return Err("wgpu rejected the MediaCodec surface".into()),
+        })
+    }
+
+    /// Presents the rendered image to MediaCodec.
+    pub fn present_frame(
+        &self,
+        compositor: &mut dyn Compositor,
+        frame: wgpu::SurfaceTexture,
+    ) -> Result<(), String> {
+        if compositor.present_surface(frame) {
+            Ok(())
+        } else {
+            Err("compositor could not present the MediaCodec surface frame".into())
+        }
+    }
 }
 
 impl WgpuCompositor {
@@ -896,6 +955,123 @@ impl WgpuCompositor {
     /// holds a device hands it to [`WgpuCompositor::with_device`] instead.
     pub fn new() -> Option<Self> {
         Self::own_api_first(false)
+    }
+
+    /// Opens a Vulkan compositor compatible with an Android native window
+    /// (typically MediaCodec's input surface) and configures that window for
+    /// direct SDR rendering.
+    #[cfg(target_os = "android")]
+    pub fn with_android_surface(
+        window: *mut std::ffi::c_void,
+        width: u32,
+        height: u32,
+    ) -> Result<(Self, AndroidSurfaceTarget), String> {
+        use std::ptr::NonNull;
+        if window.is_null() || width == 0 || height == 0 {
+            return Err("invalid Android output surface dimensions or window".into());
+        }
+        let native_window_library = NativeWindowLibrary(unsafe {
+            libc::dlopen(c"libnativewindow.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL)
+        });
+        if native_window_library.0.is_null() {
+            return Err("could not open libnativewindow.so".into());
+        }
+        let timestamp_symbol = unsafe {
+            libc::dlsym(
+                native_window_library.0,
+                c"ANativeWindow_setBuffersTimestamp".as_ptr(),
+            )
+        };
+        if timestamp_symbol.is_null() {
+            return Err("Android does not expose ANativeWindow_setBuffersTimestamp".into());
+        }
+        let set_timestamp = unsafe {
+            std::mem::transmute::<
+                *mut std::ffi::c_void,
+                unsafe extern "C" fn(*mut std::ffi::c_void, i64) -> i32,
+            >(timestamp_symbol)
+        };
+
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::VULKAN;
+        let instance = wgpu::Instance::new(descriptor);
+        let handle = wgpu::rwh::AndroidNdkWindowHandle::new(
+            NonNull::new(window.cast()).ok_or("null Android native window")?,
+        );
+        let target = wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(wgpu::rwh::AndroidDisplayHandle::new().into()),
+            raw_window_handle: handle.into(),
+        };
+        // SAFETY: caller keeps MediaCodec's ANativeWindow alive until the
+        // returned target is dropped, before releasing the encoder surface.
+        let surface = unsafe { instance.create_surface_unsafe(target) }
+            .map_err(|error| format!("could not create Vulkan output surface: {error}"))?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .map_err(|error| format!("no Vulkan adapter can present to MediaCodec: {error}"))?;
+        let info = adapter.get_info();
+        let device_descriptor = wgpu::DeviceDescriptor {
+            label: Some("concat Android surface compositor"),
+            required_limits: limits_for(&adapter.limits()),
+            ..Default::default()
+        };
+        #[cfg(target_os = "android")]
+        let imported = crate::android_import::open_device(&adapter, &device_descriptor);
+        let opened = match imported {
+            Some(opened) => Ok(opened),
+            None => pollster::block_on(adapter.request_device(&device_descriptor)),
+        }
+        .map_err(|error| format!("could not open Vulkan compositor device: {error}"))?;
+        let work = work_format(&adapter);
+        let (device, queue) = opened;
+        let lost_name = info.name.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            log::error!("Android export GPU {lost_name} was lost ({reason:?}): {message}");
+        });
+        let uncaught = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let counted = std::sync::Arc::clone(&uncaught);
+        let error_name = info.name;
+        device.on_uncaptured_error(std::sync::Arc::new(move |error: wgpu::Error| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            log::error!("Android export GPU {error_name} reported an error: {error}");
+        }));
+        let mut compositor = Self::drawing_in(device, queue, work);
+        compositor.uncaught = uncaught;
+
+        let caps = surface.get_capabilities(&adapter);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        if !caps.formats.contains(&format) {
+            return Err(format!("MediaCodec surface lacks RGBA8 support: {:?}", caps.formats));
+        }
+        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
+            wgpu::PresentMode::Fifo
+        } else {
+            *caps.present_modes.first().ok_or("MediaCodec surface has no present mode")?
+        };
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width,
+            height,
+            present_mode,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: *caps.alpha_modes.first().ok_or("MediaCodec surface has no alpha mode")?,
+            view_formats: vec![],
+        };
+        surface.configure(&compositor.device, &config);
+        Ok((
+            compositor,
+            AndroidSurfaceTarget {
+                surface,
+                window,
+                _native_window_library: native_window_library,
+                set_timestamp,
+            },
+        ))
     }
 
     /// A compositor on the machine's software adapter alone - WARP on
@@ -975,12 +1151,23 @@ impl WgpuCompositor {
                     }
                 };
             let info = adapter.get_info();
+            let descriptor = wgpu::DeviceDescriptor {
+                label: Some("concat compositor"),
+                required_limits: limits_for(&adapter.limits()),
+                ..Default::default()
+            };
+            // On a phone, the device that can take the decoder's frames as
+            // they are, where the GPU can (see `android_import`).
+            #[cfg(target_os = "android")]
+            let imported = crate::android_import::open_device(&adapter, &descriptor);
+            #[cfg(not(target_os = "android"))]
+            let imported: Option<(wgpu::Device, wgpu::Queue)> = None;
+            let opened = match imported {
+                Some(opened) => Ok(opened),
+                None => pollster::block_on(adapter.request_device(&descriptor)),
+            };
             let (device, queue) =
-                match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                    label: Some("concat compositor"),
-                    required_limits: limits_for(&adapter.limits()),
-                    ..Default::default()
-                })) {
+                match opened {
                     Ok(opened) => opened,
                     // Said, since the person sees only that nothing could draw:
                     // which adapter refused, on which API, and why (#312).
@@ -1526,6 +1713,8 @@ impl WgpuCompositor {
             dead: false,
             work,
             uncaught: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(target_os = "android")]
+            raw_device: None,
         }
     }
 
@@ -1607,15 +1796,30 @@ impl WgpuCompositor {
     /// rest is drawn on. What comes back are the draws and quads for the
     /// final render, into whichever target the caller wants.
     fn prepare(&mut self, plan: &FramePlan) -> (Vec<Draw>, Vec<Vertex>) {
+        self.prepare_with_base(plan, None)
+    }
+
+    /// Like `prepare`, with an already-rendered GPU canvas as the bottom
+    /// layer. Reserve its pool slot while upper layers and treatments are
+    /// prepared, so an effect cannot overwrite the transition it reads.
+    fn prepare_with_base(
+        &mut self,
+        plan: &FramePlan,
+        base: Option<usize>,
+    ) -> (Vec<Draw>, Vec<Vertex>) {
         self.output = plan.output;
         self.see_through = plan.see_through();
         self.used.values_mut().for_each(|used| *used = 0);
+        if let Some(index) = base {
+            let used = self.used.entry((plan.width, plan.height)).or_insert(0);
+            *used = (*used).max(index + 1);
+        }
         self.composites += 1;
         let (width, height) = (plan.width, plan.height);
         let seconds = plan.seconds();
         let mut treatments: Vec<&PlannedTreatment> = plan.treatments.iter().collect();
         treatments.sort_by_key(|treatment| treatment.track);
-        let mut ground: Option<usize> = None;
+        let mut ground = base;
         let mut next = 0;
         for treatment in treatments {
             let mut draws = Vec::new();
@@ -2443,6 +2647,10 @@ impl WgpuCompositor {
     /// run, or a fresh claim with the pixels uploaded into it.
     fn upload(&mut self, frame: &Frame) -> usize {
         use concat_core::frame::{Depth, Signal};
+        #[cfg(target_os = "android")]
+        if let Some(index) = self.upload_from_gpu(frame) {
+            return index;
+        }
         let key = (frame.width(), frame.height());
         // An HDR frame kept HDR for an HDR timeline is another picture
         // from the same frame conformed for an SDR one, so it is held
@@ -2593,6 +2801,49 @@ impl WgpuCompositor {
     }
 
     /// This size's staging texture and its bind group, made on first use.
+    /// A frame already on this GPU - a phone decoder's, imported (see
+    /// `android_import`) - claimed into a pooled texture the way an upload
+    /// is, by the same conversion into the working format, from its own
+    /// texture rather than from staging. `None` for any other frame.
+    #[cfg(target_os = "android")]
+    fn upload_from_gpu(&mut self, frame: &Frame) -> Option<usize> {
+        let picture = frame
+            .gpu()?
+            .downcast_ref::<crate::android_import::GpuPicture>()?;
+        if self.raw_device.is_none() {
+            self.raw_device = Some(crate::android_import::raw_device_of(&self.device).unwrap_or(0));
+        }
+        if self.raw_device != Some(picture.device) {
+            return None;
+        }
+        let key = (frame.width(), frame.height());
+        let identity = frame.id();
+        let used = self.used.get(&key).copied().unwrap_or(0);
+        if let Some(pool) = self.pool.get_mut(&key)
+            && let Some(found) = (used..pool.len()).find(|&slot| pool[slot].holds == identity)
+        {
+            pool.swap(used, found);
+            pool[used].drawn = self.composites;
+            *self.used.entry(key).or_insert(0) = used + 1;
+            return Some(used);
+        }
+        let index = self.claim(frame.width(), frame.height());
+        self.uploads += 1;
+        self.pool.get_mut(&key).expect("just claimed")[index].holds = identity;
+        let group = self.bind_group_of(&picture.texture, "concat zero-copy frame");
+        let view = self.pool[&key][index]
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("concat zero-copy upload"),
+            });
+        Self::copy(&mut encoder, &self.upload_pipeline, &group, &view);
+        self.queue.submit([encoder.finish()]);
+        Some(index)
+    }
+
     fn staging_for(&mut self, width: u32, height: u32) -> (wgpu::Texture, wgpu::BindGroup) {
         if let Some((texture, group)) = self.staging.get(&(width, height)) {
             return (texture.clone(), group.clone());
@@ -3726,6 +3977,117 @@ impl Compositor for WgpuCompositor {
                 Frame::black(plan.width, plan.height)
             }
         }
+    }
+
+    fn render_into_view(&mut self, plan: &FramePlan, target: &wgpu::TextureView) -> bool {
+        if self.dead || self.deliver_hdr {
+            return false;
+        }
+        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let (draws, vertices) = self.prepare(plan);
+        self.write_vertices(&vertices);
+        let (canvas, canvas_texture, canvas_view) = self.canvas(plan.width, plan.height);
+        let mut encoder = self.encode(
+            &canvas_view,
+            &canvas_texture,
+            &draws,
+            clear_of(plan.canvas),
+        );
+        self.resolve(&mut encoder, (plan.width, plan.height), canvas, target);
+        self.queue.submit([encoder.finish()]);
+        self.retire();
+        let refused = pollster::block_on(validation.pop());
+        let exhausted = pollster::block_on(memory.pop());
+        let mut failed = false;
+        for error in [exhausted, refused].into_iter().flatten() {
+            log::error!("GPU surface composite at {:.3}s failed: {error}", plan.time.as_f64());
+            failed = true;
+        }
+        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
+            log::error!("GPU surface composite at {:.3}s was drawn while the device reported an error", plan.time.as_f64());
+            failed = true;
+        }
+        if failed {
+            self.dead = true;
+        }
+        !failed
+    }
+
+    fn render_transition_into_view(
+        &mut self,
+        from: &FramePlan,
+        to: &FramePlan,
+        pass: &TransitionPass,
+        overlays: &FramePlan,
+        target: &wgpu::TextureView,
+    ) -> bool {
+        if self.dead || self.deliver_hdr || from.width != to.width || from.height != to.height {
+            return false;
+        }
+        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let (width, height, time) = (from.width, from.height, from.seconds());
+        let [from_texture, to_texture] = self.stages(width, height);
+        for (plan, texture) in [(from, &from_texture), (to, &to_texture)] {
+            let (draws, vertices) = self.prepare(plan);
+            self.write_vertices(&vertices);
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let encoder = self.encode(&view, texture, &draws, clear_of(plan.canvas));
+            self.queue.submit([encoder.finish()]);
+        }
+        let from_view = from_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let to_view = to_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let (transition_canvas, _, transition_view) = self.canvas(width, height);
+        let Some(mut encoder) = self.encode_transition(
+            width,
+            height,
+            time,
+            &from_view,
+            &to_view,
+            pass,
+            &transition_view,
+        ) else {
+            let _ = pollster::block_on(validation.pop());
+            let _ = pollster::block_on(memory.pop());
+            return false;
+        };
+        if overlays.layers.is_empty() && overlays.treatments.is_empty() {
+            self.resolve(&mut encoder, (width, height), transition_canvas, target);
+            self.queue.submit([encoder.finish()]);
+        } else {
+            self.queue.submit([encoder.finish()]);
+            let (draws, vertices) = self.prepare_with_base(overlays, Some(transition_canvas));
+            self.write_vertices(&vertices);
+            let (output_canvas, output_texture, output_view) = self.canvas(width, height);
+            let mut final_encoder =
+                self.encode(&output_view, &output_texture, &draws, clear_of(overlays.canvas));
+            self.resolve(&mut final_encoder, (width, height), output_canvas, target);
+            self.queue.submit([final_encoder.finish()]);
+        }
+        self.retire();
+        let refused = pollster::block_on(validation.pop());
+        let exhausted = pollster::block_on(memory.pop());
+        let mut failed = false;
+        for error in [exhausted, refused].into_iter().flatten() {
+            log::error!("GPU transition surface composite failed: {error}");
+            failed = true;
+        }
+        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
+            log::error!("GPU transition surface composite ran while the device reported an error");
+            failed = true;
+        }
+        if failed {
+            self.dead = true;
+        }
+        !failed
+    }
+
+    fn present_surface(&mut self, frame: wgpu::SurfaceTexture) -> bool {
+        self.queue.present(frame);
+        true
     }
 
     fn lost(&self) -> bool {

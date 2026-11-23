@@ -26,6 +26,31 @@ pub trait Compositor {
     /// encoder, and neither has anything to show through.
     fn render(&mut self, plan: &FramePlan) -> Frame;
 
+    /// Draws the finished SDR frame straight into a compatible GPU target.
+    /// Implementations without surface output support return `false` so the
+    /// caller can use the ordinary readback path.
+    fn render_into_view(&mut self, _plan: &FramePlan, _target: &wgpu::TextureView) -> bool {
+        false
+    }
+
+    /// Combines two GPU-composited stages with a packaged transition and
+    /// resolves the result directly into a compatible output view.
+    fn render_transition_into_view(
+        &mut self,
+        _from: &FramePlan,
+        _to: &FramePlan,
+        _pass: &TransitionPass,
+        _overlays: &FramePlan,
+        _target: &wgpu::TextureView,
+    ) -> bool {
+        false
+    }
+
+    /// Presents a frame acquired from a surface created for this device.
+    fn present_surface(&mut self, _frame: wgpu::SurfaceTexture) -> bool {
+        false
+    }
+
     /// Combines two finished frames with a transition: the outgoing picture
     /// `from` and the incoming one `to`, at the pass's `progress`. The shader
     /// owns the blend. `None` from a compositor that cannot run it: the

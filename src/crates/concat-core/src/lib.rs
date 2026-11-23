@@ -19,6 +19,7 @@
 pub mod animate;
 pub mod arena;
 pub mod frame;
+pub mod gpu_import;
 pub mod mask;
 pub mod retime;
 pub mod shader;

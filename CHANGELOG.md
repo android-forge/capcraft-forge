@@ -3,6 +3,13 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## 0.0.7 (24 November 2026)
+
+### 24 November 2026
+- Android preview can decode supported SDR H.264 and HEVC proxy frames directly into GPU buffers and import them into Vulkan/wgpu without a CPU pixel round trip. Unsupported clips and frames that need CPU effects keep using the existing decoder path.
+- Android SDR H.264/HEVC export can render to a MediaCodec input surface, avoiding GPU readback before encoding; HDR, 10-bit and alpha exports keep their existing path.
+- Decoder seats are managed during playback and scrub work yields so background reads do not crowd out the playing clip.
+
 ## 0.0.6 (23 November 2026)
 
 ### 24 November 2026

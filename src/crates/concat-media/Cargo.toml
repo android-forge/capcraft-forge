@@ -31,5 +31,11 @@ log = "0.4"
 resvg = "0.48"
 thiserror.workspace = true
 
+# Zero-copy frames on a phone: the platform's decoder into hardware buffers
+# (see src/surface.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-29"] }
+ndk-sys = { version = "0.6", features = ["media"] }
+
 [lints]
 workspace = true

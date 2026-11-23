@@ -304,15 +304,20 @@ pub const MEDIACODEC_COPY_FROM: u64 = 1280 * 720;
 /// A bounded count of readers holding something scarce.
 pub(crate) struct Seats {
     taken: AtomicUsize,
-    limit: usize,
+    limit: AtomicUsize,
 }
 
 impl Seats {
     pub(crate) const fn new(limit: usize) -> Self {
         Self {
             taken: AtomicUsize::new(0),
-            limit,
+            limit: AtomicUsize::new(limit),
         }
+    }
+
+    /// Makes `limit` the most seats there are; seats already taken stay.
+    pub(crate) fn set_limit(&self, limit: usize) {
+        self.limit.store(limit.max(1), Ordering::Release);
     }
 
     /// A seat, or `None` when all of them are taken. The seat is given
@@ -320,10 +325,15 @@ impl Seats {
     pub(crate) fn take(&'static self) -> Option<Seat> {
         self.taken
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |taken| {
-                (taken < self.limit).then_some(taken + 1)
+                (taken < self.limit.load(Ordering::Acquire)).then_some(taken + 1)
             })
             .ok()
             .map(|_| Seat { seats: self })
+    }
+
+    /// Whether every seat is taken right now.
+    pub(crate) fn full(&self) -> bool {
+        self.taken.load(Ordering::Acquire) >= self.limit.load(Ordering::Acquire)
     }
 
     /// How many seats are taken right now.
@@ -352,6 +362,22 @@ impl std::fmt::Debug for Seat {
 
 /// The readers on MediaCodec; see [`MEDIACODEC_READERS`].
 static MEDIACODEC_SEATS: Seats = Seats::new(MEDIACODEC_READERS);
+
+/// Lets `readers` readers decode on MediaCodec at once, in place of
+/// [`MEDIACODEC_READERS`]: for a phone with the memory for more. A clip that
+/// plays holds two or three readers of its own (the frame at the playhead and
+/// the ones decoded ahead), so three left the clip after a cut on the cores.
+/// A reader the phone will not give a session falls back to software as before.
+pub fn set_mediacodec_readers(readers: usize) {
+    MEDIACODEC_SEATS.set_limit(readers);
+}
+
+/// Whether every one of [`MEDIACODEC_READERS`] is on MediaCodec now: a reader
+/// opened next would decode on the cores, unless one of them closes first
+/// (see the reader pool's `free_a_seat`).
+pub(crate) fn mediacodec_full() -> bool {
+    MEDIACODEC_SEATS.full()
+}
 
 /// A seat on MediaCodec for a reader about to open one of its decoders,
 /// or `None` when [`MEDIACODEC_READERS`] already have one - said once a

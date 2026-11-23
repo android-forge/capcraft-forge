@@ -21,3 +21,7 @@ ffmpeg-the-third = { version = "6", default-features = false, features = [
     "software-scaling",
 ] }
 libc = "0.2"
+
+[[bin]]
+name = "surface-encode-proto"
+path = "src/surface_encode.rs"

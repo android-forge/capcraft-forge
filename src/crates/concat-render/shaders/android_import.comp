@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 CapCraft Forge contributors
+//
+// A phone decoder's picture, sampled where it lies in the decoder's buffer
+// through the Y'CbCr conversion its immutable sampler carries, turned upright
+// and drawn into an eight-bit RGBA picture of the size the compositor asked
+// for. Compiled to android_import.spv with the NDK's glslc:
+//   glslc --target-env=vulkan1.1 -O android_import.comp -o android_import.spv
+#version 450
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(binding = 0) uniform sampler2D decoded;
+layout(binding = 1, rgba8) uniform writeonly image2D picture;
+layout(push_constant) uniform Place {
+    // The picture's rectangle in the buffer: x, y, width, height, from 0 to 1.
+    vec4 crop;
+    // Degrees clockwise the picture is turned to stand upright.
+    int rotation;
+} place;
+
+void main() {
+    ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(picture);
+    if (at.x >= size.x || at.y >= size.y) {
+        return;
+    }
+    vec2 shown = (vec2(at) + 0.5) / vec2(size);
+    // Where in the picture as decoded the upright pixel comes from: a turn of
+    // 90 degrees clockwise takes the decoded (x, y) to (1 - y, x).
+    vec2 decoded_at = shown;
+    if (place.rotation == 90) {
+        decoded_at = vec2(shown.y, 1.0 - shown.x);
+    } else if (place.rotation == 180) {
+        decoded_at = vec2(1.0 - shown.x, 1.0 - shown.y);
+    } else if (place.rotation == 270) {
+        decoded_at = vec2(1.0 - shown.y, shown.x);
+    }
+    vec2 uv = place.crop.xy + decoded_at * place.crop.zw;
+    imageStore(picture, at, texture(decoded, uv));
+}
