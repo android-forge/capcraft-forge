@@ -116,7 +116,7 @@ internal val INDIAN_LANGUAGES = listOf(
  * and gives here; sites that share a key name it in [keyName]. Only what may be changed and used in a video,
  * commercially, is shown: public domain, CC0, CC BY (credited), and the sites' own free licences.
  */
-internal enum class StockSite(val title: String, val kind: StockKind, val keyPage: String? = null, val about: String, val keyName: String? = null) {
+internal enum class StockSite(val title: String, val kind: StockKind, val keyPage: String? = null, val about: String, val keyName: String? = null, val moving: Boolean = kind == StockKind.VIDEOS) {
     COMMONS_FREE("Commons", StockKind.PHOTOS, null, "Wikimedia Commons: public domain and CC0. No credit needed."),
     COMMONS_CREDIT("Commons, with credit", StockKind.PHOTOS, null, "Wikimedia Commons: CC BY. Credit the maker wherever it is shown."),
     NASA("NASA", StockKind.PHOTOS, null, "NASA's own pictures. Free to use; do not suggest NASA endorses anything."),
@@ -129,6 +129,9 @@ internal enum class StockSite(val title: String, val kind: StockKind, val keyPag
     COMMONS_MEME("Commons", StockKind.MEMES, null, "Meme pictures on Wikimedia Commons: public domain, CC0 and CC BY (credit the maker)."),
     OPENVERSE("Openverse", StockKind.MEMES, null, "Openverse: openly licensed pictures from many sites. Public domain, CC0 and CC BY (credit the maker)."),
     PIXABAY_IMAGE("Pixabay", StockKind.MEMES, "https://pixabay.com/api/docs/", "Pictures and illustrations provided by Pixabay.", "PIXABAY"),
+    // what these two hold is mostly from films and shows whose makers keep their rights: its use is the user's to judge
+    GIPHY("GIPHY", StockKind.MEMES, "https://developers.giphy.com/dashboard/", "Powered by GIPHY. GIFs, brought in as silent videos, credited to whoever put them there. Many are from films and shows whose makers keep their rights: how you use them is for you to judge.", moving = true),
+    IMGFLIP("Imgflip", StockKind.MEMES, null, "Imgflip's most used meme templates, put there by its users. Most come from films, shows and photos whose makers keep their rights: how you use them is for you to judge."),
 }
 
 /** Photos from stock sites, searched from the import page. Only those at least full HD are shown. */
@@ -193,6 +196,8 @@ internal object Stock {
             StockSite.COMMONS_MEME -> commonsOpen("$words meme".trim(), page, video = false)
             StockSite.OPENVERSE -> openverse("$words meme".trim(), page)
             StockSite.PIXABAY_IMAGE -> pixabay(key, words, page, video = false)
+            StockSite.GIPHY -> giphy(key, query, page, language)
+            StockSite.IMGFLIP -> imgflip(words, page)
         }
     }
 
@@ -270,6 +275,48 @@ internal object Stock {
             .filter { it.optString("name").lowercase().endsWith(".mp4") && it.optString("size").toLongOrNull()?.let { s -> s in 1..VIDEO_LIMIT } == true }
             .maxByOrNull { it.optString("size").toLong() } ?: throw IOException("That film has no MP4 small enough to bring in.")
         return "https://archive.org/download/${Uri.encode(id)}/" + mp4.optString("name").split('/').joinToString("/") { Uri.encode(it) }
+    }
+
+    /**
+     * GIFs on GIPHY, as their MP4s, credited to their uploaders. GIPHY reads two of India's languages itself;
+     * for the rest, the language's name goes in among the words.
+     */
+    private fun giphy(key: String, query: String, page: Int, language: Pair<String, String>?): List<StockPhoto> {
+        val own = mapOf("hin" to "hi", "ben" to "bn")[language?.second]
+        val words = if (language != null && own == null) "$query ${language.first}".trim() else query.ifBlank { language?.first.orEmpty() }
+        val list = json(
+            "https://api.giphy.com/v1/gifs/search?api_key=${q(key)}&q=${q(words.take(50))}&limit=40&offset=${(page - 1) * 40}&rating=pg-13" + (own?.let { "&lang=$it" } ?: ""),
+        ).optJSONArray("data") ?: return emptyList()
+        return (0 until list.length()).map { list.getJSONObject(it) }.mapNotNull { g ->
+            val images = g.optJSONObject("images") ?: return@mapNotNull null
+            val original = images.optJSONObject("original") ?: return@mapNotNull null
+            val mp4 = original.optString("mp4").ifBlank { return@mapNotNull null }
+            val still = images.optJSONObject("fixed_width_still")?.optString("url").orEmpty().ifBlank { images.optJSONObject("original_still")?.optString("url").orEmpty() }
+            val by = g.optString("username").ifBlank { g.optString("source_tld") }.ifBlank { "GIPHY" }
+            StockPhoto(
+                "giphy-" + g.optString("id"), still, mp4, original.optString("width").toIntOrNull() ?: 0, original.optString("height").toIntOrNull() ?: 0,
+                by.take(80), "GIPHY", g.optString("url"), credit = true, video = true, ext = ".mp4",
+            )
+        }
+    }
+
+    /** Imgflip's most used templates, a hundred of them, kept once read; those whose names hold any of the words. */
+    @Volatile private var templates: List<StockPhoto>? = null
+
+    private fun imgflip(query: String, page: Int): List<StockPhoto> {
+        if (page > 1) return emptyList()
+        val all = templates ?: run {
+            val memes = json("https://api.imgflip.com/get_memes").optJSONObject("data")?.optJSONArray("memes") ?: return emptyList()
+            (0 until memes.length()).map { memes.getJSONObject(it) }.map { m ->
+                val url = m.optString("url")
+                StockPhoto(
+                    "imgflip-" + m.optString("id"), url, url, m.optInt("width"), m.optInt("height"), m.optString("name").take(80), "Imgflip template",
+                    "https://imgflip.com/meme/" + m.optString("id"), credit = false, ext = "." + url.substringAfterLast('.', "jpg").lowercase().take(4),
+                )
+            }.also { templates = it }
+        }
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.length > 1 }
+        return if (words.isEmpty()) all else all.filter { t -> words.any { t.by.lowercase().contains(it) } }
     }
 
     private fun pexelsVideos(key: String, query: String, page: Int): List<StockPhoto> {
@@ -566,7 +613,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
             }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StockSite.entries.filter { it.kind == kind }.forEach { s ->
+            StockSite.entries.filter { it.kind == kind && !(wanted == MediaKinds.IMAGE && it.moving) }.forEach { s ->
                 Box(
                     Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(if (s == site) Palette.Accent else Color(0xFF2A2A2A)).clickable(enabled = fetching == null) {
                         if (s != site) {
@@ -654,7 +701,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
         }
         if (multiple) {
             Row(Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).height(58.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                val owed = chosen.filter { it.credit || it.licence == "Unsplash" || it.licence == "Pexels" || it.licence == "Pixabay" }
+                val owed = chosen.filter { it.credit || it.licence == "Unsplash" || it.licence == "Pexels" || it.licence == "Pixabay" || it.licence == "Imgflip template" }
                 if (owed.isNotEmpty()) {
                     Text(
                         if (owed.any { it.credit }) "Copy credits (needed)" else "Copy credits",

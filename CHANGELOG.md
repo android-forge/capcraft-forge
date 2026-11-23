@@ -42,7 +42,9 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Stock photos, full HD or better, searched on the import page: Wikimedia Commons and NASA, and Pexels and Unsplash with a key of
   one's own. Stock videos and meme pictures beside them, narrowed to any of twelve languages of India: public domain films from
   1965 and before on the Internet Archive, Commons, Openverse, and Pexels and Pixabay with a key; only what may be changed and
-  used commercially (public domain, CC0, CC BY credited, and the sites' own licences).
+  used commercially (public domain, CC0, CC BY credited, and the sites' own licences). Among the memes, GIPHY GIFs (silent
+  videos, credited, "Powered by GIPHY", with a key of one's own) and Imgflip's most used templates, whose makers keep their
+  rights: their use is the user's to judge. YouTube and Klipy are left out, as their API terms forbid keeping copies.
 - Beats: the main track's clips cut so each change lands on a beat, or all made one length, in one tap.
 - Atmosphere's overlays (smoke, clouds, lights, rays) scaled, turned, moved along either axis and flipped upside down.
 - Reel to template: a finished video's cuts, transitions, moves, flashes and sound read on the phone and laid out, for other media
