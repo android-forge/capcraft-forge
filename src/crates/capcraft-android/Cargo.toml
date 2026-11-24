@@ -20,6 +20,7 @@ concat-core.workspace = true
 concat-project.workspace = true
 concat-media.workspace = true
 concat-export.workspace = true
+concat-render.workspace = true
 concat-effects.workspace = true
 concat-host.workspace = true
 concat-text.workspace = true

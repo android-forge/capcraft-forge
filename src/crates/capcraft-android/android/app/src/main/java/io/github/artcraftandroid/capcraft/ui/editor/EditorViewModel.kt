@@ -187,6 +187,8 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
 
     /** A long operation in progress, shown over the editor ("Importing"). */
     var busy: String? by mutableStateOf(null)
+    /** Whether the video scopes show over the preview while grading. */
+    var scopes by mutableStateOf(false)
     var fullscreen by mutableStateOf(false)
     /** The cover editor is open. */
     var editingCover by mutableStateOf(false)
@@ -756,8 +758,29 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         if (playing) stop()
         val end = timeline?.durationUs ?: 0L
         playhead = to.coerceIn(0L, end.coerceAtLeast(0L))
-        viewModelScope.launch(Threads.commands) { runCatching { seek(playhead) } }
+        val at = playhead
+        // how fast the playhead is going, in times real time: a fast drag or a fling coasting on is not sounded, as
+        // ninety milliseconds of sound a few seconds apart is noise, and it went on for as long as the fling did
+        val nowMs = scrubbedAt
+        val pace = if (nowMs > lastScrubMs) kotlin.math.abs(at - lastScrubUs) / 1000.0 / (nowMs - lastScrubMs) else 0.0
+        lastScrubMs = nowMs
+        lastScrubUs = at
+        if (scrubSound && pace <= SCRUB_SOUND_FASTEST) {
+            // the engine sounds the latest place only, a snippet at a time, and stops when the drag does; it returns
+            // at once, so it is asked straight from here rather than queued behind edits. It moves the player too: a
+            // seek queued as well landed behind a snippet and jumped its sound back
+            runCatching { io.github.artcraftandroid.capcraft.core.scrubSound(at) }
+        } else {
+            viewModelScope.launch(Threads.commands) { runCatching { seek(at) } }
+        }
     }
+
+    /** Whether dragging the playhead sounds the timeline under it. */
+    var scrubSound by mutableStateOf(true)
+    /** The last scrub's time and place, for its pace. */
+    private var lastScrubMs = 0L
+    private var lastScrubUs = 0L
+
 
     /** The export settings (the top bar's chip shows the resolution). */
     var exportResolution: Int? by mutableStateOf(null)
@@ -1108,6 +1131,58 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         }
     }
 
+    /** Makes the song in [clip] end with the video: a stretch of its middle cut out, or played again, on the beat. */
+    fun remixToFit(clip: ClipView) {
+        val s = session ?: return
+        val end = timeline?.rows?.firstOrNull { it.kind == RowKind.MAIN }?.clips?.maxOfOrNull { it.startUs + it.durationUs }
+        if (end == null || end - clip.startUs < 1_000_000) {
+            message = "Put the video on the timeline first"
+            return
+        }
+        viewModelScope.launch {
+            busy = "Remixing to fit"
+            val result = withContext(Threads.commands) { runCatching { s.remixToFit(clip.id, end - clip.startUs) } }
+            busy = null
+            result.onSuccess {
+                timeline = it
+                message = "The song now ends with the video"
+                scheduleSave()
+            }.onFailure { fail(it) }
+        }
+    }
+
+    /** Turns [clip] down by 12 dB wherever another clip's voice sounds over it, and back up after, as volume keys. */
+    fun autoDuck(clip: ClipView) {
+        val s = session ?: return
+        viewModelScope.launch {
+            busy = "Listening for voices"
+            val result = withContext(Threads.commands) { runCatching { s.autoDuck(clip.id, 12.0) } }
+            busy = null
+            result.onSuccess {
+                timeline = it
+                message = "Turned down under the voices"
+                scheduleSave()
+            }.onFailure { fail(it) }
+        }
+    }
+
+    /** Splits [clip] wherever its shot changes, read from its pictures on the phone; says how many pieces it made. */
+    fun splitScenes(clip: ClipView) {
+        val s = session ?: return
+        viewModelScope.launch {
+            busy = "Finding scenes"
+            val before = timeline?.rows?.sumOf { it.clips.size } ?: 0
+            val result = withContext(Threads.commands) { runCatching { s.splitAtScenes(clip.id) } }
+            busy = null
+            result.onSuccess {
+                timeline = it
+                val made = it.rows.sumOf { row -> row.clips.size } - before
+                message = if (made == 1) "Split into 2 scenes" else "Split into ${made + 1} scenes"
+                scheduleSave()
+            }.onFailure { fail(it) }
+        }
+    }
+
     /** Adds a title at the playhead, selects it and hands its id to [onCreated]. */
     fun addText(style: JSONObject, durationUs: Long = 3_000_000, onCreated: (String) -> Unit = {}) {
         edit(select = { v -> v.createdId.ifEmpty { null }?.also(onCreated) }) { addText(playhead, durationUs, style.toString()) }
@@ -1327,3 +1402,6 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         override fun <T : ViewModel> create(modelClass: Class<T>): T = EditorViewModel(app, path) as T
     }
 }
+
+/** The fastest a dragged playhead is sounded, in times real time. */
+private const val SCRUB_SOUND_FASTEST = 2.5

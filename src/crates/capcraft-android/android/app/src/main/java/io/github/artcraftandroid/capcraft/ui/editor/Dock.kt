@@ -547,12 +547,14 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
                     add(Tool("noise", "Reduce noise", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.denoise", "Noise reduction") })
                     add(Tool("voice", "Audio effects", LucideIcons.Headphones, enabled = clip.audible) { vm.panel = Panel.Packages("audio", Panel.Target.Clip) })
                     add(Tool("enhance", "Enhance voice", LucideIcons.MicVocal, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.enhance-voice", "Voice enhancement") })
+                    add(Tool("duck", "Auto duck", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.autoDuck(clip) })
                 }
             }
             add(divider("d-time"))
             if (video) {
                 add(Tool("freeze", "Freeze", LucideIcons.GalleryHorizontal, enabled = inside) { vm.freeze(clip) })
                 add(Tool("reverse", "Reverse", LucideIcons.RotateCcw) { vm.reverse(clip) })
+                add(Tool("scenes", "Split scenes", LucideIcons.SquareSplitHorizontal) { vm.splitScenes(clip) })
             }
             add(Tool("mask", "Mask", LucideIcons.CircleDashed) { vm.panel = Panel.Mask })
             if (main) {
@@ -579,6 +581,10 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
                 vm.panel = Panel.Sounds
             },
             Tool("beats", "Beats", LucideIcons.Flag) { vm.panel = Panel.Beats },
+            // the song made to end with the video, joined on the beat
+            Tool("remix", "Fit to video", LucideIcons.Scissors) { vm.remixToFit(clip) },
+            // turned down wherever the other clips speak
+            Tool("duck", "Auto duck", LucideIcons.AudioWaveform) { vm.autoDuck(clip) },
             // a sound's speed is one ruler, no curve, as the reference has it
             Tool("speed", "Speed", LucideIcons.Gauge) { vm.panel = Panel.Speed(curve = false) },
             Tool("fade", "Fade", LucideIcons.ChartSpline) { vm.panel = Panel.Fade },

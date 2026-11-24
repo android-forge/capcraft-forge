@@ -412,6 +412,7 @@ dependencies = [
  "concat-host",
  "concat-media",
  "concat-project",
+ "concat-render",
  "concat-speech",
  "concat-text",
  "concat-vision",

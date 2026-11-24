@@ -136,6 +136,7 @@ fun ExportSheet(vm: EditorViewModel, onExport: () -> Unit) {
                 )
                 return@Column
             }
+            if (!vm.exportPhoto) Presets(vm, t.width.toInt(), t.height.toInt())
             val res = exportResolutionOf(vm)
             val r = RESOLUTIONS.indexOf(res).coerceAtLeast(0)
             SettingSlider("Resolution", RESOLUTION_HINTS[r], RESOLUTION_LABELS, r.toFloat()) {
@@ -173,6 +174,58 @@ fun ExportSheet(vm: EditorViewModel, onExport: () -> Unit) {
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
         }
+    }
+}
+
+/**
+ * A platform's upload, as its own help pages suggest it: 1080p vertical, the frame rate, and a bitrate high enough
+ * that its own re-encode has something to work from. A starting point the sliders below change; the platforms change
+ * their advice, and their re-encode decides in the end.
+ */
+private data class Preset(val name: String, val resolution: Int, val fps: Int, val mbps: Int, val hint: String)
+
+private val PRESETS = listOf(
+    Preset("Reels", 1080, 30, 20, "Instagram Reels: 1080p, 30 fps"),
+    Preset("TikTok", 1080, 30, 15, "TikTok: 1080p, 30 fps"),
+    Preset("Shorts", 1080, 60, 25, "YouTube Shorts: 1080p, 60 fps"),
+)
+
+/** One tap for a platform's upload: the chips above the sliders, the one the settings match lit. */
+@Composable
+private fun Presets(vm: EditorViewModel, width: Int, height: Int) {
+    val matching = PRESETS.firstOrNull {
+        exportResolutionOf(vm) == it.resolution && vm.exportFps == it.fps && vm.exportMbps == it.mbps
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PRESETS.forEach { preset ->
+            val on = preset == matching
+            Box(
+                Modifier.height(30.dp).clip(RoundedCornerShape(15.dp))
+                    .background(if (on) Palette.Accent else Palette.Chip)
+                    .clickable {
+                        vm.exportResolution = preset.resolution
+                        vm.exportFps = preset.fps
+                        vm.exportMbps = preset.mbps
+                    }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(preset.name, style = Type.Body.copy(fontSize = 14.sp, color = if (on) Palette.OnAccent else Palette.Text))
+            }
+        }
+    }
+    val hint = when {
+        matching == null -> null
+        // a 9:16 frame is what these play full screen; anything else gets bars or a crop
+        abs(width * 16 - height * 9) > height / 50 -> "${matching.hint}. They play 9:16 full screen: set Ratio to 9:16 first"
+        else -> matching.hint
+    }
+    if (hint != null) {
+        Text(hint, style = Type.Small.copy(fontSize = 12.sp, color = Palette.TextSecondary), modifier = Modifier.padding(horizontal = 20.dp))
     }
 }
 

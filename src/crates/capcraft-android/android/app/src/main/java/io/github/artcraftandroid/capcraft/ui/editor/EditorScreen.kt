@@ -308,6 +308,9 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
             } else if (!vm.fullscreen) {
                 PreviewOverlay(vm, Modifier.fillMaxSize())
             }
+            if (vm.scopes && vm.panel == Panel.Adjust && !vm.fullscreen) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.ScopesOverlay(image, Modifier.align(Alignment.TopEnd))
+            }
         }
         if (t.rows.all { it.clips.isEmpty() }) {
             Text("Add media to start editing", style = Type.Small)

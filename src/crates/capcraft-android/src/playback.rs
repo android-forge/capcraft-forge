@@ -174,6 +174,9 @@ pub fn set_playback_listener(listener: Arc<dyn PlaybackListener>) {
 /// Starts playing from `at_us`.
 #[uniffi::export]
 pub fn play(at_us: i64) -> Result<(), MobileError> {
+    // A play pressed straight after a drag is not stopped by the drag's snippet.
+    SNIPPET.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    SNIPPING.store(false, std::sync::atomic::Ordering::Release);
     player()?.play(seconds(at_us).max(0.0));
     Ok(())
 }
@@ -181,8 +184,73 @@ pub fn play(at_us: i64) -> Result<(), MobileError> {
 /// Stops playing where it is.
 #[uniffi::export]
 pub fn pause() {
+    SNIPPET.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    SNIPPING.store(false, std::sync::atomic::Ordering::Release);
     if let Some(player) = running() {
         player.pause();
+    }
+}
+
+/// Bumped by every play, pause and drag: a scrub worker that finds it moved
+/// under a play or a pause stops sounding.
+static SNIPPET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Whether the player is sounding a snippet rather than playing.
+static SNIPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Where the dragged playhead is now, microseconds; `i64::MIN` once taken.
+static SCRUB_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MIN);
+/// Whether a scrub worker is running.
+static SCRUBBER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// How long a snippet sounds: long enough to tell a word or a beat, short
+/// enough that a drag sounds like a tape under the head.
+const SNIPPET_LENGTH: std::time::Duration = std::time::Duration::from_millis(90);
+
+/// Sounds a moment of the timeline from `at_us` while the playhead is
+/// dragged, as an editor's scrub audio does. Only the latest position is ever
+/// sounded, a snippet at a time, by one worker that stops the player the moment
+/// the drag stops: a drag's every move once queued a snippet of its own, and the
+/// queue went on playing for seconds after the finger was still. Nothing while
+/// a real play is on. Returns at once.
+#[uniffi::export]
+pub fn scrub_sound(at_us: i64) {
+    use std::sync::atomic::Ordering;
+    let Some(player) = running() else { return };
+    if player.is_playing() && !SNIPPING.load(Ordering::Acquire) {
+        return;
+    }
+    SCRUB_AT.store(at_us.max(0), Ordering::Release);
+    if SCRUBBER.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let mine = SNIPPET.load(Ordering::Acquire);
+    let spawned = std::thread::Builder::new()
+        .name("capcraft-scrub-sound".to_owned())
+        .spawn(move || {
+            loop {
+                if SNIPPET.load(Ordering::Acquire) != mine {
+                    // a play or a pause came: it owns the player now
+                    break;
+                }
+                let at = SCRUB_AT.swap(i64::MIN, Ordering::AcqRel);
+                if at == i64::MIN {
+                    if SNIPPING.swap(false, Ordering::AcqRel) {
+                        player.pause();
+                    }
+                    break;
+                }
+                SNIPPING.store(true, Ordering::Release);
+                player.play(seconds(at));
+                std::thread::sleep(SNIPPET_LENGTH);
+            }
+            SCRUBBER.store(false, Ordering::Release);
+            // a drag that moved again as this worker was leaving is heard
+            if SCRUB_AT.load(Ordering::Acquire) != i64::MIN
+                && SNIPPET.load(Ordering::Acquire) == mine
+            {
+                scrub_sound(SCRUB_AT.load(Ordering::Acquire));
+            }
+        });
+    if spawned.is_err() {
+        SCRUBBER.store(false, Ordering::Release);
     }
 }
 

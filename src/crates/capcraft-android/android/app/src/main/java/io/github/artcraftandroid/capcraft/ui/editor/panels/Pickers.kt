@@ -53,6 +53,7 @@ import io.github.artcraftandroid.capcraft.core.RowKind
 import io.github.artcraftandroid.capcraft.core.packages
 import io.github.artcraftandroid.capcraft.core.still
 import io.github.artcraftandroid.capcraft.engine.Threads
+import io.github.artcraftandroid.capcraft.engine.userMessage
 import io.github.artcraftandroid.capcraft.engine.toBitmap
 import io.github.artcraftandroid.capcraft.ui.Glyph
 import io.github.artcraftandroid.capcraft.ui.LucideIcons
@@ -718,6 +719,7 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
     val knob = KNOBS[which.coerceAtLeast(0)]
     val smart = SMART.getOrNull(-1 - which)
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val row = androidx.compose.foundation.lazy.rememberLazyListState()
     // which of Smart and Customize is lit: the one last tapped, or the chosen tool's
     var section by remember { mutableIntStateOf(1) }
@@ -799,6 +801,38 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
             found = key to base
             strength = 100f
             putFound(base, 100f, null)
+        }
+    }
+
+    /**
+     * The selected clip's grade written as a .cube LUT, drawn by the compositor over every colour: kept in Looks to
+     * use again here, and handed to the share sheet for another app. What a LUT cannot hold is said.
+     */
+    fun saveLut() {
+        val id = target?.id ?: run { vm.message = "Choose a clip first"; return }
+        val s = vm.session ?: return
+        scope.launch {
+            vm.busy = "Saving the LUT"
+            val result = withContext(Threads.commands) {
+                runCatching {
+                    val folder = java.io.File(context.cacheDir, "exports").apply { mkdirs() }
+                    val name = "Forge grade " + java.text.SimpleDateFormat("yyyy-MM-dd HHmm", java.util.Locale.US).format(java.util.Date())
+                    val file = java.io.File(folder, "$name.cube")
+                    val made = s.exportLut(id, file.absolutePath, name)
+                    runCatching { io.github.artcraftandroid.capcraft.core.importLook(file.absolutePath) }
+                    made
+                }
+            }
+            vm.busy = null
+            result.onSuccess { made ->
+                vm.message = if (made.leftOut.isEmpty()) "Saved to Looks" else "Saved to Looks; a LUT cannot hold ${made.leftOut.distinct().joinToString()}"
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", java.io.File(made.path))
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("application/octet-stream")
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share the LUT")) }
+            }.onFailure { vm.message = it.userMessage }
         }
     }
 
@@ -945,7 +979,10 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
             )
         }
         Spacer(Modifier.weight(1f))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(Modifier.clickable(onClick = ::reset).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Glyph(LucideIcons.RotateCcw, Palette.DockText, size = 18.dp)
                 Spacer(Modifier.width(6.dp))
@@ -957,7 +994,18 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
                 Spacer(Modifier.width(6.dp))
                 Text("Apply to all", style = Type.Body.copy(color = Palette.DockText))
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
+            Row(Modifier.clickable { vm.scopes = !vm.scopes }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Glyph(LucideIcons.Activity, if (vm.scopes) Palette.Accent else Palette.DockText, size = 18.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("Scopes", style = Type.Body.copy(color = if (vm.scopes) Palette.Accent else Palette.DockText))
+            }
+            Spacer(Modifier.width(12.dp))
+            Row(Modifier.clickable(onClick = ::saveLut).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Glyph(LucideIcons.Palette, Palette.DockText, size = 18.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("Save LUT", style = Type.Body.copy(color = Palette.DockText))
+            }
             Row(Modifier.clickable(onClick = ::savePreset).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Glyph(LucideIcons.Bookmark, Palette.DockText, size = 18.dp)
                 Spacer(Modifier.width(6.dp))

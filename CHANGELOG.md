@@ -3,6 +3,24 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## 0.0.8 (24 November 2026)
+
+### 24 November 2026
+Ideas from [FilmCraft](https://github.com/storytold/filmcraft) (Apache-2.0), written here for a phone.
+- Export presets for Instagram Reels (1080p, 30 fps), TikTok (1080p, 30 fps) and YouTube Shorts (1080p, 60 fps), with a
+  note when the project is not 9:16.
+- Split scenes: a video clip cut wherever its shot changes, read on the phone by the shot reader Reel to template uses,
+  in one undo step.
+- Save LUT in Adjust: a clip's grade drawn over a 33-step lattice on the GPU and written as a `.cube`, kept in Looks and
+  handed to the share sheet; sharpen, vignette, clarity and grain are left out and named, as a LUT cannot hold them.
+- Scopes in Adjust: a histogram, a waveform and a vectorscope with a skin-tone line over the preview, read from the
+  picture five times a second; a tap moves to the next.
+- The timeline is heard under a dragged playhead, in snippets of the latest place only, and not while it races or a
+  fling coasts.
+- Auto duck: a music clip turned down 12 dB wherever the other clips speak, with volume keys that fade down and up.
+- Fit to video: a song made to end with the video, a stretch of its middle taken out or played again with both ends of
+  the join on a beat. The join is worked out before anything changes, so a song that cannot be joined is left as it was.
+
 ## 0.0.7 (24 November 2026)
 
 ### 24 November 2026
