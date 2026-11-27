@@ -275,3 +275,17 @@ https://unsplash.com/photos/2v921tlqdXE), used under the Unsplash License. The s
 and is embedded in the app; each card is the effect's own shader run over
 it on the GPU when the app first needs the card (`concat-host`'s
 `cards.rs`).
+
+## Reel effects
+
+- The 51 reel effects in `src/crates/capcraft-reelfx` are a Rust port of
+  claude-video-effects by Vibha Ramprakash
+  (https://github.com/Vibha-Ramprakash/claude-video-effects, MIT; the
+  licence text is `src/crates/capcraft-reelfx/LICENSE-claude-video-effects.txt`).
+  Defaults that imitated another company's interface or name are drawn as
+  neutral cards instead.
+- YuNet face detector, face_detection_yunet_2023mar, from OpenCV Zoo
+  (https://github.com/opencv/opencv_zoo, MIT), compiled into
+  `concat-vision` (`models/yunet.onnx`). It finds the face the effects follow.
+- Space Mono Bold and Playfair Display (SIL Open Font License 1.1), in
+  `src/crates/capcraft-reelfx/fonts/` with their licence texts.

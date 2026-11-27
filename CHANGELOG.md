@@ -6,6 +6,12 @@ dated, as the licence asks; `#` numbers are the original project's.
 ## Unreleased
 
 ### 27 November 2026
+- Reel FX (in Look): 51 talking-head effects - orbit, spotlight, backdrop word, glass widgets, LED sign, checklist,
+  tier list, match cut and the rest - ported from Vibha Ramprakash's claude-video-effects (MIT). Each is placed on a
+  stretch of the clip, follows the face (OpenCV's YuNet, built in) and can sit behind the person (Remove BG's person
+  model); the face and the person are found on the phone the first time, with the progress in the panel. Effects with
+  pictures use the clip's own frames, or images you pick. Preview and export draw the same frames; a split keeps each
+  half's effects.
 The editor's tools reorganised (the first three steps of `docs/proposals/app-cleanup-and-tools.md`). Nothing was removed.
 - A picture's bar is Split, Speed, Volume, Duplicate and Delete, always in the same places, then five drawers: **Edit**,
   **Look**, **Smart** (the models and heavy processing), **Motion** and **Sound**. That's 10 tools where there were

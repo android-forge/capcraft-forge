@@ -526,6 +526,28 @@ const BUNDLED: [&[u8]; 5] = [
     include_bytes!("../fonts/HankenGrotesk-Italic.ttf"),
 ];
 
+/// Faces the bundled list carries that other crates draw with by name:
+/// Forge's reel effects (`capcraft-reelfx`). Statics, so the bytes are in
+/// the library once whichever list names them.
+/// `Inter-Regular.ttf`.
+pub static INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
+/// `Inter-SemiBold.ttf`.
+pub static INTER_SEMIBOLD: &[u8] = include_bytes!("../fonts/Inter-SemiBold.ttf");
+/// `Inter-Bold.ttf`.
+pub static INTER_BOLD: &[u8] = include_bytes!("../fonts/Inter-Bold.ttf");
+/// `Montserrat-Bold.ttf`.
+pub static MONTSERRAT_BOLD: &[u8] = include_bytes!("../fonts/Montserrat-Bold.ttf");
+/// `Montserrat-ExtraBold.ttf`.
+pub static MONTSERRAT_EXTRABOLD: &[u8] = include_bytes!("../fonts/Montserrat-ExtraBold.ttf");
+/// `ArchivoBlack-Regular.ttf`.
+pub static ARCHIVO_BLACK: &[u8] = include_bytes!("../fonts/ArchivoBlack-Regular.ttf");
+/// `Anton-Regular.ttf`.
+pub static ANTON: &[u8] = include_bytes!("../fonts/Anton-Regular.ttf");
+/// `PermanentMarker-Regular.ttf`.
+pub static PERMANENT_MARKER: &[u8] = include_bytes!("../fonts/PermanentMarker-Regular.ttf");
+/// `InstrumentSerif-Italic.ttf`.
+pub static INSTRUMENT_SERIF_ITALIC: &[u8] = include_bytes!("../fonts/InstrumentSerif-Italic.ttf");
+
 /// The base fonts every title can use, whatever the machine has installed:
 /// a working set of sans, serif, display, comic and script faces, at the
 /// weights a title wants. The text presets are built on them. Each is
@@ -539,26 +561,26 @@ const BUNDLED: [&[u8]; 5] = [
 /// A phone's build carries the ones in everyday use; the rest are
 /// downloaded when they are wanted, and found in [`more_folder`].
 pub const BASE_FONTS: &[&[u8]] = &[
-    include_bytes!("../fonts/Inter-Regular.ttf"),
-    include_bytes!("../fonts/Inter-SemiBold.ttf"),
-    include_bytes!("../fonts/Inter-Bold.ttf"),
+    INTER_REGULAR,
+    INTER_SEMIBOLD,
+    INTER_BOLD,
     include_bytes!("../fonts/Inter-Black.ttf"),
     include_bytes!("../fonts/Inter-Italic.ttf"),
     include_bytes!("../fonts/Montserrat-Regular.ttf"),
-    include_bytes!("../fonts/Montserrat-Bold.ttf"),
-    include_bytes!("../fonts/Montserrat-ExtraBold.ttf"),
+    MONTSERRAT_BOLD,
+    MONTSERRAT_EXTRABOLD,
     include_bytes!("../fonts/Montserrat-Black.ttf"),
     include_bytes!("../fonts/SpaceGrotesk-Regular.ttf"),
     include_bytes!("../fonts/SpaceGrotesk-Medium.ttf"),
     include_bytes!("../fonts/SpaceGrotesk-Bold.ttf"),
-    include_bytes!("../fonts/ArchivoBlack-Regular.ttf"),
+    ARCHIVO_BLACK,
     include_bytes!("../fonts/BebasNeue-Regular.ttf"),
-    include_bytes!("../fonts/Anton-Regular.ttf"),
+    ANTON,
     include_bytes!("../fonts/DMSerifDisplay-Regular.ttf"),
     include_bytes!("../fonts/DMSerifDisplay-Italic.ttf"),
     include_bytes!("../fonts/AbrilFatface-Regular.ttf"),
     include_bytes!("../fonts/Bangers-Regular.ttf"),
-    include_bytes!("../fonts/PermanentMarker-Regular.ttf"),
+    PERMANENT_MARKER,
     include_bytes!("../fonts/Pacifico-Regular.ttf"),
     #[cfg(not(target_os = "android"))]
     include_bytes!("../fonts/Lobster-Regular.ttf"),
@@ -587,7 +609,7 @@ pub const BASE_FONTS: &[&[u8]] = &[
     // the faces of modern reels' titles: an editorial serif, a heavy geometric sans, a retro script,
     // neon lines, a mono and display caps
     include_bytes!("../fonts/InstrumentSerif-Regular.ttf"),
-    include_bytes!("../fonts/InstrumentSerif-Italic.ttf"),
+    INSTRUMENT_SERIF_ITALIC,
     include_bytes!("../fonts/Poppins-ExtraBold.ttf"),
     include_bytes!("../fonts/Poppins-Black.ttf"),
     include_bytes!("../fonts/Shrikhand-Regular.ttf"),

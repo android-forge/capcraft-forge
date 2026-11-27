@@ -426,6 +426,8 @@ private fun clipSubTools(vm: EditorViewModel, clip: ClipView, row: RowKind, leve
             add(Tool("filters", "Filters", LucideIcons.Blend) { vm.panel = Panel.Packages("filter", Panel.Target.Clip) })
             add(Tool("effects", "Effects", LucideIcons.Star) { vm.clipLevel = "effects" })
             add(Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation })
+            // 51 talking-head effects around the person and the face
+            add(Tool("reelfx", "Reel FX", LucideIcons.Clapperboard, aliases = listOf("Effects pack", "Spotlight", "Orbit")) { vm.panel = Panel.ReelFx })
             add(Tool("mask", "Mask", LucideIcons.CircleDashed) { vm.panel = Panel.Mask })
             add(Tool("opacity", "Opacity", LucideIcons.Droplet) { vm.panel = Panel.Opacity })
             // how an overlay mixes with what is under it

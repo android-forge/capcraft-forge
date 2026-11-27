@@ -99,6 +99,7 @@ sealed interface Panel {
     data object IsolateVoice : Panel
     data object AutoReframe : Panel
     data object Retouch : Panel
+    data object ReelFx : Panel
     data object CustomCutout : Panel
     data object ShapeStyle : Panel
     data object CaptionTemplates : Panel

@@ -40,6 +40,7 @@ pub mod body;
 pub mod colormatch;
 pub mod compound;
 pub mod cutout;
+mod reelfx;
 pub mod deflicker;
 pub mod ducking;
 pub(crate) mod depthlight;

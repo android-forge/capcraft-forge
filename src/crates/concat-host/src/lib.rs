@@ -24,6 +24,7 @@ pub mod cards;
 pub mod consolidate;
 pub mod crash;
 pub mod cutout;
+pub mod faces;
 pub mod dirs;
 pub mod enhance;
 pub mod export;
@@ -53,6 +54,7 @@ pub mod voices;
 
 pub use brush::{Brushes, RegionRequest};
 pub use cutout::{AnalyseRequest, Cutouts};
+pub use faces::{FaceRequest, Faces};
 pub use dirs::AppDirs;
 pub use enhance::{EnhanceRequest, Enhancers};
 pub use jobs::{Job, SingleFlight};

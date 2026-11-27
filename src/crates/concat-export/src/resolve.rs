@@ -143,6 +143,148 @@ impl CutoutJob {
     }
 }
 
+/// Forge's reel effects as the frame loop runs them: the clip's effects,
+/// drawn by `capcraft_reelfx` on each of its frames with the person its
+/// masks keep in front and the face its track follows. An instant the
+/// person or the face has not been found at yet is drawn with nobody in
+/// front, the face a third of the way down the middle.
+pub(crate) struct FxJob {
+    /// Where the clip starts on the timeline, in seconds.
+    clip_start: f64,
+    runs: std::sync::Mutex<Vec<capcraft_reelfx::Run>>,
+    person: MaskStore,
+    faces: concat_vision::faces::FaceTrack,
+    /// From the frame the effects are given to the source the masks and
+    /// the face are kept in.
+    mapping: Mapping,
+    /// Where the card effects' pictures come from.
+    media: String,
+    source: (f64, f64),
+    still: bool,
+    images: Vec<String>,
+    cards: std::sync::OnceLock<Arc<Vec<tiny_skia::Pixmap>>>,
+}
+
+impl FxJob {
+    /// The job for a clip with reel effects; `treated` as for
+    /// [`CutoutJob::of`].
+    pub(crate) fn of(clip: &ExportClip, treated: bool) -> Option<FxJob> {
+        let runs: Vec<capcraft_reelfx::Run> = clip
+            .reel_fx
+            .iter()
+            .filter_map(|e| capcraft_reelfx::Run::new(&e.fx, e.start as f32, e.end as f32, e.options.clone()))
+            .collect();
+        if runs.is_empty() {
+            return None;
+        }
+        let images = runs
+            .iter()
+            .filter_map(|r| r.o.get("images"))
+            .flat_map(|v| v.split('|').map(str::to_owned).collect::<Vec<_>>())
+            .filter(|p| !p.is_empty())
+            .collect();
+        Some(FxJob {
+            clip_start: clip.start,
+            runs: std::sync::Mutex::new(runs),
+            person: MaskStore::open(Path::new(&clip.person_dir)),
+            faces: concat_vision::faces::FaceTrack::open(Path::new(&clip.face_file)),
+            mapping: if treated {
+                Mapping {
+                    crop: clip.crop.map(|edges| edges.map(|edge| edge as f32)).unwrap_or([0.0; 4]),
+                    flip_h: clip.flip_h,
+                    flip_v: clip.flip_v,
+                }
+            } else {
+                Mapping::IDENTITY
+            },
+            media: clip.path.clone(),
+            source: (clip.source_start, clip.duration * clip.speed.max(0.0625)),
+            still: clip.kind == ClipKind::Image,
+            images,
+            cards: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Whether an effect is on at `time` of the timeline.
+    pub(crate) fn covers(&self, time: Rational) -> bool {
+        let t = (time.as_f64() - self.clip_start) as f32;
+        self.runs.lock().is_ok_and(|runs| runs.iter().any(|r| r.covers(t)))
+    }
+
+    /// The pictures the card effects lay out: the user's own, or ten of
+    /// the clip's frames across what it shows.
+    fn cards(&self) -> Arc<Vec<tiny_skia::Pixmap>> {
+        Arc::clone(self.cards.get_or_init(|| {
+            let read = |path: &str, at: f64, long: u32| -> Option<tiny_skia::Pixmap> {
+                let info = concat_media::probe::probe(Path::new(path)).ok()?;
+                let video = info.video?;
+                let scale = long as f32 / video.width.max(video.height).max(1) as f32;
+                let (w, h) = (((video.width as f32 * scale) as u32).max(2) & !1, ((video.height as f32 * scale) as u32).max(2) & !1);
+                let options = concat_media::DecodeOptions::default()
+                    .starting_at(Rational::approximate(at).unwrap_or(Rational::ZERO))
+                    .scaled_to(w, h)
+                    .limited_to(1);
+                let mut decoder = concat_media::Decoder::open(Path::new(path), &options).ok()?;
+                let frame = concat_media::FrameSource::next_frame(&mut decoder).ok()??;
+                let mut pm = tiny_skia::Pixmap::new(frame.width(), frame.height())?;
+                if frame.pixels().len() != pm.data().len() {
+                    return None;
+                }
+                pm.data_mut().copy_from_slice(frame.pixels());
+                Some(pm)
+            };
+            let own: Vec<tiny_skia::Pixmap> = self.images.iter().filter_map(|p| read(p, 0.0, 540)).collect();
+            if !own.is_empty() {
+                return Arc::new(own);
+            }
+            let (from, len) = self.source;
+            let n = if self.still { 1 } else { 10 };
+            Arc::new((0..n).filter_map(|j| read(&self.media, from + len * (f64::from(j) + 0.5) / f64::from(n), 480)).collect())
+        }))
+    }
+
+    /// `frame` with the effects on at `time` drawn on it, or `None` when
+    /// none is, or the frame is not eight-bit pixels in memory.
+    pub(crate) fn apply(&self, frame: &Frame, time: Rational, source_time: Rational) -> Option<Frame> {
+        let t = (time.as_f64() - self.clip_start) as f32;
+        let mut runs = self.runs.lock().ok()?;
+        if !runs.iter().any(|r| r.covers(t)) {
+            return None;
+        }
+        let (w, h) = (frame.width() as usize, frame.height() as usize);
+        if w == 0 || h == 0 || frame.pixels().len() != w * h * 4 {
+            return None;
+        }
+        if runs.iter().any(|r| r.covers(t) && r.effect.cards && r.cards.is_empty()) {
+            let cards = self.cards();
+            for r in runs.iter_mut().filter(|r| r.effect.cards) {
+                r.cards = Arc::clone(&cards);
+            }
+        }
+        let seconds = source_time.as_f64();
+        let mask = self.person.mask_at(seconds).map(|mask| {
+            let mut m = vec![0f32; w * h];
+            for y in 0..h {
+                for x in 0..w {
+                    let (u, v) = self.mapping.source_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                    m[y * w + x] = mask.sample(u, v);
+                }
+            }
+            m
+        });
+        let face = self.faces.at(seconds).and_then(|f| {
+            let (x, y) = self.mapping.frame_of(f.x, f.y)?;
+            let [left, _, right, _] = self.mapping.crop;
+            Some(capcraft_reelfx::Face { x, y, w: f.w / (1.0 - left - right).max(1e-3) })
+        });
+        let mut rgba = frame.pixels().to_vec();
+        if !capcraft_reelfx::draw(&mut rgba, w, h, mask.as_deref(), face, &mut runs, t) {
+            return None;
+        }
+        Frame::from_rgba(frame.width(), frame.height(), rgba)
+    }
+}
+
 /// A stabilization as the frame loop runs it: the clip's correction for
 /// every frame it shows, worked out once from the media's measured
 /// movement and the clip's settings when the timeline is built. Nothing
@@ -232,6 +374,8 @@ pub(crate) struct BuiltTimeline {
     pub(crate) transitions: Vec<TransitionSpan>,
     /// The clips whose background a mask takes away.
     pub(crate) cutouts: HashMap<ClipId, CutoutJob>,
+    /// The clips with Forge's reel effects.
+    pub(crate) fx: HashMap<ClipId, FxJob>,
     /// What fills the frame behind each picture that has a background; see
     /// [`crate::with_backdrops`].
     pub(crate) backdrops: HashMap<ClipId, crate::ExportBackdrop>,
@@ -335,6 +479,7 @@ pub(crate) fn build_timeline(
     let mut chains: HashMap<ClipId, Vec<AppliedFilter>> = HashMap::new();
     let mut reveal_maps: HashMap<ClipId, Arc<RevealMap>> = HashMap::new();
     let mut cutouts: HashMap<ClipId, CutoutJob> = HashMap::new();
+    let mut fx: HashMap<ClipId, FxJob> = HashMap::new();
     let mut backdrops: HashMap<ClipId, crate::ExportBackdrop> = HashMap::new();
     let mut stabilized: HashMap<ClipId, StabilizeJob> = HashMap::new();
     let mut highlight: Option<ClipId> = None;
@@ -448,6 +593,9 @@ pub(crate) fn build_timeline(
             if let Some(job) = CutoutJob::of(clip, planned.is_none()) {
                 cutouts.insert(id, job);
             }
+            if let Some(job) = FxJob::of(clip, planned.is_none()) {
+                fx.insert(id, job);
+            }
             if clip.highlighted {
                 highlight = Some(id);
             }
@@ -470,6 +618,7 @@ pub(crate) fn build_timeline(
         chains,
         reveal_maps,
         cutouts,
+        fx,
         stabilized,
         highlight,
         backdrops,

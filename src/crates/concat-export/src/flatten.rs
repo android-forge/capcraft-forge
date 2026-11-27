@@ -182,6 +182,17 @@ pub fn flatten_timeline_in(
                     }
                     _ => String::new(),
                 },
+                reel_fx: if matches!(kind, ClipKind::Video | ClipKind::Image) { clip.reel_fx.clone() } else { Vec::new() },
+                person_dir: match project_dir {
+                    Some(dir) if !clip.reel_fx.is_empty() => concat_vision::mask_dir(dir, &media.path, concat_project::model::Subject::Person)
+                        .to_string_lossy()
+                        .into_owned(),
+                    _ => String::new(),
+                },
+                face_file: match project_dir {
+                    Some(dir) if !clip.reel_fx.is_empty() => concat_vision::faces::face_file(dir, &media.path).to_string_lossy().into_owned(),
+                    _ => String::new(),
+                },
                 stabilize: clip.stabilize.filter(|_| kind == ClipKind::Video),
                 motion_dir: match (&clip.stabilize, project_dir) {
                     (Some(_), Some(dir)) if kind == ClipKind::Video => {

@@ -1451,6 +1451,26 @@ impl ShapeKind {
     }
 }
 
+/// One of Forge's reel effects on a clip: which, when, and how it is set.
+///
+/// `start` and `end` are seconds from the clip's start on the timeline, so
+/// the effect moves with the clip. `options` are the effect's own settings,
+/// all text, as `capcraft-reelfx` reads them ("text", "color", "zoom" ...).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReelEffect {
+    /// The effect's name, as `capcraft_reelfx::EFFECTS` lists it.
+    pub fx: String,
+    /// When it begins, in seconds from the clip's start.
+    pub start: f64,
+    /// When it ends, in seconds from the clip's start.
+    pub end: f64,
+    /// Its settings, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<String, String>,
+}
+
 /// How a shape clip is painted. Sizes are fractions of the frame's height,
 /// as a title's are, so a shape composed against 1080p is the same shape at
 /// 4K. A style arriving in a command needs only the fields it changes.
@@ -2093,6 +2113,11 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
     pub background: Option<Background>,
+    /// Forge's reel effects on this clip, in the order they are drawn: each
+    /// a named effect over a stretch of the clip, drawn by `capcraft-reelfx`
+    /// on the clip's own picture with the person and the face it tracks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reel_fx: Vec<ReelEffect>,
     /// Fields this build does not know, kept so a document written by a
     /// newer or a different build round-trips through this one intact.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
@@ -2192,6 +2217,7 @@ impl Clip {
             text: None,
             shape: None,
             background: None,
+            reel_fx: Vec::new(),
             extra: Map::new(),
         }
     }

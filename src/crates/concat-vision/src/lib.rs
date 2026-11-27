@@ -53,6 +53,7 @@ pub mod detect;
 pub mod enhance;
 #[cfg(feature = "infer")]
 pub mod erase;
+pub mod faces;
 pub mod fine;
 pub mod mask;
 pub mod models;

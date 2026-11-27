@@ -423,6 +423,14 @@ pub(super) fn apply(
                 tail.transition_in = None;
                 tail.fade_in = 0.0;
                 tail.rewindow_keys(whole, offset, whole);
+                // Forge's reel effects: each half keeps the stretch it shows,
+                // timed from its own start
+                tail.reel_fx = tail
+                    .reel_fx
+                    .iter()
+                    .filter(|e| e.end > offset)
+                    .map(|e| crate::model::ReelEffect { start: (e.start - offset).max(0.0), end: e.end - offset, ..e.clone() })
+                    .collect();
                 created = Some(tail.id.clone());
                 let head = timeline.clip_at_mut(index);
                 crate::speed::rewindow_clip(head, whole, 0.0, offset);
@@ -430,6 +438,10 @@ pub(super) fn apply(
                 head.source_start = head_source;
                 head.fade_out = 0.0;
                 head.rewindow_keys(whole, 0.0, offset);
+                head.reel_fx.retain(|e| e.start < offset);
+                for e in &mut head.reel_fx {
+                    e.end = e.end.min(offset);
+                }
                 timeline.clips.insert(index + 1, Arc::new(tail));
             }
             // A split always mints the tail, so "minted anything" and
