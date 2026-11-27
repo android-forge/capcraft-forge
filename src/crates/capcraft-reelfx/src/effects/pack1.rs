@@ -213,7 +213,7 @@ pub(crate) const SPOTLIGHT: Effect = Effect {
     name: "spotlight",
     title: "Spotlight",
     desc: "Kills the lights, keeps you lit",
-    options: "text: a glowing word behind you; color; push (1.1); look: sparkle for golden rays",
+    options: "text: a glowing word behind you; color; font; push (1.1); look: plain, sparkle, warm, cool, stage or neon",
     cards: false,
     draw: spotlight,
 };
@@ -225,15 +225,24 @@ fn spotlight(c: &mut Ctx, e: &mut Run) {
     let k = e.ramp(c, 0.3, 0.25);
     let (w, h) = (c.w as f32, c.h as f32);
     let (fx, fy) = (c.fx, c.fy + h * 0.2);
+    // the light's colour, how dark the room falls and how wide the pool is
+    let (tint, floor, wide) = match e.s("look", "plain").as_str() {
+        "warm" => ([1.14, 0.98, 0.78], 0.2, 1.0),
+        "cool" => ([0.84, 0.96, 1.16], 0.2, 1.0),
+        "stage" => ([1.0, 1.0, 1.0], 0.07, 0.72),
+        "neon" => ([1.18, 0.72, 1.22], 0.14, 1.0),
+        _ => ([1.0, 1.0, 1.0], 0.2, 1.0),
+    };
     for y in 0..c.h {
         for x in 0..c.w {
             let i = y * c.w + x;
-            let d = ((x as f32 - fx) / (w * 0.5)).powi(2) + ((y as f32 - fy) / (h * 0.46)).powi(2);
+            let d = ((x as f32 - fx) / (w * 0.5 * wide)).powi(2) + ((y as f32 - fy) / (h * 0.46 * wide)).powi(2);
             let pool = (1.0 - d).clamp(0.0, 1.0).powf(1.6);
-            let bright = 1.0 - k * (1.0 - (0.2 + 0.45 * pool));
+            let bright = 1.0 - k * (1.0 - (floor + 0.45 * pool));
             let m = c.m[i];
-            let f = bright * (1.0 - m) + m * (1.0 + 0.04 * k);
             for ch in 0..3 {
+                let lit = 1.0 + (tint[ch] - 1.0) * k * (0.35 + 0.65 * pool);
+                let f = bright * lit * (1.0 - m) + m * (1.0 + 0.04 * k) * (1.0 + (tint[ch] - 1.0) * 0.4 * k);
                 c.img[i * 3 + ch] *= f;
             }
         }
@@ -336,36 +345,40 @@ pub(crate) const SWIPE: Effect = Effect {
     name: "swipe",
     title: "Swipe",
     desc: "A before and after slider sweeps across you",
-    options: "grade: the after look: moody, bw, warm, cool or pop",
+    options: "grade: the after look: moody, bw, warm, cool or pop; stop: where the line rests (0 to 1); tilt (0.22); color: the line; before; after",
     cards: false,
     draw: swipe,
 };
 fn swipe(c: &mut Ctx, e: &mut Run) {
     let after = c.graded(Grade::named(&e.s("grade", "moody")));
     let p = c.lt / e.d;
-    let sp = if p < 0.5 { 1.05 - 0.95 * ease_inout(p / 0.5) } else { 0.1 + 0.4 * ease_inout((p - 0.5) / 0.4) };
+    // across to the far side, then back to where it rests
+    let stop = e.f("stop", 0.5).clamp(0.0, 1.0);
+    let tilt = e.f("tilt", 0.22);
+    let line = e.color("color", (255, 255, 255));
+    let sp = if p < 0.5 { 1.05 - 0.95 * ease_inout(p / 0.5) } else { 0.1 + (stop - 0.1) * ease_inout((p - 0.5) / 0.4) };
     let (w, h) = (c.w as f32, c.h as f32);
     for y in 0..c.h {
-        let line_x = sp * w + 0.22 * (y as f32 - h / 2.0);
+        let line_x = sp * w + tilt * (y as f32 - h / 2.0);
         for x in 0..c.w {
             let i = y * c.w + x;
             let a = ((x as f32 - line_x) / 3.0 + 0.5).clamp(0.0, 1.0);
             let edge = (1.0 - (x as f32 - line_x).abs() / 3.5).clamp(0.0, 1.0);
             for ch in 0..3 {
                 let v = c.img[i * 3 + ch] * (1.0 - a) + after[i * 3 + ch] * a;
-                c.img[i * 3 + ch] = v * (1.0 - edge) + edge;
+                c.img[i * 3 + ch] = v * (1.0 - edge) + edge * f32::from([line.0, line.1, line.2][ch]) / 255.0;
             }
         }
     }
     let hy = h * 0.62;
-    let hx = sp * w + 0.22 * (hy - h / 2.0);
+    let hx = sp * w + tilt * (hy - h / 2.0);
     let r = (w * 0.035).floor();
     let mut handle = blank(2.0 * r + 4.0, 2.0 * r + 4.0);
     canvas::ellipse(&mut handle, 2.0, 2.0, 2.0 * r + 2.0, 2.0 * r + 2.0, Some((255, 255, 255, 255)), None);
     text(&mut handle, r + 2.0, r + 2.0, "< >", Kind::Mono, r * 0.7, op(INK), Anchor::MM);
     c.put(&shadowed(&handle, 8.0, 4.0, 110), hx, hy, 1.0, false, false);
-    for (lab, x) in [("before", 0.14), ("after", 0.86)] {
-        let t = text_img(lab, w * 0.03, Kind::Serif, INK, Look::default());
+    for (lab, x) in [(e.s("before", "before"), 0.14), (e.s("after", "after"), 0.86)] {
+        let t = text_img(&lab, w * 0.03, Kind::Serif, INK, Look::default());
         let mut pill = rrect(t.width() as f32 + 16.0, t.height() as f32, t.height() as f32 / 2.0, (255, 255, 255, 225), None);
         over(&mut pill, &t, 8, 0);
         c.put(&pill, w * x, h * 0.88, 1.0, false, false);
@@ -424,12 +437,12 @@ pub(crate) const TAP: Effect = Effect {
     name: "tap",
     title: "The Tap",
     desc: "A Follow button pops up and flips to Following",
-    options: "at: second of the clip the button flips; x, y: where (0 to 1); color: once flipped",
+    options: "at: seconds into the effect the button flips; x, y: where (0 to 1); color: once flipped; label (+ Follow); done (Following)",
     cards: false,
     draw: tap,
 };
 fn tap(c: &mut Ctx, e: &mut Run) {
-    let at = if e.has("at") { e.f("at", 0.0) - e.start } else { e.d * 0.45 };
+    let at = e.f("at", (e.d * 0.45 * 10.0).round() / 10.0);
     let (w, h) = (c.w as f32, c.h as f32);
     let (bw, bh) = ((w * 0.3).floor(), (w * 0.09).floor());
     let x = if e.has("x") { e.f("x", 0.5) * w } else { c.fx + c.fw * 1.9 }.clamp(bw / 2.0 + 30.0, w - bw / 2.0 - 30.0);
@@ -437,7 +450,7 @@ fn tap(c: &mut Ctx, e: &mut Run) {
     let on = c.lt >= at;
     let col = if on { e.color("color", crate::PURPLE) } else { (40, 40, 46) };
     let mut im = rrect(bw, bh, bh * 0.28, op(col), None);
-    text(&mut im, bw / 2.0, bh / 2.0, if on { "Following" } else { "+ Follow" }, Kind::Ui, bh * 0.4, (255, 255, 255, 255), Anchor::MM);
+    text(&mut im, bw / 2.0, bh / 2.0, &if on { e.s("done", "Following") } else { e.s("label", "+ Follow") }, Kind::Ui, bh * 0.4, (255, 255, 255, 255), Anchor::MM);
     let pop = ease_back(c.lt / 0.3);
     let mut sq = 1.0;
     if on {
@@ -565,18 +578,54 @@ fn uninstall(c: &mut Ctx, e: &mut Run) {
     c.place(&shadowed(&im, 16.0, 8.0, 120), wf / 2.0, h as f32 * 0.16, 0.8 + 0.2 * ease_back(c.lt / 0.3), 0.0, clamp(c.lt / 0.1), false, false);
 }
 
-/// The column of counts down a reel's right edge: a heart, a bubble and a
-/// paper plane, with numbers under the first two.
-fn reel_icons(size: f32) -> Pixmap {
+/// The column down a reel's right edge, as the reel players draw it: a
+/// heart, a comment bubble, a repost loop, a paper plane and a bookmark,
+/// each with its count under it, and two lines for more at the foot.
+fn reel_icons(size: f32, counts: [&str; 5]) -> Pixmap {
     let s = size.floor();
-    let mut im = blank(s, s * 3.6);
-    let wd = (s / 12.0).floor().max(3.0);
-    let hrt = canvas::heart(s * 0.8, (255, 255, 255));
-    over(&mut im, &hrt, (s * 0.1) as i32, 0);
-    text(&mut im, s / 2.0, s * 0.95, "26.9K", Kind::Ui, s * 0.24, (255, 255, 255, 255), Anchor::MM);
-    canvas::ellipse(&mut im, s * 0.15, s * 1.25, s * 0.85, s * 1.95, None, Some(((255, 255, 255, 255), wd)));
-    text(&mut im, s / 2.0, s * 2.15, "412", Kind::Ui, s * 0.24, (255, 255, 255, 255), Anchor::MM);
-    canvas::polygon(&mut im, &[(s * 0.12, s * 2.75), (s * 0.9, s * 2.45), (s * 0.55, s * 3.25), (s * 0.45, s * 2.88)], None, Some(((255, 255, 255, 255), wd)));
+    let step = s * 1.5;
+    let mut im = blank(s, step * 5.0 + s * 0.7);
+    let wd = (s / 11.0).max(2.5);
+    let white = (255, 255, 255, 255);
+    let at = |i: usize, x: f32, y: f32| (x * s, i as f32 * step + y * s * 0.9);
+    // heart
+    let heart: Vec<(f32, f32)> = (0..48)
+        .map(|j| {
+            let t = j as f32 / 48.0 * std::f32::consts::TAU;
+            let (x, y) = (16.0 * t.sin().powi(3), 13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos());
+            at(0, 0.5 + x / 38.0, 0.5 - y / 38.0)
+        })
+        .collect();
+    canvas::polygon(&mut im, &heart, None, Some((white, wd)));
+    // comment: a round bubble with its tail at the lower left
+    let bubble: Vec<(f32, f32)> = (0..40)
+        .map(|j| {
+            let t = j as f32 / 40.0 * std::f32::consts::TAU;
+            at(1, 0.5 + 0.38 * t.cos(), 0.5 + 0.36 * t.sin())
+        })
+        .filter(|p| !(p.0 < 0.35 * s && p.1 > step + 0.6 * s * 0.9))
+        .collect();
+    let mut b = bubble.clone();
+    b.push(at(1, 0.14, 0.9));
+    canvas::line(&mut im, &[b[b.len() - 2], at(1, 0.14, 0.9), b[0]], white, wd);
+    canvas::line(&mut im, &bubble, white, wd);
+    // repost: two arrows chasing round a loop
+    canvas::line(&mut im, &[at(2, 0.18, 0.6), at(2, 0.18, 0.28), at(2, 0.8, 0.28)], white, wd);
+    canvas::line(&mut im, &[at(2, 0.68, 0.16), at(2, 0.82, 0.28), at(2, 0.68, 0.4)], white, wd);
+    canvas::line(&mut im, &[at(2, 0.82, 0.42), at(2, 0.82, 0.74), at(2, 0.2, 0.74)], white, wd);
+    canvas::line(&mut im, &[at(2, 0.32, 0.62), at(2, 0.18, 0.74), at(2, 0.32, 0.86)], white, wd);
+    // share: a paper plane
+    canvas::polygon(&mut im, &[at(3, 0.1, 0.42), at(3, 0.9, 0.12), at(3, 0.58, 0.9), at(3, 0.44, 0.56)], None, Some((white, wd)));
+    canvas::line(&mut im, &[at(3, 0.44, 0.56), at(3, 0.9, 0.12)], white, wd);
+    // save: a bookmark
+    canvas::polygon(&mut im, &[at(4, 0.24, 0.1), at(4, 0.76, 0.1), at(4, 0.76, 0.92), at(4, 0.5, 0.7), at(4, 0.24, 0.92)], None, Some((white, wd)));
+    for (i, n) in counts.iter().enumerate() {
+        text(&mut im, s / 2.0, i as f32 * step + s * 1.12, n, Kind::Uib, s * 0.26, white, Anchor::MM);
+    }
+    // more: two lines
+    let y = step * 5.0 + s * 0.2;
+    canvas::line(&mut im, &[(s * 0.22, y), (s * 0.78, y)], white, wd);
+    canvas::line(&mut im, &[(s * 0.22, y + s * 0.24), (s * 0.78, y + s * 0.24)], white, wd);
     im
 }
 
@@ -584,7 +633,7 @@ pub(crate) const REEL_FRAME: Effect = Effect {
     name: "reel-frame",
     title: "Reel Frame",
     desc: "Your video shrinks into a reel card",
-    options: "text: the handle (@your.handle)",
+    options: "text: the handle (@your.handle); likes (26.9K); comments (412); reposts (1.2K); shares (3.4K); saves (8.1K)",
     cards: false,
     draw: reel_frame,
 };
@@ -645,8 +694,9 @@ fn reel_frame(c: &mut Ctx, e: &mut Run) {
     c.fx = x0 as f32 + c.fx * s;
     c.fy = y0 as f32 + c.fy * s;
     c.fw *= s;
-    let ic = e.cache("ic", || shadowed(&reel_icons(wf * 0.075), 6.0, 2.0, 120));
-    c.comp(&ic, (x0 + iw) as f32 - ic.width() as f32 - wf * 0.01, y0 as f32 + ih as f32 * 0.52, k, false, false);
+    let counts = [e.s("likes", "26.9K"), e.s("comments", "412"), e.s("reposts", "1.2K"), e.s("shares", "3.4K"), e.s("saves", "8.1K")];
+    let ic = e.cache("ic", || shadowed(&reel_icons(wf * 0.07, counts.each_ref().map(String::as_str)), 6.0, 2.0, 120));
+    c.comp(&ic, (x0 + iw) as f32 - ic.width() as f32 - wf * 0.025, (y0 + ih) as f32 - ic.height() as f32 - wf * 0.05, k, false, false);
     let hdl = text_img(&e.s("text", "@your.handle"), wf * 0.032, Kind::Ui, (255, 255, 255), Look { shadow: 4.0, ..Look::default() });
     c.comp(&hdl, x0 as f32 + wf * 0.03, (y0 + ih) as f32 - hdl.height() as f32 - wf * 0.04, k, false, false);
 }
@@ -745,7 +795,7 @@ pub(crate) const COUNTDOWN_FLIP: Effect = Effect {
     name: "countdown-flip",
     title: "Countdown Flip",
     desc: "A 3, 2, 1 flip clock above your head",
-    options: "from (3)",
+    options: "from (3); look: flip, neon, minimal or bubble; color: the card; ink: the number",
     cards: false,
     draw: countdown_flip,
 };
@@ -756,11 +806,25 @@ fn countdown_flip(c: &mut Ctx, e: &mut Run) {
     let (cur, prev) = (n0 - i, n0 - i + 1);
     let f = if i > 0 { clamp((c.lt - i as f32 * seg) / 0.3) } else { 1.0 };
     let (tw, th) = ((c.w as f32 * 0.3).floor(), (c.w as f32 * 0.38).floor());
+    let look = e.s("look", "flip");
+    let card = e.color("color", (30, 30, 34));
+    let ink = e.color("ink", if look == "neon" { (255, 64, 160) } else { CREAM });
     let hv = e.cache("h", || {
         let mut out = Vec::new();
         for num in 0..=n0 + 1 {
-            let mut im = rrect(tw, th, tw * 0.1, (30, 30, 34, 255), None);
-            text(&mut im, tw / 2.0, th / 2.0, &num.to_string(), Kind::Bold, th * 0.62, op(CREAM), Anchor::MM);
+            let mut im = match look.as_str() {
+                "neon" => rrect(tw, th, tw * 0.12, (12, 12, 16, 200), Some((op(ink), (tw / 40.0).max(3.0)))),
+                "minimal" => blank(tw, th),
+                "bubble" => {
+                    let mut b = blank(tw, th);
+                    let r = tw.min(th) * 0.48;
+                    canvas::ellipse(&mut b, tw / 2.0 - r, th / 2.0 - r, tw / 2.0 + r, th / 2.0 + r, Some(op(card)), None);
+                    b
+                }
+                _ => rrect(tw, th, tw * 0.1, op(card), None),
+            };
+            let digits = text_img(&num.to_string(), th * 0.62, Kind::Bold, ink, if look == "neon" { Look { glow: Some((ink, 18.0)), ..Look::default() } } else { Look { shadow: if look == "minimal" { 10.0 } else { 0.0 }, ..Look::default() } });
+            over(&mut im, &digits, ((tw - digits.width() as f32) / 2.0) as i32, ((th - digits.height() as f32) / 2.0) as i32);
             let top = canvas::crop(&im, 0.0, 0.0, tw, (th / 2.0).floor());
             let bottom = canvas::crop(&im, 0.0, (th / 2.0).floor(), tw, th - (th / 2.0).floor());
             out.push((top, bottom));
@@ -781,7 +845,9 @@ fn countdown_flip(c: &mut Ctx, e: &mut Run) {
         let fl = canvas::resized(&get(cur).1, tw, hh);
         over(&mut im, &fl, 0, half as i32);
     }
-    canvas::line_flat(&mut im, &[(0.0, half), (tw, half)], (0, 0, 0, 255), 4.0);
+    if look == "flip" {
+        canvas::line_flat(&mut im, &[(0.0, half), (tw, half)], (0, 0, 0, 255), 4.0);
+    }
     let y = (th / 2.0 + c.h as f32 * 0.05).max(c.fy - c.fw * 2.3);
     let x = c.w as f32 / 2.0 * 0.6 + c.fx * 0.4;
     c.place(&shadowed(&im, 16.0, 10.0, 120), x, y, 0.7 + 0.3 * ease_back(c.lt / 0.3), 0.0, clamp((e.d - c.lt) / 0.2), true, false);
@@ -847,7 +913,7 @@ pub(crate) const COVER_STAR: Effect = Effect {
     name: "cover-star",
     title: "Cover Star",
     desc: "You become a magazine cover, title behind your head",
-    options: "text: the title; lines joined with |; issue; color; look: editorial",
+    options: "text: the magazine name (VIBE); issue: the line under it; lines: the cover lines, joined with |; color; look: classic or editorial",
     cards: false,
     draw: cover_star,
 };
@@ -899,7 +965,7 @@ pub(crate) const SCRIBBLE: Effect = Effect {
     name: "scribble",
     title: "Scribble",
     desc: "Marker doodles draw themselves around you",
-    options: "text: the label (me!); color",
+    options: "text: the label (me!); color; shape: ring, underline, box, heart or crown",
     cards: false,
     draw: scribble,
 };
@@ -909,12 +975,46 @@ fn scribble(c: &mut Ctx, e: &mut Run) {
     let wd = (w / 130.0).floor().max(6.0);
     let mut lay = blank(w, h);
     let (rx, ry) = (c.fw * 1.0, c.fw * 1.3);
-    let ring: Vec<(f32, f32)> = (0..70)
-        .map(|i| {
-            let a = -1.9 + 2.0 * PI * 1.08 * i as f32 / 69.0;
-            (c.fx + rx * (1.0 + 0.04 * (3.0 * a).sin()) * a.cos(), c.fy + ry * (1.0 + 0.04 * (2.0 * a).cos()) * a.sin())
-        })
-        .collect();
+    let (fx, fy, fw) = (c.fx, c.fy, c.fw);
+    let wobble = |i: usize| 1.0 + 0.04 * (i as f32 * 1.7).sin();
+    let ring: Vec<(f32, f32)> = match e.s("shape", "ring").as_str() {
+        // a wavy line under the chin
+        "underline" => (0..60).map(|i| {
+            let t = i as f32 / 59.0;
+            (fx - fw * 1.2 + fw * 2.4 * t, fy + ry * 1.05 + fw * 0.08 * (t * 14.0).sin())
+        }).collect(),
+        // a rough box round the head
+        "box" => {
+            let (l, r, t, b) = (fx - rx * 1.1, fx + rx * 1.1, fy - ry * 1.05, fy + ry * 1.0);
+            let corners = [(l, t), (r, t * 1.01), (r * 0.99, b), (l * 1.02, b), (l, t - fw * 0.1)];
+            corners.windows(2).flat_map(|p| (0..15).map(move |j| {
+                let k = j as f32 / 15.0;
+                (p[0].0 + (p[1].0 - p[0].0) * k, p[0].1 + (p[1].1 - p[0].1) * k)
+            })).collect()
+        }
+        // a heart round the face
+        "heart" => (0..80).map(|i| {
+            let t = i as f32 / 79.0 * 2.0 * PI;
+            let (x, y) = (16.0 * t.sin().powi(3), 13.0 * t.cos() - 5.0 * (2.0 * t).cos() - 2.0 * (3.0 * t).cos() - (4.0 * t).cos());
+            (fx + x / 15.0 * rx * wobble(i), fy - fw * 0.1 - y / 15.0 * ry)
+        }).collect(),
+        // a crown drawn over the head
+        "crown" => {
+            let (l, r, base) = (fx - rx * 0.9, fx + rx * 0.9, fy - ry * 1.05);
+            let tip = fw * 0.7;
+            let pts = [(l, base), (l, base - tip), (l + (r - l) * 0.25, base - tip * 0.45), (fx, base - tip * 1.2), (l + (r - l) * 0.75, base - tip * 0.45), (r, base - tip), (r, base), (l, base)];
+            pts.windows(2).flat_map(|p| (0..10).map(move |j| {
+                let k = j as f32 / 10.0;
+                (p[0].0 + (p[1].0 - p[0].0) * k, p[0].1 + (p[1].1 - p[0].1) * k)
+            })).collect()
+        }
+        _ => (0..70)
+            .map(|i| {
+                let a = -1.9 + 2.0 * PI * 1.08 * i as f32 / 69.0;
+                (fx + rx * (1.0 + 0.04 * (3.0 * a).sin()) * a.cos(), fy + ry * (1.0 + 0.04 * (2.0 * a).cos()) * a.sin())
+            })
+            .collect(),
+    };
     canvas::hand_path(&mut lay, &ring, col, wd, ease_inout(c.lt / 0.5));
     let lx = (c.fx + c.fw * 2.3).clamp(w * 0.2, w * 0.8);
     let ly = (h * 0.08).max(c.fy - c.fw * 2.4);

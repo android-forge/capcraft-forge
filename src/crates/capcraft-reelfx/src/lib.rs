@@ -111,6 +111,42 @@ pub struct Run {
     pub strength: Vec<(f32, f32)>,
     pub cards: Arc<Vec<Pixmap>>,
     state: HashMap<String, Arc<dyn Any + Send + Sync>>,
+    /// The settings read, as [`settings`] asks for them.
+    seen: Option<std::sync::Mutex<Vec<Setting>>>,
+}
+
+/// What kind of value a setting holds, as the effect reads it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Kind {
+    /// Words (a list when its default joins items with `|`).
+    Text,
+    /// A number.
+    Number,
+    /// A `#rrggbb` colour.
+    Color,
+}
+
+/// One setting an effect reads, with the value it uses when none is set.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Setting {
+    pub key: String,
+    pub kind: Kind,
+    pub default: String,
+}
+
+/// The settings effect `name` reads, in the order it reads them, found by
+/// drawing it a few times on a small frame with nothing set.
+pub fn settings(name: &str) -> Vec<Setting> {
+    let Some(mut run) = Run::new(name, 0.0, 3.0, BTreeMap::new()) else {
+        return Vec::new();
+    };
+    run.seen = Some(std::sync::Mutex::new(Vec::new()));
+    let (w, h) = (72, 128);
+    for t in [0.05, 0.4, 0.9, 1.5, 2.2, 2.9] {
+        let mut rgba = vec![128u8; w * h * 4];
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut rgba, w, h, None, None, std::slice::from_mut(&mut run), t)));
+    }
+    run.seen.take().and_then(|m| m.into_inner().ok()).unwrap_or_default()
 }
 
 impl Run {
@@ -131,6 +167,7 @@ impl Run {
             cards: Arc::new(Vec::new()),
             strength: Vec::new(),
             state: HashMap::new(),
+            seen: None,
         })
     }
 
@@ -141,6 +178,7 @@ impl Run {
 
     /// The setting `key`, or `default`.
     pub fn s(&self, key: &str, default: &str) -> String {
+        self.saw(key, Kind::Text, default);
         self.o.get(key).cloned().unwrap_or_else(|| default.to_owned())
     }
 
@@ -162,17 +200,38 @@ impl Run {
 
     /// The setting `key` as a number, or `default`.
     pub fn f(&self, key: &str, default: f32) -> f32 {
+        self.saw(key, Kind::Number, &format!("{}", (default * 1000.0).round() / 1000.0));
         self.o.get(key).and_then(|v| v.trim().parse().ok()).unwrap_or(default)
     }
 
     /// Whether `key` is set.
     pub fn has(&self, key: &str) -> bool {
+        self.saw(key, Kind::Text, "");
         self.o.get(key).is_some_and(|v| !v.is_empty())
     }
 
     /// The setting `key` as a `#rrggbb` colour, or `default`.
     pub fn color(&self, key: &str, default: Rgb) -> Rgb {
+        self.saw(key, Kind::Color, &format!("#{:02x}{:02x}{:02x}", default.0, default.1, default.2));
         self.o.get(key).and_then(|v| hex(v)).unwrap_or(default)
+    }
+
+    /// Notes a setting read, when [`settings`] is listening. A later read
+    /// with a default fills one an earlier `has` left blank.
+    fn saw(&self, key: &str, kind: Kind, default: &str) {
+        let Some(seen) = &self.seen else { return };
+        let Ok(mut seen) = seen.lock() else { return };
+        match seen.iter_mut().find(|s| s.key == key) {
+            Some(s) => {
+                if s.default.is_empty() {
+                    s.default = default.to_owned();
+                }
+                if kind != Kind::Text {
+                    s.kind = kind;
+                }
+            }
+            None => seen.push(Setting { key: key.to_owned(), kind, default: default.to_owned() }),
+        }
     }
 
     /// The value kept under `key`, made by `make` the first time.
@@ -283,4 +342,17 @@ pub fn draw(rgba: &mut [u8], w: usize, h: usize, mask: Option<&[f32]>, face: Opt
         }
     }
     true
+}
+
+#[cfg(test)]
+mod settings_tests {
+    #[test]
+    fn every_effect_lists_what_it_reads() {
+        for e in super::effects() {
+            let found = super::settings(e.name);
+            println!("{}: {:?}", e.name, found.iter().map(|s| format!("{}={:?}:{}", s.key, s.kind, s.default)).collect::<Vec<_>>());
+        }
+        let spot = super::settings("spotlight");
+        assert!(spot.iter().any(|s| s.key == "push" && s.kind == super::Kind::Number));
+    }
 }

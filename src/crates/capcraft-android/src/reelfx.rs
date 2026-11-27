@@ -43,6 +43,40 @@ pub fn reel_effects() -> Vec<ReelEffectInfo> {
         .collect()
 }
 
+/// One setting a reel effect reads, as the panel lays it out.
+#[derive(uniffi::Record)]
+pub struct ReelSetting {
+    pub key: String,
+    /// "text", "number" or "color".
+    pub kind: String,
+    /// What the effect uses when it is not set.
+    pub default_value: String,
+}
+
+/// The settings effect `name` reads, in the order it reads them.
+#[uniffi::export]
+pub fn reel_settings(name: String) -> Vec<ReelSetting> {
+    capcraft_reelfx::settings(&name)
+        .into_iter()
+        .map(|s| ReelSetting {
+            key: s.key,
+            kind: match s.kind {
+                capcraft_reelfx::Kind::Text => "text",
+                capcraft_reelfx::Kind::Number => "number",
+                capcraft_reelfx::Kind::Color => "color",
+            }
+            .to_owned(),
+            default_value: s.default,
+        })
+        .collect()
+}
+
+/// The fonts a reel effect's `font` can name: the app's own, by full name.
+#[uniffi::export]
+pub fn reel_fonts() -> Vec<String> {
+    capcraft_reelfx::canvas::base_names().iter().filter(|n| !n.is_empty()).cloned().collect()
+}
+
 fn faces() -> &'static Faces {
     static ONE: OnceLock<Faces> = OnceLock::new();
     ONE.get_or_init(Faces::new)

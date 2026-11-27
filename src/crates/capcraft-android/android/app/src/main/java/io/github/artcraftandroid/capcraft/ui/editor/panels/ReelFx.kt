@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,6 +42,8 @@ import androidx.compose.ui.unit.sp
 import io.github.artcraftandroid.capcraft.core.SpeechListener
 import io.github.artcraftandroid.capcraft.core.TimelineView
 import io.github.artcraftandroid.capcraft.core.reelEffects
+import io.github.artcraftandroid.capcraft.core.reelFonts
+import io.github.artcraftandroid.capcraft.core.reelSettings
 import io.github.artcraftandroid.capcraft.engine.Threads
 import io.github.artcraftandroid.capcraft.engine.userMessage
 import io.github.artcraftandroid.capcraft.ui.Palette
@@ -45,6 +51,7 @@ import io.github.artcraftandroid.capcraft.ui.Type
 import io.github.artcraftandroid.capcraft.ui.common.MediaKinds
 import io.github.artcraftandroid.capcraft.ui.common.MediaPick
 import io.github.artcraftandroid.capcraft.ui.editor.EditorViewModel
+import io.github.artcraftandroid.capcraft.ui.editor.Panel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,7 +90,69 @@ private fun optsOf(line: String): List<Opt> = line.split(';').map { it.trim() }.
     keys.filter { WORD.matches(it) && it != "images" }.map { Opt(it, hint, choices) }
 }.distinctBy { it.key }
 
-private fun labelOf(key: String): String = if (key == TEXT) "Words" else key.replace('_', ' ').replaceFirstChar { it.uppercase() }
+private val LABELS = mapOf(
+    TEXT to "Words", "hl" to "Highlight", "tc" to "Corner tag", "sub" to "Subtitle", "label_x" to "Label at", "bg" to "Background",
+    "ticks" to "Times (s)", "others" to "Other items", "pick" to "Picture", "cell" to "Dot size", "y" to "Height", "x" to "Across",
+    "at" to "At (s)", "to" to "Values", "from" to "From", "push" to "Push in", "dark" to "Darken", "pos" to "Place", "count" to "Count",
+)
+
+private fun labelOf(key: String, hint: String = ""): String {
+    // "the magazine name" names it better than the key does
+    val named = hint.takeIf { it.startsWith("the ") }?.removePrefix("the ")?.substringBefore(" (")?.substringBefore(",")?.substringBefore(":")
+        ?.takeIf { it.split(' ').size <= 3 }?.replaceFirstChar { it.uppercase() }
+    return when {
+        named != null && key in setOf("color", "bg", "ink") -> "$named colour"
+        named != null -> named
+        else -> LABELS[key] ?: key.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+}
+
+/** Settings read as words that hold a number. */
+private val NUMBER_KEYS = setOf("x", "y", "at", "pick", "opacity")
+
+/** Numbers that count things. */
+private val WHOLE_KEYS = setOf("count", "from", "pick", "spin", "angle", "box", "pages", "spread")
+
+/** More looks for an effect than its line names. */
+private val EXTRA_LOOKS = mapOf<String, List<String>>()
+
+/** The slider's span for a number setting with default [d]. */
+private fun rangeOf(key: String, d: Float, hint: String, lengthS: Float): ClosedFloatingPointRange<Float> = when {
+    key == "zoom" || key == "push" -> 1f..maxOf(2.5f, d * 1.5f)
+    key == "angle" -> -45f..45f
+    key == "spin" -> 0f..40f
+    key == "from" -> 1f..10f
+    key == "pick" -> 0f..9f
+    key == "box" -> 1f..6f
+    key == "pages" -> 3f..16f
+    key == "spread" -> 20f..180f
+    key == "tilt" -> -1f..1f
+    key == "count" && d >= 1000f -> 0f..maxOf(1_000_000f, d * 5f)
+    key == "count" -> 1f..maxOf(40f, d * 3f)
+    key == "at" && "0 to 1" !in hint -> 0f..lengthS
+    key == "speed" -> 0f..maxOf(2f, d * 3f)
+    "0 to 1" in hint || d <= 1f -> 0f..1f
+    else -> 0f..d * 3f
+}
+
+/** Sounds that suit an effect, offered first. */
+private val SUITS = mapOf(
+    "profile-wall" to listOf("Sparkle", "Coin", "Success"),
+    "slow-push" to listOf("Riser", "Drone", "Whoosh"),
+    "countdown-flip" to listOf("Tick tock", "Ding"),
+    "the-tap" to listOf("Pop", "Notify"),
+    "tap" to listOf("Pop", "Notify"),
+    "uninstall" to listOf("Glitch", "Error"),
+    "reject-stamp" to listOf("Thud", "Impact"),
+    "huge-strike" to listOf("Impact", "Boom"),
+    "messages" to listOf("Notify", "Phone buzz"),
+    "shortcut-rain" to listOf("Keyboard", "Typewriter"),
+)
+
+/** Colours to pick from. */
+private val REEL_SWATCHES = listOf(
+    "#ffffff", "#f4e9d8", "#ffd60a", "#ff9230", "#ee2222", "#ff4fa3", "#7c5cff", "#0a84ff", "#34c759", "#22c55e", "#141416", "#000000",
+)
 
 /**
  * Reel effects: the 51 talking-head effects from claude-video-effects (MIT), drawn on the clip's own frames
@@ -187,21 +256,54 @@ fun ReelFxPanel(vm: EditorViewModel) {
                     if (v.isBlank()) o.remove(key) else o.put(key, v)
                     it.put("options", o)
                 }
-                optsOf(info?.options.orEmpty()).forEach { o ->
-                    if (o.choices.isNotEmpty()) {
-                        val now = opts?.optString(o.key).orEmpty().ifEmpty { o.choices.first() }
-                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(labelOf(o.key), style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                o.choices.forEach { c -> Chip(if (c == "bw") "B&W" else c.replaceFirstChar { it.uppercase() }, c == now) { set(o.key, c) } }
-                            }
+                val name = e.optString("fx")
+                val read = remember(name) { runCatching { reelSettings(name) }.getOrDefault(emptyList()) }
+                val hints = remember(name) { optsOf(info?.options.orEmpty()) }
+                val fonts = remember { runCatching { reelFonts() }.getOrDefault(emptyList()) }
+                // what the effect reads, then what its line names that this run did not reach
+                val keys = (read.map { it.key } + hints.map { it.key }).distinct().filter { it != "images" }
+                keys.forEach { key ->
+                    val got = read.firstOrNull { it.key == key }
+                    val hint = hints.firstOrNull { it.key == key }
+                    val default = got?.defaultValue.orEmpty()
+                    val now = opts?.optString(key).orEmpty()
+                    val label = labelOf(key, hint?.hint.orEmpty())
+                    val numeric = got?.kind == "number" || key in NUMBER_KEYS
+                    when {
+                        key == "font" -> Choices(label, listOf("bold", "serif") + fonts, now.ifEmpty { default.ifEmpty { "bold" } }, { it.replaceFirstChar { c -> c.uppercase() } }) { set(key, it) }
+                        key == "hl" -> {
+                            val words = (opts?.optString(TEXT).orEmpty().ifEmpty { read.firstOrNull { it.key == TEXT }?.defaultValue.orEmpty() })
+                                .split('|', ' ').map { it.trim(' ', '.', ',', '!', '?') }.filter { it.isNotEmpty() }.distinct()
+                            Choices(label, words, now.ifEmpty { default }, { it }) { set(key, it) }
                         }
-                    } else {
-                        Field(labelOf(o.key), opts?.optString(o.key).orEmpty(), o.hint) { v -> set(o.key, v) }
+                        hint != null && hint.choices.isNotEmpty() -> Choices(label, hint.choices, now.ifEmpty { default.ifEmpty { hint.choices.first() } }, { if (it == "bw") "B&W" else it.replaceFirstChar { c -> c.uppercase() } }) { set(key, it) }
+                        // a named look: as made, or the one its line names
+                        key == "look" || key == "pos" -> {
+                            val other = hint?.hint?.substringBefore(" for ")?.trim()?.takeIf { WORD.matches(it) }
+                            val looks = listOfNotNull("", other) + (EXTRA_LOOKS[name] ?: emptyList())
+                            Choices(label, looks.distinct(), now, { if (it.isEmpty()) "Standard" else it.replaceFirstChar { c -> c.uppercase() } }) { set(key, it) }
+                        }
+                        got?.kind == "color" || key == "color" || key == "bg" -> Swatches(label, now.ifEmpty { default.ifEmpty { "#ffffff" } }) { set(key, it) }
+                        numeric -> {
+                            val d = default.toFloatOrNull() ?: 0.5f
+                            val range = rangeOf(key, d, hint?.hint.orEmpty(), lengthS.toFloat().coerceAtLeast(1f))
+                            val whole = key in WHOLE_KEYS
+                            ValueSlider((now.toFloatOrNull() ?: d).coerceIn(range), range, { if (whole) "%.0f".format(it) else "%.2f".format(it) },
+                                { v -> change("reelfx-$key") { val o = it.optJSONObject("options") ?: JSONObject(); o.put(key, if (whole) "%.0f".format(v) else "%.3f".format(v)); it.put("options", o) } },
+                                { vm.endGesture() }, title = label)
+                        }
+                        '|' in default || hint?.hint?.contains("joined with |") == true -> Lines(label, now.ifEmpty { default }) { set(key, it) }
+                        else -> Field(label, now.ifEmpty { default }, hint?.hint.orEmpty()) { v -> set(key, v) }
                     }
                 }
+                // a sound at the effect's start, the ones that suit it first
+                val sounds = (SUITS[name].orEmpty() + listOf("Whoosh", "Pop", "Riser", "Impact", "Sparkle", "Ding", "Camera flash", "Typewriter", "Glitch")).distinct()
+                Choices("Sound", sounds, "", { it }) { sound ->
+                    vm.scrub(c.startUs + (if (layer) 0L else (e.optDouble("start") * 1_000_000).toLong()))
+                    addSoundFx(vm, sound, scope)
+                }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (info?.cards == true) {
+                    if (info?.cards == true || read.any { it.key == "images" }) {
                         val context = androidx.compose.ui.platform.LocalContext.current
                         Chip("Your images", false) {
                             MediaPick.open(MediaKinds.IMAGE, multiple = true) { uris ->
@@ -232,6 +334,78 @@ fun ReelFxPanel(vm: EditorViewModel) {
     }
 }
 
+/** A row of chips, one chosen. */
+@Composable
+private fun Choices(title: String, choices: List<String>, now: String, name: (String) -> String, onPick: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            choices.forEach { c -> Chip(name(c), c.equals(now, ignoreCase = true)) { onPick(c) } }
+        }
+    }
+}
+
+/** Colours as dots to tap; the one in use ringed. */
+@Composable
+private fun Swatches(title: String, now: String, onPick: (String) -> Unit) {
+    val all = (listOf(now.lowercase()) + REEL_SWATCHES).distinct()
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            all.forEach { hex ->
+                val color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.White)
+                val on = hex.equals(now, ignoreCase = true)
+                Box(
+                    Modifier.size(30.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(if (on) Palette.Accent else Color.Transparent).padding(3.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape).background(color).clickable { onPick(hex) },
+                )
+            }
+        }
+    }
+}
+
+/** Several lines, each its own box, with add and remove; held joined by `|`. Lines with `::` get a small second box. */
+@Composable
+private fun Lines(title: String, value: String, onDone: (String) -> Unit) {
+    val items = value.split('|')
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(title, style = Type.Small.copy(color = Palette.TextSecondary))
+        items.forEachIndexed { i, item ->
+            fun put(v: String) = onDone(items.toMutableList().also { it[i] = v }.joinToString("|"))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if ("::" in item) {
+                    Box(Modifier.weight(0.62f)) { Box_(item.substringBefore("::")) { put(it + "::" + item.substringAfter("::")) } }
+                    Spacer(Modifier.width(6.dp))
+                    Box(Modifier.weight(0.38f)) { Box_(item.substringAfter("::")) { put(item.substringBefore("::") + "::" + it) } }
+                } else {
+                    Box(Modifier.weight(1f)) { Box_(item) { put(it) } }
+                }
+                if (items.size > 1) {
+                    Text("✕", style = Type.Body.copy(color = Palette.TextSecondary), modifier = Modifier.clickable { onDone(items.filterIndexed { j, _ -> j != i }.joinToString("|")) }.padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+            }
+        }
+        Row(Modifier.padding(top = 6.dp)) {
+            Chip("+ Line", false) { onDone((items + if (items.any { "::" in it }) "::" else "").joinToString("|")) }
+        }
+    }
+}
+
+/** A bare one-line text box. */
+@Composable
+private fun Box_(value: String, onDone: (String) -> Unit) {
+    var text by remember(value) { mutableStateOf(value) }
+    BasicTextField(
+        text,
+        { text = it.replace("|", ""); onDone(text) },
+        singleLine = true,
+        textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
+        cursorBrush = SolidColor(Palette.Accent),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp),
+    )
+}
+
 @Composable
 private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
@@ -250,7 +424,8 @@ private fun Field(title: String, value: String, hint: String, onDone: (String) -
         BasicTextField(
             text,
             { text = it; onDone(it) },
-            singleLine = true,
+            singleLine = false,
+            maxLines = 4,
             textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
             cursorBrush = SolidColor(Palette.Accent),
             modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp),
@@ -262,4 +437,91 @@ private fun Field(title: String, value: String, hint: String, onDone: (String) -
             },
         )
     }
+}
+
+/** The settings a drag on the preview moves, by effect: across, and down (either may be absent). */
+private val PLACED = mapOf(
+    "tap" to ("x" to "y"), "wave-trim" to ("x" to "y"), "swipe" to ("stop" to null), "pause-point" to ("label_x" to null),
+    "reject-stamp" to (null to "y"), "messages" to (null to "y"),
+)
+
+/** Whether the words box over the preview is open. */
+internal object ReelWords {
+    var open by mutableStateOf(false)
+}
+
+/** The selected item's reel effect, when a reel item (or a clip with the Reel FX panel open) is selected. */
+internal fun reelSelected(vm: EditorViewModel): JSONObject? {
+    val id = vm.selected ?: return null
+    if (vm.panel != Panel.ReelFx && vm.clip(id)?.kind != "layer") return null
+    return reelFx(vm, id).firstOrNull()
+}
+
+/**
+ * The selected reel effect's words, edited over the preview: one line per item (they are kept joined by `|`),
+ * opened by a tap on the picture.
+ */
+@Composable
+fun ReelWordsBox(vm: EditorViewModel) {
+    if (!ReelWords.open) return
+    val id = vm.selected
+    val e = reelSelected(vm)
+    if (id == null || e == null) { ReelWords.open = false; return }
+    val name = e.optString("fx")
+    val default = remember(name) { runCatching { reelSettings(name) }.getOrDefault(emptyList()).firstOrNull { it.key == TEXT }?.defaultValue.orEmpty() }
+    val now = e.optJSONObject("options")?.optString(TEXT).orEmpty().ifEmpty { default }
+    var text by remember(id) { mutableStateOf(now.replace("|", "\n")) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(id) { runCatching { focus.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable { ReelWords.open = false }, contentAlignment = Alignment.Center) {
+        Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF242426)).clickable(enabled = false) {}.padding(14.dp)) {
+            Text("Words · one line each", style = Type.Small.copy(color = Palette.TextSecondary))
+            Spacer(Modifier.height(8.dp))
+            BasicTextField(
+                text,
+                { v ->
+                    text = v
+                    val list = reelFx(vm, id).map { JSONObject(it.toString()) }
+                    list.firstOrNull()?.let { first ->
+                        val o = first.optJSONObject("options") ?: JSONObject()
+                        val joined = v.split('\n').joinToString("|") { it.replace("|", "") }
+                        if (joined.isBlank()) o.remove(TEXT) else o.put(TEXT, joined)
+                        first.put("options", o)
+                        setReelFx(vm, id, list, "reelfx-words")
+                    }
+                },
+                textStyle = Type.Body.copy(color = Palette.Text, fontSize = 18.sp),
+                cursorBrush = SolidColor(Palette.Accent),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp, max = 220.dp).focusRequester(focus),
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Chip("Done", true) { vm.endGesture(); ReelWords.open = false }
+            }
+        }
+    }
+}
+
+/** The selected reel effect's place on the frame (0 to 1 each way), when it is one that can be dragged there. */
+internal fun reelHandle(vm: EditorViewModel): Pair<Float, Float>? {
+    val id = vm.selected ?: return null
+    if (vm.panel != Panel.ReelFx && vm.clip(id)?.kind != "layer") return null
+    val e = reelFx(vm, id).firstOrNull() ?: return null
+    val (kx, ky) = PLACED[e.optString("fx")] ?: return null
+    val o = e.optJSONObject("options")
+    fun v(key: String?, d: Float) = key?.let { o?.optString(it)?.toFloatOrNull() } ?: d
+    return v(kx, if (kx == "label_x") 0.72f else 0.5f) to v(ky, if (ky == null) 0.5f else 0.35f)
+}
+
+/** Puts the selected reel effect at `(x, y)` of the frame, as one gesture. */
+internal fun moveReel(vm: EditorViewModel, x: Float, y: Float) {
+    val id = vm.selected ?: return
+    val list = reelFx(vm, id).map { JSONObject(it.toString()) }
+    val e = list.firstOrNull() ?: return
+    val (kx, ky) = PLACED[e.optString("fx")] ?: return
+    val o = e.optJSONObject("options") ?: JSONObject()
+    kx?.let { o.put(it, "%.3f".format(x)) }
+    ky?.let { o.put(it, "%.3f".format(y)) }
+    e.put("options", o)
+    setReelFx(vm, id, list, "reelfx-drag")
 }

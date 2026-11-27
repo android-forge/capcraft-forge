@@ -387,7 +387,8 @@ fn carousel_spin(c: &mut Ctx, e: &mut Run) {
         let sx = th.cos().abs().powf(0.6).max(0.06);
         let s = (0.72 + 0.34 * (depth + 1.0) / 2.0) * (0.5 + 0.5 * intro);
         let squeezed = canvas::resized(src, (src.width() as f32 * s * sx).max(2.0), (src.height() as f32 * s).max(2.0));
-        c.place(&squeezed, fx + rad * th.sin(), cy + ry * depth, 1.0, 0.0, out * clamp(c.lt / 0.12) * (0.85 + 0.15 * depth), depth < 0.0, depth >= 0.0);
+        // the near panels cross in front of you whole, the far ones pass behind
+        c.place(&squeezed, fx + rad * th.sin(), cy + ry * depth, 1.0, 0.0, out * clamp(c.lt / 0.12) * (0.85 + 0.15 * depth), depth < 0.0, false);
     }
 }
 
@@ -474,17 +475,36 @@ pub(crate) const MATCH_CUT: Effect = Effect {
     name: "match-cut",
     title: "Match Cut",
     desc: "News pages cut on one word, locked in a red box behind your head",
-    options: "text: the word (THIS); color",
+    options: "text: the word (THIS); color; pages: how many cuts (8); images: your own pictures as the pages",
     cards: false,
     draw: match_cut,
 };
+/// One of your own pictures as a page: filling the frame, the word in its
+/// red box at the same place on every one.
+fn photo_page(pic: &Pixmap, w: usize, h: usize, word: &str, red: Rgb, wx: f32, wy: f32) -> Vec<f32> {
+    let (wf, hf) = (w as f32, h as f32);
+    let (pw, ph) = (pic.width() as f32, pic.height() as f32);
+    let s = (wf / pw).max(hf / ph);
+    let mut im = blank(wf, hf);
+    canvas::over_scaled(&mut im, pic, (wf - pw * s) / 2.0, (hf - ph * s) / 2.0, pw * s, ph * s);
+    let size = wf * 0.09;
+    let t = text_img(word, size, Kind::Anton, WHITE, Look::default());
+    let (tw, th) = (t.width() as f32, t.height() as f32);
+    let mut bx = rrect(tw + size * 0.44, th + size * 0.2, size * 0.08, op(red), None);
+    over(&mut bx, &t, (size * 0.22) as i32, (size * 0.1) as i32);
+    over(&mut im, &bx, (wx - bx.width() as f32 / 2.0) as i32, (wy - bx.height() as f32 / 2.0) as i32);
+    im.data().chunks_exact(4).flat_map(|p| [f32::from(p[0]) / 255.0, f32::from(p[1]) / 255.0, f32::from(p[2]) / 255.0]).collect()
+}
+
 fn match_cut(c: &mut Ctx, e: &mut Run) {
     let k = clamp(c.lt / 0.06) * e.fade(c, 0.12);
     c.face_cam(1.0 + 0.06 * ease_out(c.lt / e.d), 0.44);
     let (wf, hf) = (c.w as f32, c.h as f32);
     let (fy, fw) = (c.fy, c.fw);
     let anchor = e.cache("anchor", || (wf / 2.0, (hf * 0.1).max(fy - fw * 1.55)));
-    let durs = [0.15, 0.15, 0.17, 0.19, 0.22, 0.26, 0.3, 0.45];
+    // the cuts quicken at first and slow to the last page
+    let n = (e.f("pages", 8.0).round() as usize).clamp(3, 16);
+    let durs: Vec<f32> = (0..n).map(|j| if j + 1 == n { 0.45 } else { 0.15 + 0.15 * (j as f32 / (n - 1) as f32).powi(2) }).collect();
     let (mut t, mut j) = (c.lt, 0);
     while j < durs.len() - 1 && t > durs[j] {
         t -= durs[j];
@@ -493,7 +513,10 @@ fn match_cut(c: &mut Ctx, e: &mut Run) {
     let word = e.s("text", "THIS");
     let red = e.color("color", (214, 40, 40));
     let (w, h) = (c.w, c.h);
-    let pg = e.cache(&format!("pg{j}"), || match_page(w, h, &word, red, j, anchor.0, anchor.1));
+    let own = e.has("images") && !e.cards.is_empty();
+    let pg = e.cache_with(&format!("pg{j}"), |e| {
+        if own { photo_page(&e.cards[j % e.cards.len()], w, h, &word, red, anchor.0, anchor.1) } else { match_page(w, h, &word, red, j, anchor.0, anchor.1) }
+    });
     for i in 0..w * h {
         let m = c.m[i];
         for ch in 0..3 {
@@ -1037,7 +1060,7 @@ pub(crate) const TAPE_LABEL: Effect = Effect {
     name: "tape-label",
     title: "Tape Label",
     desc: "A strip of yellow tape with your line lands on your chest",
-    options: "text",
+    options: "text; color: the tape; ink: the words; angle (-3)",
     cards: false,
     draw: tape_label,
 };
@@ -1048,25 +1071,38 @@ fn tape_label(c: &mut Ctx, e: &mut Run) {
     }
     let s = (c.w as f32 * 0.055).floor();
     let line = e.s("text", "your own reels");
+    let tape = e.color("color", TAPE);
+    let ink = e.color("ink", INKY);
     let im = e.cache("tape", || {
-        let t = text_img(&line, s, Kind::Hand, INKY, Look::default());
-        let (w, h) = ((t.width() as f32 + s * 0.6).floor(), (t.height() as f32 + s * 0.2).floor());
-        let o = (s / 9.0).floor().max(4.0);
-        let mut im = blank(w + o, h + o);
-        canvas::rect(&mut im, o, o, w + o, h + o, (17, 17, 17, 255));
-        canvas::rect(&mut im, 0.0, 0.0, w, h, op(TAPE));
+        let t = text_img(&line, s, Kind::Hand, ink, Look::default());
+        let (w, h) = ((t.width() as f32 + s * 1.2).floor(), (t.height() as f32 + s * 0.5).floor());
+        let tooth = s * 0.18;
+        let mut im = blank(w, h);
+        // torn ends: a zigzag down each side
+        let teeth = ((h / tooth) as usize).max(3);
+        let mut pts = vec![(tooth, 0.0), (w - tooth, 0.0)];
+        pts.extend((0..=teeth).map(|j| (w - tooth + if j % 2 == 0 { tooth } else { 0.0 }, h * j as f32 / teeth as f32)));
+        pts.push((tooth, h));
+        pts.extend((0..=teeth).rev().map(|j| (if j % 2 == 0 { 0.0 } else { tooth }, h * j as f32 / teeth as f32)));
+        canvas::polygon(&mut im, &pts, Some(with_a(tape, 238)), None);
+        // a sheen across the top and fine lines through the tape
+        canvas::rect(&mut im, tooth, h * 0.08, w - tooth, h * 0.3, (255, 255, 255, 46));
+        for j in 1..4 {
+            let y = h * j as f32 / 4.0;
+            canvas::line_flat(&mut im, &[(tooth, y), (w - tooth, y)], (0, 0, 0, 14), 1.0);
+        }
         over(&mut im, &t, ((w - t.width() as f32) / 2.0) as i32, ((h - t.height() as f32) / 2.0) as i32);
-        im
+        shadowed(&im, 10.0, 5.0, 90)
     });
     let y = (c.fy + c.fw * 1.6).clamp(c.h as f32 * 0.45, c.h as f32 * 0.68);
-    c.place(&im, c.w as f32 / 2.0, y, 0.85 + 0.15 * k, 0.0, clamp(k * 1.5), false, true);
+    c.place(&im, c.w as f32 / 2.0, y, 0.85 + 0.15 * k, e.f("angle", -3.0), clamp(k * 1.5), false, true);
 }
 
 pub(crate) const SELECT_RESIZE: Effect = Effect {
     name: "select-resize",
     title: "Select & Resize",
     desc: "A blue selection box grabs your number above your head and a cursor drags it bigger",
-    options: "text (2X)",
+    options: "text (2X); images: your picture in the box",
     cards: false,
     draw: select_resize,
 };
@@ -1079,7 +1115,17 @@ fn select_resize(c: &mut Ctx, e: &mut Run) {
     let p = ease_inout((c.lt - 0.25) / 0.7);
     let s = ((w * 0.2 * (0.55 + 0.45 * p)) as i32 / 4 * 4) as f32;
     let word = e.s("text", "2X");
-    let t = e.cache(&format!("t{s}"), || text_img(&word, s, Kind::Didone, CREAMY, Look { shadow: 8.0, ..Look::default() }));
+    // your picture in the box when you give one, else the word
+    let pic = e.has("images") && !e.cards.is_empty();
+    let t = e.cache_with(&format!("t{s}"), |e| {
+        if pic {
+            let im = &e.cards[0];
+            let k = s * 1.6 / im.height().max(1) as f32;
+            canvas::resized(im, im.width() as f32 * k, im.height() as f32 * k)
+        } else {
+            text_img(&word, s, Kind::Didone, CREAMY, Look { shadow: 8.0, ..Look::default() })
+        }
+    });
     let (bw, bh) = (t.width() as f32 + w * 0.03, t.height() as f32);
     let (cx, cy) = (w / 2.0, above_head(c, bh));
     let (x0, y0) = (cx - bw / 2.0, cy - bh / 2.0);
@@ -1110,7 +1156,7 @@ pub(crate) const WAVE_TRIM: Effect = Effect {
     name: "wave-trim",
     title: "Wave Trim",
     desc: "The silent parts of your voice are trimmed away on screen until only your words are left",
-    options: "none",
+    options: "x, y: where (0 to 1)",
     cards: false,
     draw: wave_trim,
 };
@@ -1143,8 +1189,10 @@ fn wave_trim(c: &mut Ctx, e: &mut Run) {
             x += sd * gap;
         }
     }
-    let y = above_head(c, ph);
-    c.place(&lay, w / 2.0, y, 1.0, 0.0, al, true, false);
+    // above the head, or where you put it
+    let y = if e.has("y") { e.f("y", 0.3) * c.h as f32 } else { above_head(c, ph) };
+    let x = if e.has("x") { e.f("x", 0.5) * w } else { w / 2.0 };
+    c.place(&lay, x, y, 1.0, 0.0, al, true, false);
 }
 
 pub(crate) const HUGE_STRIKE: Effect = Effect {
@@ -1246,14 +1294,14 @@ pub(crate) const FAN_BUILD: Effect = Effect {
     name: "fan-build",
     title: "Fan Build",
     desc: "Your reel covers deal into a fan behind your head, one card at a time",
-    options: "images: your covers; count (13)",
+    options: "images: your covers; count (9); size: card width (0.17); spread: degrees (110)",
     cards: true,
     draw: fan_build,
 };
 fn fan_build(c: &mut Ctx, e: &mut Run) {
-    let n = e.f("count", 13.0).max(1.0) as usize;
+    let n = (e.f("count", 9.0).round() as usize).clamp(2, 24);
     let al = e.fade(c, 0.2);
-    let cw = (c.w as f32 * 0.15).floor();
+    let cw = (c.w as f32 * e.f("size", 0.17)).floor();
     let cs = e.cache_with("cards", |e| {
         if e.cards.is_empty() {
             return Vec::new();
@@ -1262,22 +1310,28 @@ fn fan_build(c: &mut Ctx, e: &mut Run) {
         (0..n)
             .map(|i| {
                 let im = &e.cards[i % e.cards.len()];
-                card(&if own { im.clone() } else { vary(im, i) }, cw)
+                shadowed(&card(&if own { im.clone() } else { vary(im, i) }, cw), 10.0, 4.0, 110)
             })
             .collect::<Vec<Pixmap>>()
     });
     if cs.is_empty() {
         return;
     }
-    let (px, py, r) = (c.fx, c.fy + c.fw * 0.1, c.fw * 2.15);
+    // a hand of cards held below the chin: every card turns about the same
+    // point, evenly spread, dealt out from the middle one after another
+    let spread = e.f("spread", 110.0).clamp(20.0, 180.0);
+    let (px, py) = (c.fx, c.fy + c.fw * 1.5);
+    let r = c.fw * 2.6;
+    let breathe = 1.5 * (c.lt * 1.6).sin();
     for i in 0..n.min(cs.len()) {
-        let t0 = 0.055 * i as f32;
-        if c.lt < t0 {
-            break;
+        let q = ease_back((c.lt - 0.06 * i as f32) / 0.35);
+        if q <= 0.0 {
+            continue;
         }
-        let q = ease_out((c.lt - t0) / 0.3);
-        let a = -95.0 + (-62.0 + 124.0 * i as f32 / (n.max(2) - 1) as f32 + 95.0) * q;
+        let target = -spread / 2.0 + spread * i as f32 / (n - 1) as f32;
+        let a = target * q + breathe * q;
         let rad = a.to_radians();
-        c.place(&cs[i], px + r * rad.sin(), py - r * rad.cos(), 1.0, -a, al, true, false);
+        let dist = r * (0.55 + 0.45 * q.min(1.0));
+        c.place(&cs[i], px + dist * rad.sin(), py - dist * rad.cos(), 0.8 + 0.2 * q.min(1.0), -a, al * clamp(q * 2.0), true, false);
     }
 }

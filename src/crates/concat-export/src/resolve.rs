@@ -259,9 +259,9 @@ impl FxJob {
         if w == 0 || h == 0 || frame.pixels().len() != w * h * 4 {
             return None;
         }
-        if runs.iter().any(|r| r.covers(t) && r.effect.cards && r.cards.is_empty()) {
+        if runs.iter().any(|r| r.covers(t) && (r.effect.cards || r.o.contains_key("images")) && r.cards.is_empty()) {
             let cards = self.cards();
-            for r in runs.iter_mut().filter(|r| r.effect.cards) {
+            for r in runs.iter_mut().filter(|r| r.effect.cards || r.o.contains_key("images")) {
                 r.cards = Arc::clone(&cards);
             }
         }

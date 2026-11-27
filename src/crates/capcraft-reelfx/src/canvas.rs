@@ -66,6 +66,8 @@ pub enum Kind {
     Didone,
     Didoneb,
     Didonei,
+    /// One of the app's own fonts ([`concat_text::BASE_FONTS`]), by its place there.
+    Base(u16),
 }
 
 impl Kind {
@@ -84,7 +86,7 @@ impl Kind {
             "didone" => Kind::Didone,
             "didoneb" => Kind::Didoneb,
             "didonei" => Kind::Didonei,
-            _ => Kind::Bold,
+            _ => base_names().iter().position(|n| n.eq_ignore_ascii_case(name)).map_or(Kind::Bold, |i| Kind::Base(i as u16)),
         }
     }
 }
@@ -115,8 +117,34 @@ fn load(bytes: &'static [u8], weight: Option<f32>) -> Face {
     }
 }
 
+/// The app's own fonts by their full names, in [`concat_text::BASE_FONTS`]'s order.
+pub fn base_names() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        concat_text::BASE_FONTS
+            .iter()
+            .map(|bytes| {
+                ttf_parser::Face::parse(bytes, 0)
+                    .ok()
+                    .and_then(|f| {
+                        f.names()
+                            .into_iter()
+                            .find(|n| n.name_id == ttf_parser::name_id::FULL_NAME && n.is_unicode())
+                            .and_then(|n| n.to_string())
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()
+    })
+}
+
 /// The face of `kind`.
 pub fn face(kind: Kind) -> &'static Face {
+    if let Kind::Base(i) = kind {
+        static BASE: OnceLock<Vec<Face>> = OnceLock::new();
+        let base = BASE.get_or_init(|| concat_text::BASE_FONTS.iter().map(|b| load(b, None)).collect());
+        return base.get(usize::from(i)).unwrap_or_else(|| face(Kind::Bold));
+    }
     static FACES: OnceLock<Vec<Face>> = OnceLock::new();
     let faces = FACES.get_or_init(|| {
         vec![
@@ -135,7 +163,22 @@ pub fn face(kind: Kind) -> &'static Face {
             load(PLAYFAIR_ITALIC, Some(500.0)),
         ]
     });
-    &faces[kind as usize]
+    let i = match kind {
+        Kind::Bold => 0,
+        Kind::Serif => 1,
+        Kind::Mono => 2,
+        Kind::Hand => 3,
+        Kind::Ui => 4,
+        Kind::Uim => 5,
+        Kind::Uib => 6,
+        Kind::Anton => 7,
+        Kind::Mont => 8,
+        Kind::Montb => 9,
+        Kind::Didone => 10,
+        Kind::Didoneb => 11,
+        Kind::Didonei | Kind::Base(_) => 12,
+    };
+    &faces[i]
 }
 
 struct Outliner<'a> {

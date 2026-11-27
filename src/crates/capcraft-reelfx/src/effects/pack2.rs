@@ -76,13 +76,15 @@ fn glass_widgets(c: &mut Ctx, e: &mut Run) {
     let (w, h) = (c.w as f32, c.h as f32);
     let u = w / 1080.0;
     let al = e.fade(c, 0.2);
-    let gd = e.f("dark", 0.22);
+    let gd = e.f("dark", 0.3);
+    // one accent through every widget
+    let acc = e.color("color", (255, 159, 10));
     let g = |c: &Ctx, ww: f32, hh: f32, cx: f32, cy: f32, r: Option<f32>| c.glass(ww, hh, r.unwrap_or(ww.min(hh) * 0.2), cx, cy, 0.14, WHITE, None, 240.0, gd, true);
     // 1 · stat tile
     let s = 300.0 * u;
     let (ax, ay) = (50.0 * u + s / 2.0, 118.0 * u + s / 2.0);
     let mut a = g(c, s, s, ax, ay, None);
-    canvas::ellipse(&mut a, s * 0.1, s * 0.115, s * 0.16, s * 0.175, Some(op(ORANGE)), None);
+    canvas::ellipse(&mut a, s * 0.1, s * 0.115, s * 0.16, s * 0.175, Some(op(acc)), None);
     text(&mut a, s * 0.2, s * 0.145, &e.s("title", "Studio"), Kind::Uim, s * 0.085, with_a(WHITE, 235), Anchor::LM);
     text(&mut a, s * 0.08, s * 0.2, &e.s("text", "51"), Kind::Uib, s * 0.44, op(WHITE), Anchor::LA);
     for (j, ln) in parts(&e.s("sub", "effects|one clip")).iter().enumerate() {
@@ -94,10 +96,10 @@ fn glass_widgets(c: &mut Ctx, e: &mut Run) {
     let (bx, by) = (w - 50.0 * u - bw / 2.0, 118.0 * u + bh / 2.0);
     let mut b = g(c, bw, bh, bx, by, Some(bh * 0.28));
     let p = ease_inout(c.lt / (e.d * 0.85).max(0.3));
-    canvas::ellipse(&mut b, bh * 0.17, bh * 0.2, bh * 0.28, bh * 0.31, Some((255, 69, 58, 255)), None);
+    canvas::ellipse(&mut b, bh * 0.17, bh * 0.2, bh * 0.28, bh * 0.31, Some(op(acc)), None);
     text(&mut b, bh * 0.36, bh * 0.255, "Rendering", Kind::Uim, bh * 0.19, with_a(WHITE, 240), Anchor::LM);
     canvas::rounded(&mut b, bh * 0.17, bh * 0.5, bw - bh * 0.17, bh * 0.6, bh * 0.05, Some(with_a(WHITE, 70)), None);
-    canvas::rounded(&mut b, bh * 0.17, bh * 0.5, bh * 0.17 + (bw - bh * 0.34) * p.max(0.04), bh * 0.6, bh * 0.05, Some(with_a(WHITE, 245)), None);
+    canvas::rounded(&mut b, bh * 0.17, bh * 0.5, bh * 0.17 + (bw - bh * 0.34) * p.max(0.04), bh * 0.6, bh * 0.05, Some(op(acc)), None);
     text(&mut b, bh * 0.17, bh * 0.78, &format!("4K render  ·  {}%", (p * 100.0) as i32), Kind::Uim, bh * 0.14, with_a(WHITE, 210), Anchor::LM);
     show(c, &b, bx, by, 1, false, al, u);
     // 3 · profile
@@ -112,27 +114,19 @@ fn glass_widgets(c: &mut Ctx, e: &mut Run) {
     let (aw, ah) = (330.0 * u, 330.0 * u);
     let (dx, dy) = (50.0 * u + aw / 2.0, ay + s / 2.0 + 26.0 * u + ah / 2.0);
     let mut art = g(c, aw, ah, dx, dy, Some(44.0 * u));
-    text(&mut art, 24.0 * u, 30.0 * u, "card · views", Kind::Mono, 15.0 * u, with_a(WHITE, 220), Anchor::LM);
-    let mut inn = rrect(aw - 36.0 * u, ah - 74.0 * u, 20.0 * u, (250, 248, 244, 255), None);
-    let (iw, ih) = (inn.width() as f32, inn.height() as f32);
-    for (j, col) in [(255, 95, 87), (255, 189, 46), (40, 200, 64)].into_iter().enumerate() {
-        let x = 14.0 * u + j as f32 * 16.0 * u;
-        canvas::ellipse(&mut inn, x, 14.0 * u, x + 10.0 * u, 24.0 * u, Some(op(col)), None);
-    }
-    text(&mut inn, 16.0 * u, 40.0 * u, "Top reels", Kind::Uib, 26.0 * u, (24, 22, 26, 255), Anchor::LA);
-    text(&mut inn, 16.0 * u, 72.0 * u, "197K", Kind::Anton, 44.0 * u, (200, 85, 61, 255), Anchor::LA);
+    text(&mut art, 26.0 * u, 40.0 * u, "Top reels", Kind::Uim, 20.0 * u, with_a(WHITE, 225), Anchor::LM);
+    text(&mut art, 26.0 * u, 92.0 * u, &e.s("views", "197K"), Kind::Uib, 58.0 * u, op(WHITE), Anchor::LM);
     let vals = [197.0, 140.0, 124.0, 83.0, 50.0, 40.0, 38.0];
-    let (gx0, gx1, gy1) = (16.0 * u, iw - 16.0 * u, ih - 18.0 * u);
-    let bwid = (gx1 - gx0) / 7.0 * 0.66;
+    let (gx0, gx1, gy1) = (26.0 * u, aw - 26.0 * u, ah - 30.0 * u);
+    let bwid = (gx1 - gx0) / 7.0 * 0.62;
     for (j, v) in vals.iter().enumerate() {
         let q = ease_out((c.lt - 0.35 - 0.05 * j as f32) / 0.4);
-        let hh = (ih * 0.42) * v / 197.0 * q;
+        let hh = (ah * 0.4) * v / 197.0 * q;
         let x0 = gx0 + (gx1 - gx0) * j as f32 / 7.0;
         if hh > 1.0 {
-            canvas::rounded(&mut inn, x0, gy1 - hh, x0 + bwid, gy1, 5.0 * u, Some(op(if j == 0 { (242, 196, 109) } else { (200, 85, 61) })), None);
+            canvas::rounded(&mut art, x0, gy1 - hh, x0 + bwid, gy1, bwid / 2.0, Some(if j == 0 { op(acc) } else { with_a(WHITE, 150) }), None);
         }
     }
-    over(&mut art, &inn, (18.0 * u) as i32, (56.0 * u) as i32);
     show(c, &art, dx, dy, 3, false, al, u);
     // 5 · now editing
     let (mw, mh) = (360.0 * u, 220.0 * u);
@@ -174,9 +168,9 @@ fn glass_widgets(c: &mut Ctx, e: &mut Run) {
     let (kw, kh) = (330.0 * u, 190.0 * u);
     let (kx, ky) = (50.0 * u + kw / 2.0, dy + ah / 2.0 + 26.0 * u + kh / 2.0);
     let mut ca = g(c, kw, kh, kx, ky, Some(40.0 * u));
-    text(&mut ca, 26.0 * u, 36.0 * u, &e.s("day", "WED"), Kind::Uib, 22.0 * u, (255, 92, 82, 255), Anchor::LM);
+    text(&mut ca, 26.0 * u, 36.0 * u, &e.s("day", "WED"), Kind::Uib, 22.0 * u, op(acc), Anchor::LM);
     text(&mut ca, 26.0 * u, 82.0 * u, &e.s("date", "21"), Kind::Uib, 56.0 * u, op(WHITE), Anchor::LM);
-    canvas::rounded(&mut ca, 22.0 * u, 120.0 * u, kw - 22.0 * u, 168.0 * u, 12.0 * u, Some((255, 92, 82, 210)), None);
+    canvas::rounded(&mut ca, 22.0 * u, 120.0 * u, kw - 22.0 * u, 168.0 * u, 12.0 * u, Some(with_a(acc, 220)), None);
     text(&mut ca, 36.0 * u, 144.0 * u, &e.s("event", "Post 2 reels · tonight"), Kind::Uib, 22.0 * u, op(WHITE), Anchor::LM);
     show(c, &ca, kx, ky, 5, false, al, u);
     // 7 · 4K ring
@@ -187,7 +181,7 @@ fn glass_widgets(c: &mut Ctx, e: &mut Run) {
     let rr = rr_ * 0.34;
     canvas::ellipse(&mut rg, rr_ / 2.0 - rr, rr_ / 2.0 - rr - 8.0 * u, rr_ / 2.0 + rr, rr_ / 2.0 + rr - 8.0 * u, None, Some((with_a(WHITE, 60), 16.0 * u)));
     if rp > 0.0 {
-        canvas::arc(&mut rg, rr_ / 2.0 - rr, rr_ / 2.0 - rr - 8.0 * u, rr_ / 2.0 + rr, rr_ / 2.0 + rr - 8.0 * u, -90.0, -90.0 + 360.0 * rp, (52, 199, 89, 255), 16.0 * u);
+        canvas::arc(&mut rg, rr_ / 2.0 - rr, rr_ / 2.0 - rr - 8.0 * u, rr_ / 2.0 + rr, rr_ / 2.0 + rr - 8.0 * u, -90.0, -90.0 + 360.0 * rp, op(acc), 16.0 * u);
     }
     text(&mut rg, rr_ / 2.0, rr_ / 2.0 - 8.0 * u, "4K", Kind::Uib, 52.0 * u, op(WHITE), Anchor::MM);
     text(&mut rg, rr_ / 2.0, rr_ - 26.0 * u, "render", Kind::Uim, 20.0 * u, with_a(WHITE, 210), Anchor::MM);
@@ -255,13 +249,14 @@ pub(crate) const RED_COLLAGE: Effect = Effect {
     name: "red-collage",
     title: "Red Collage",
     desc: "Black and white you, a giant red word behind, three lines slam in",
-    options: "text: the red word; lines joined with |; tag; color",
+    options: "text: the red word; lines joined with |; tag; color; photo: bw or color; strength: how solid the word is (0 to 1)",
     cards: false,
     draw: red_collage,
 };
 fn red_collage(c: &mut Ctx, e: &mut Run) {
     let k = e.ramp(c, 0.15, 0.0);
-    let bw = c.graded(Grade::Bw);
+    // the room in black and white (or as shot), darkened behind you
+    let bw = if e.s("photo", "bw") == "color" { c.img.clone() } else { c.graded(Grade::Bw) };
     let mut out = bw.clone();
     for i in 0..c.w * c.h {
         let m = c.m[i];
@@ -275,10 +270,11 @@ fn red_collage(c: &mut Ctx, e: &mut Run) {
     let al = e.fade(c, 0.2);
     let (w, h) = (c.w as f32, c.h as f32);
     let word = e.s("text", "EDIT").to_uppercase();
-    let wim = e.cache("w", || fit_text(&word, w * 0.98, Kind::Uib, 700.0, red, Look { glow: Some((red, 34.0)), ..Look::default() }));
+    // the word sits in the room rather than glowing on it
+    let wim = e.cache("w", || fit_text(&word, w * 0.98, Kind::Uib, 700.0, red, Look { shadow: 14.0, ..Look::default() }));
     let s = 1.12 - 0.12 * ease_out(c.lt / 0.4);
     let y = (wim.height() as f32 * 0.42).max(c.fy - c.fw * 1.05);
-    c.place(&wim, w / 2.0, y, s, 0.0, clamp(c.lt / 0.12) * al, true, false);
+    c.place(&wim, w / 2.0, y, s, 0.0, clamp(c.lt / 0.12) * al * e.f("strength", 0.8), true, false);
     let lines = parts(&e.s("lines", "ONE CLIP.|51 EFFECTS.|ZERO APPS."));
     let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
     let size = *e.cache("sz", || lines_fit(&refs, w * 0.8, Kind::Uib, (w * 0.14).floor()));
@@ -369,7 +365,7 @@ pub(crate) const PASTEL_WORD: Effect = Effect {
     name: "pastel-word",
     title: "Pastel Word",
     desc: "Lavender room, a giant word behind you, a profile card gets followed",
-    options: "text; name; handle; role",
+    options: "text; name; handle; role; color: the wall at the top; bg: the wall at the foot; ink: the word",
     cards: false,
     draw: pastel_word,
 };
@@ -378,11 +374,14 @@ fn pastel_word(c: &mut Ctx, e: &mut Run) {
     let k = e.ramp(c, 0.2, 0.0);
     let al = e.fade(c, 0.2);
     let mut target = vec![0f32; c.img.len()];
+    // the wall: one pastel at the top fading to another at the foot
+    let (top, foot) = (e.color("color", (179, 171, 247)), e.color("bg", (237, 230, 255)));
+    let (top, foot) = ([top.0, top.1, top.2].map(|v| f32::from(v) / 255.0), [foot.0, foot.1, foot.2].map(|v| f32::from(v) / 255.0));
     for y in 0..c.h {
         for x in 0..c.w {
             let i = y * c.w + x;
             let t = ((y as f32 / h) * 0.8 + (x as f32 / w) * 0.2).clamp(0.0, 1.0);
-            let g = [0.70 * (1.0 - t) + 0.93 * t, 0.67 * (1.0 - t) + 0.90 * t, 0.97 * (1.0 - t) + t];
+            let g = [0, 1, 2].map(|ch| top[ch] * (1.0 - t) + foot[ch] * t);
             let p = c.px(i);
             let lum = p[0] * 0.299 + p[1] * 0.587 + p[2] * 0.114;
             let m = c.m[i];
@@ -395,7 +394,8 @@ fn pastel_word(c: &mut Ctx, e: &mut Run) {
     }
     c.mix_with(&target, k);
     let word = e.s("text", "REELS").to_uppercase();
-    let wim = e.cache("w", || shadowed(&fit_text(&word, w * 0.96, Kind::Uib, 700.0, WHITE, Look::default()), 24.0, 12.0, 60));
+    let ink = e.color("ink", WHITE);
+    let wim = e.cache("w", || shadowed(&fit_text(&word, w * 0.96, Kind::Uib, 700.0, ink, Look::default()), 24.0, 12.0, 60));
     let dk = ease_out(c.lt / 0.45);
     let y = (wim.height() as f32 * 0.45).max(c.fy - c.fw * 1.2) - (1.0 - dk) * h * 0.06;
     c.place(&wim, w / 2.0, y, 1.0, 0.0, al * clamp(c.lt / 0.15), true, false);
@@ -504,14 +504,15 @@ pub(crate) const TIMELINE: Effect = Effect {
     name: "timeline",
     title: "Timeline",
     desc: "A dark red film look with an editing timeline, a REC timecode and a glowing playhead",
-    options: "text: the title; sub; tc; color",
+    options: "text: the title; sub; tc; color; opacity (1)",
     cards: false,
     draw: timeline,
 };
 fn timeline(c: &mut Ctx, e: &mut Run) {
     let (w, h) = (c.w as f32, c.h as f32);
-    let k = e.ramp(c, 0.2, 0.0);
-    let al = e.fade(c, 0.2);
+    let see = e.f("opacity", 1.0).clamp(0.0, 1.0);
+    let k = e.ramp(c, 0.2, 0.0) * see;
+    let al = e.fade(c, 0.2) * see;
     let mut target = c.img.clone();
     for i in 0..c.w * c.h {
         let p = c.px(i);
@@ -574,7 +575,7 @@ pub(crate) const HEADLINE_BOX: Effect = Effect {
     name: "headline-box",
     title: "Headline Box",
     desc: "A punch-in with a clean two-line headline, the second line in a white box",
-    options: "text: lines joined with |; zoom (1.2)",
+    options: "text: lines joined with |; zoom (1.2); box: which line is boxed (1 to 3); color: the box; ink: its words",
     cards: false,
     draw: headline_box,
 };
@@ -600,11 +601,13 @@ fn boxed_lines(c: &mut Ctx, e: &mut Run, lines: &[String], start: f32, grow: boo
             y += s * 1.3;
             continue;
         }
-        let boxed = j == n - 1;
-        let t = e.cache(&format!("t{j}"), || text_img(ln, s, Kind::Uib, if boxed { (16, 16, 18) } else { WHITE }, Look { shadow: if boxed { 0.0 } else { 9.0 }, ..Look::default() }));
+        // the line in the box: the last unless one is chosen
+        let boxed = j + 1 == (e.f("box", n as f32).round() as usize).clamp(1, n);
+        let (paper, ink) = (e.color("color", WHITE), e.color("ink", (16, 16, 18)));
+        let t = e.cache(&format!("t{j}"), || text_img(ln, s, Kind::Uib, if boxed { ink } else { WHITE }, Look { shadow: if boxed { 0.0 } else { 9.0 }, ..Look::default() }));
         let tw = t.width() as f32;
         if boxed {
-            let bx = rrect(tw - s * 0.15, s * 1.22, s * 0.08, op(WHITE), None);
+            let bx = rrect(tw - s * 0.15, s * 1.22, s * 0.08, op(paper), None);
             let bx = if grow {
                 let wk = ease_out(kj);
                 canvas::crop(&bx, 0.0, 0.0, (bx.width() as f32 * wk).max(1.0), bx.height() as f32)
@@ -1133,7 +1136,7 @@ pub(crate) const COMMENT_BOX: Effect = Effect {
     name: "comment-box",
     title: "Comment Box",
     desc: "A comments sheet above your head types your word, posts it, gets a heart and your reply",
-    options: "text: the comment (EFFECTS); handle; reply; chip; look: bar for the plain comment bar",
+    options: "text: the comment (EFFECTS); you: who comments; handle: who replies; reply; chip; look: bar for the plain comment bar",
     cards: false,
     draw: comment_box,
 };
@@ -1148,7 +1151,8 @@ fn comment_box(c: &mut Ctx, e: &mut Run) {
     let handle = e.s("handle", "your.handle");
     let reply = e.s("reply", "Sent you the pack");
     let chip = e.s("chip", "51 effects");
-    let (sw, sh) = (740.0 * u, 450.0 * u);
+    let me = e.s("you", "you");
+    let (sw, sh) = (740.0 * u, 390.0 * u);
     let t_post = 0.3 + 0.06 * word.chars().count() as f32 + 0.1;
     let (t_heart, t_rep) = (t_post + 0.25, t_post + 0.4);
     let mut sheet = rrect(sw, sh, 30.0 * u, (38, 38, 40, 248), None);
@@ -1160,7 +1164,7 @@ fn comment_box(c: &mut Ctx, e: &mut Run) {
     let avatar = |sz: f32| {
         let mut a = blank(sz, sz);
         canvas::ellipse(&mut a, 0.0, 0.0, sz - 1.0, sz - 1.0, Some(op(PURPLE)), None);
-        text(&mut a, sz / 2.0, sz / 2.0, "Y", Kind::Uib, sz * 0.5, op(WHITE), Anchor::MM);
+        text(&mut a, sz / 2.0, sz / 2.0, &me.chars().next().unwrap_or('Y').to_uppercase().to_string(), Kind::Uib, sz * 0.5, op(WHITE), Anchor::MM);
         a
     };
     let a8 = |v: (u8, u8, u8, u8), a: u8| (v.0, v.1, v.2, a);
@@ -1171,9 +1175,9 @@ fn comment_box(c: &mut Ctx, e: &mut Run) {
         let oy = (1.0 - q) * -20.0 * u;
         let a = (255.0 * clamp(q * 1.5)) as u8;
         canvas::over_a(&mut sheet, &avatar(46.0 * u), (26.0 * u) as i32, (100.0 * u + oy) as i32, f32::from(a) / 255.0);
-        text(&mut sheet, 88.0 * u, 108.0 * u + oy, "you", Kind::Uib, 19.0 * u, a8(white, a), Anchor::LM);
-        text(&mut sheet, 88.0 * u + canvas::length(Kind::Uib, 19.0 * u, "you ") + 4.0 * u, 108.0 * u + oy, "now", Kind::Uim, 18.0 * u, a8(grey, a), Anchor::LM);
-        text(&mut sheet, 86.0 * u, 128.0 * u + oy, &word, Kind::Uib, 50.0 * u, a8(white, a), Anchor::LA);
+        text(&mut sheet, 88.0 * u, 108.0 * u + oy, &me, Kind::Uib, 19.0 * u, a8(white, a), Anchor::LM);
+        text(&mut sheet, 88.0 * u + canvas::length(Kind::Uib, 19.0 * u, &format!("{me} ")) + 4.0 * u, 108.0 * u + oy, "now", Kind::Uim, 18.0 * u, a8(grey, a), Anchor::LM);
+        text(&mut sheet, 88.0 * u, 134.0 * u + oy, &word, Kind::Uim, 26.0 * u, a8(white, a), Anchor::LA);
         text(&mut sheet, 88.0 * u, 196.0 * u + oy, "Reply", Kind::Uim, 17.0 * u, a8(grey, a), Anchor::LM);
         let hk = ease_back((c.lt - t_heart) / 0.3);
         if hk > 0.0 {
@@ -1200,21 +1204,15 @@ fn comment_box(c: &mut Ctx, e: &mut Run) {
             }
         }
     }
-    // the reactions row: plain dots in warm colours where an emoji set would be
-    let ey = sh - 140.0 * u;
-    for (j, col) in [(255, 72, 96), (255, 196, 64), (255, 120, 48), (250, 200, 120), (120, 170, 255), (255, 140, 180), (200, 160, 255), (255, 215, 90)].into_iter().enumerate() {
-        let x = 36.0 * u + j as f32 * (sw - 72.0 * u - 36.0 * u) / 7.0;
-        canvas::ellipse(&mut sheet, x, ey, x + 36.0 * u, ey + 36.0 * u, Some(op(col)), None);
-    }
     let iy = sh - 78.0 * u;
     over(&mut sheet, &avatar(48.0 * u), (22.0 * u) as i32, iy as i32);
     canvas::rounded(&mut sheet, 82.0 * u, iy, sw - 22.0 * u, iy + 48.0 * u, 24.0 * u, Some((54, 54, 58, 255)), None);
     let n = word.chars().count().max(1);
     let typed: String = if c.lt < t_post { word.chars().take((clamp((c.lt - 0.3) / (0.06 * n as f32)) * n as f32 + 1e-3) as usize).collect() } else { String::new() };
     if !typed.is_empty() {
-        text(&mut sheet, 104.0 * u, iy + 24.0 * u, &typed, Kind::Uib, 26.0 * u, white, Anchor::LM);
+        text(&mut sheet, 104.0 * u, iy + 24.0 * u, &typed, Kind::Uim, 22.0 * u, white, Anchor::LM);
         if (c.lt * 4.0) as i32 % 2 == 1 {
-            let tl = canvas::length(Kind::Uib, 26.0 * u, &typed);
+            let tl = canvas::length(Kind::Uim, 22.0 * u, &typed);
             canvas::rect(&mut sheet, 104.0 * u + tl + 3.0 * u, iy + 10.0 * u, 106.0 * u + tl + 3.0 * u, iy + 38.0 * u, op(BLUE));
         }
     } else {

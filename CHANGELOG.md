@@ -6,6 +6,13 @@ dated, as the licence asks; `#` numbers are the original project's.
 ## Unreleased
 
 ### 27 November 2026
+- Reel FX settings by kind: sliders for numbers, colour dots, a line-by-line editor for lists, chips for looks, shapes
+  and every app font; tap a selected effect on the preview to edit its words there, and drag Swipe's line, The Tap,
+  Wave Trim, Pause & Point's label, Reject Stamp and Messages into place. A new effect shows itself as soon as it is
+  added, and a Sound row adds one of the built-in sounds at its start. Reel Frame has the full icon column with counts;
+  Countdown Flip has looks; Scribble has shapes; Spotlight has light presets; Fan Build, Tape Label and Glass Widgets
+  are redrawn; Match Cut takes your own pictures; Carousel Spin's near panels pass in front of you.
+- Atmosphere: the filter row is gone and the settings scroll, so the light sliders no longer overlap.
 - Reel FX on the timeline: Effects > Reel FX lays each effect on the effects row as an item of its own, drawn on the
   pictures beneath it - move it, trim or extend it, and key its opacity to fade it in and out. Each effect shows only
   the settings it reads (Swipe's after look and Backdrop Word's font as choices), not a generic words box.

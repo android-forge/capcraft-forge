@@ -327,6 +327,7 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.EraseSurface(vm, Modifier.fillMaxSize())
             } else if (!vm.fullscreen) {
                 PreviewOverlay(vm, Modifier.fillMaxSize())
+                io.github.artcraftandroid.capcraft.ui.editor.panels.ReelWordsBox(vm)
             }
             if (vm.scopes && vm.panel == Panel.Adjust && !vm.fullscreen) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.ScopesOverlay(image, Modifier.align(Alignment.TopEnd))
