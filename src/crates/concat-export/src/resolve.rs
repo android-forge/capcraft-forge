@@ -219,7 +219,7 @@ pub(crate) struct BuiltTimeline {
     /// The clip's applied effects: the passes are resolved from them at
     /// each frame, because a knob with keys is worth something different
     /// each frame and the resolution is cheap.
-    pub(crate) chains: HashMap<ClipId, Vec<AppliedFilter>>,
+    pub(crate) chains: HashMap<ClipId, Vec<concat_effects::AppliedFilter>>,
     /// A title's per-word reveal order, for the clips that have one -
     /// carried beside `chains` rather than inside it, since it is baked
     /// once by the host and never resolved per frame the way effects are.
@@ -283,7 +283,7 @@ pub(crate) struct Treatment {
     pub(crate) track: usize,
     /// The layer's applied effects, resolved to passes at each frame, so a
     /// keyed knob rides.
-    pub(crate) effects: Vec<AppliedFilter>,
+    pub(crate) effects: Vec<concat_effects::AppliedFilter>,
     pub(crate) strength: f32,
     pub(crate) ramp_in: f64,
     pub(crate) ramp_out: f64,
@@ -338,7 +338,7 @@ pub(crate) fn build_timeline(
     let mut geometry: HashMap<ClipId, PlannedGeometry> = HashMap::new();
     let mut shapes: HashMap<ClipId, Vec<crate::TransitionShape>> = HashMap::new();
     let mut ranges: HashMap<ClipId, concat_media::ColorRange> = HashMap::new();
-    let mut chains: HashMap<ClipId, Vec<AppliedFilter>> = HashMap::new();
+    let mut chains: HashMap<ClipId, Vec<concat_effects::AppliedFilter>> = HashMap::new();
     let mut reveal_maps: HashMap<ClipId, Arc<RevealMap>> = HashMap::new();
     let mut cutouts: HashMap<ClipId, CutoutJob> = HashMap::new();
     let mut backdrops: HashMap<ClipId, crate::ExportBackdrop> = HashMap::new();
@@ -533,7 +533,7 @@ pub(crate) fn planned_geometry(clip: &ExportClip) -> Option<PlannedGeometry> {
 /// The enabled entries of a chain whose package has a shader: the ones
 /// resolved to passes each frame. A link to a package not installed here
 /// draws nothing.
-pub(crate) fn shaded(effects: &[AppliedFilter]) -> Vec<AppliedFilter> {
+pub(crate) fn shaded(effects: &[AppliedFilter]) -> Vec<concat_effects::AppliedFilter> {
     let catalogue = Catalogue::builtin();
     effects
         .iter()
@@ -543,7 +543,7 @@ pub(crate) fn shaded(effects: &[AppliedFilter]) -> Vec<AppliedFilter> {
                     .get(&applied.id)
                     .is_some_and(|package| package.shader().is_some())
         })
-        .cloned()
+        .map(crate::chains::engine_filter)
         .collect()
 }
 

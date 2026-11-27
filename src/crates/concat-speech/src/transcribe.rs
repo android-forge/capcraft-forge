@@ -1149,6 +1149,7 @@ impl Transcriber {
                 channels: 1,
                 format: SampleFormat::F32,
                 stream: request.audio_stream.map(|index| index as usize),
+                stretch: None,
             },
         )
         .map_err(|error| error.to_string())?;
@@ -2184,6 +2185,7 @@ mod accuracy {
                             channels: 1,
                             format: SampleFormat::F32,
                             stream: None,
+                            stretch: None,
                         },
                     )
                     .and_then(|mut decoder| decoder.collect_f32())

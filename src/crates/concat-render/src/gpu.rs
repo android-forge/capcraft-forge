@@ -457,6 +457,27 @@ fn rung_flags(software: bool) -> wgpu::InstanceFlags {
     }
 }
 
+/// The wgpu instance a device on `rung` is asked of: its APIs, its flags
+/// ([`rung_flags`]), the memory budget, and FXC for DX12's shaders.
+pub(crate) fn instance_for(rung: Rung) -> wgpu::Instance {
+    let mut descriptor = wgpu::InstanceDescriptor {
+        backends: rung.backends,
+        flags: rung_flags(rung.software),
+        memory_budget_thresholds: memory_budget(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    };
+    // FXC, never wgpu's default `Auto`: Concat ships no dxcompiler.dll,
+    // so `Auto` loads whichever one Windows finds on PATH - Obsidian's or
+    // another Electron app's - and a build that does not match wgpu, or
+    // needs instructions the CPU lacks, kills the process at the first
+    // shader (0xc000001d). FXC is in System32 and is what every machine
+    // without a stray DXC already compiles with (#418). WGPU_DX12_COMPILER
+    // still picks another, for trying DXC on a real GPU (#297).
+    descriptor.backend_options.dx12.shader_compiler =
+        wgpu::Dx12Compiler::from_env().unwrap_or(wgpu::Dx12Compiler::Fxc);
+    wgpu::Instance::new(descriptor)
+}
+
 /// Whether `CONCAT_WARP_SHADERS=optimised` asks for WARP's shaders to be
 /// compiled as a GPU's are; see [`rung_flags`].
 fn warp_shaders_optimised() -> bool {
@@ -1096,21 +1117,31 @@ struct PooledTexture {
 /// the monitor has shown finds its frames on the device.
 ///
 /// Chosen by what the textures cost the machine. On a card of its own they
-/// live in the card's memory, which nothing else in the app wants: 512 MB,
-/// 64 frames at 1080p. On integrated graphics - Intel, AMD's APUs, Apple's
-/// chips - and on a virtual GPU they come out of system memory beside the
-/// frame cache, so half that; on the software adapter they are system
-/// memory outright, so a quarter.
-pub fn pool_budget_for(device: wgpu::DeviceType) -> u64 {
+/// live in the card's memory: 512 MB, 64 frames at 1080p, but never more
+/// than a fifth of what the driver gives this process of the card
+/// (`card_budget`), since the window, the effects and the video decoders
+/// live there too - a flat 512 MB was a third of a 2 GB card, which ran
+/// out (#873). On integrated graphics - Intel, AMD's APUs, Apple's chips -
+/// and on a virtual GPU they come out of system memory beside the frame
+/// cache, so half that; on the software adapter they are system memory
+/// outright, so a quarter.
+pub fn pool_budget_for(device: wgpu::DeviceType, card_budget: Option<u64>) -> u64 {
     const MB: u64 = 1024 * 1024;
     match device {
-        wgpu::DeviceType::DiscreteGpu => 512 * MB,
+        wgpu::DeviceType::DiscreteGpu => {
+            card_budget.map_or(512 * MB, |budget| (budget / 5).clamp(POOL_FLOOR, 512 * MB))
+        }
         wgpu::DeviceType::Cpu => 128 * MB,
         wgpu::DeviceType::IntegratedGpu
         | wgpu::DeviceType::VirtualGpu
         | wgpu::DeviceType::Other => 256 * MB,
     }
 }
+
+/// The least the layer pool is let shrink to, by the card's size or by the
+/// card running out (see `pressure_seen`): two 1080p frames at half float
+/// and change, enough for a composite of a few layers to draw.
+const POOL_FLOOR: u64 = 48 * 1024 * 1024;
 
 /// The LUTs and the reveal maps kept on the device, at most: a look is a
 /// megabyte at 65 a side, and each one a person tries stayed on the device
@@ -1286,8 +1317,13 @@ pub struct WgpuCompositor {
     pool: HashMap<(u32, u32), Vec<PooledTexture>>,
     /// What the pool's textures hold, in bytes; see [`pool_budget_for`].
     pool_bytes: u64,
-    /// What `pool_bytes` may reach; see [`pool_budget_for`].
+    /// What `pool_bytes` may reach; see [`pool_budget_for`]. Halved each
+    /// time a device of the process runs out of memory, down to
+    /// [`POOL_FLOOR`].
     pool_budget: u64,
+    /// [`crate::memory::pressure`] as last read: a change since says a
+    /// device has run out of memory and the pool must hold less.
+    pressure_seen: u64,
     /// How many textures the pool holds; see [`POOL_TEXTURES`].
     pool_textures: usize,
     /// Composites drawn so far; see [`PooledTexture::drawn`].
@@ -1307,10 +1343,14 @@ pub struct WgpuCompositor {
     white: std::sync::Arc<Frame>,
     /// The mask pass's module: the shared mask arithmetic and the pass.
     mask_stack_source: std::sync::Arc<str>,
-    /// Set when a readback fails - a lost or reset device. The compositor
-    /// then answers every composite from the CPU reference instead: slower,
-    /// always correct, and never a panic in the middle of an export.
+    /// Set once the device is given up: when it says it is gone - its lost
+    /// callback, Direct3D 12's removed reason - or after [`STRIKES`] frames
+    /// in a row failed on it. The compositor then answers every composite
+    /// black and `lost` says so, and the caller draws on the next device.
     dead: bool,
+    /// Frames in a row that failed on a device that said it was still
+    /// there; see [`WgpuCompositor::failed_frame`].
+    strikes: u32,
     /// Set by the device's lost callback, from whatever thread wgpu calls
     /// it on, and read as `dead` is: a device Direct3D removed outright
     /// (#673) was otherwise only noticed by a readback, and a picture drawn
@@ -1587,7 +1627,7 @@ impl WgpuCompositor {
     }
 
     /// [`WgpuCompositor::new`]'s order of asking: the platform's own API,
-    /// then every API wgpu was built with. `software_only` leaves the
+    /// then, except on Windows, every API wgpu was built with. `software_only` leaves the
     /// hardware adapters out.
     fn own_api_first(software_only: bool) -> Option<Self> {
         Self::rungs_for(software_only)
@@ -1634,8 +1674,18 @@ impl WgpuCompositor {
         } else {
             &[false, true]
         };
-        [own, wgpu::Backends::all()]
-            .into_iter()
+        // Then every API wgpu was built with - but not on Windows, where
+        // that adds OpenGL alone, and OpenGL there is a driver's least-run
+        // path: an MCP preview whose DX12 adapters both failed stepped onto
+        // NVIDIA's GL driver and died in it with the whole process (#875).
+        // Below DX12's two the CPU draws instead, slower, and says so.
+        let apis: &[wgpu::Backends] = if cfg!(windows) {
+            &[own]
+        } else {
+            &[own, wgpu::Backends::all()]
+        };
+        apis.iter()
+            .copied()
             .flat_map(|backends| {
                 choices
                     .iter()
@@ -1648,22 +1698,7 @@ impl WgpuCompositor {
     /// opens no device there.
     pub fn on_rung(rung: Rung) -> Option<Self> {
         let Rung { backends, software } = rung;
-        let mut descriptor = wgpu::InstanceDescriptor {
-            backends,
-            flags: rung_flags(software),
-            memory_budget_thresholds: memory_budget(),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        };
-        // FXC, never wgpu's default `Auto`: Concat ships no dxcompiler.dll,
-        // so `Auto` loads whichever one Windows finds on PATH - Obsidian's or
-        // another Electron app's - and a build that does not match wgpu, or
-        // needs instructions the CPU lacks, kills the process at the first
-        // shader (0xc000001d). FXC is in System32 and is what every machine
-        // without a stray DXC already compiles with (#418). WGPU_DX12_COMPILER
-        // still picks another, for trying DXC on a real GPU (#297).
-        descriptor.backend_options.dx12.shader_compiler =
-            wgpu::Dx12Compiler::from_env().unwrap_or(wgpu::Dx12Compiler::Fxc);
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = instance_for(rung);
         {
             let adapter =
                 match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -1843,6 +1878,50 @@ impl WgpuCompositor {
         self.dead || self.gone.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// A frame failed on this device: whether that costs the device is
+    /// asked of the device. Only the device can say it is gone - its lost
+    /// callback (`gone`), or Direct3D 12's removed reason - and a timeout,
+    /// a map nobody answered, a refused call or memory run short is a
+    /// frame that failed, drawn again on the same device. Guessing a loss
+    /// from those gave up a working RTX 3060 mid-export for Windows'
+    /// software renderer, five times slower, though Direct3D 12 said both
+    /// times the device was not removed (#868). A device that fails
+    /// [`STRIKES`] frames in a row is given up all the same: alive or
+    /// not, it is not drawing.
+    fn failed_frame(&mut self) {
+        self.strikes += 1;
+        let gone =
+            self.gone.load(std::sync::atomic::Ordering::Relaxed) || removed(&self.device).is_some();
+        if gone || self.strikes >= STRIKES {
+            self.dead = true;
+            return;
+        }
+        log::warn!(
+            "gpu: a frame failed on {}, which says it is still there; drawing it again on \
+             the same device ({} of {STRIKES})",
+            self.device.adapter_info().name,
+            self.strikes
+        );
+    }
+
+    /// A frame came back whole: the device's strikes start again.
+    fn drew_frame(&mut self) {
+        self.strikes = 0;
+    }
+
+    /// The oldest frame in flight failed. On a device that is given up it
+    /// comes back black, and `lost` says so; on one that is not, nothing
+    /// comes back and every frame still in flight is let go, so the caller
+    /// draws them all again, in order, on this device.
+    fn failed_in_flight(&mut self, black: crate::Drawn) -> Option<crate::Drawn> {
+        self.failed_frame();
+        if self.dead() {
+            return Some(black);
+        }
+        self.in_flight.clear();
+        None
+    }
+
     /// Says once, in the log, that this compositor has given up its device
     /// and why: the adapter and its driver, what the device's own API says
     /// happened where it can say (Direct3D 12's removed reason), what wgpu
@@ -1916,6 +1995,17 @@ impl WgpuCompositor {
         self
     }
 
+    /// This compositor on a device whose uncaptured-error handler, the
+    /// caller's, adds one to `uncaught` for every error no scope caught:
+    /// a composite drawn under one is then known to be wrong (see
+    /// [`Compositor::render`]), as on a device this opened itself, whose
+    /// handler counts into it. A device the window opened handed its
+    /// compositor a count nothing ever added to.
+    pub fn counting(mut self, uncaught: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+        self.uncaught = uncaught;
+        self
+    }
+
     /// A second compositor on this one's device, with pipelines, pools and
     /// caches of its own: work on another thread - the effect cards -
     /// shares the GPU's time with this one and nothing else, so it never
@@ -1955,7 +2045,10 @@ impl WgpuCompositor {
     /// [`WORK_FALLBACK`] where the device cannot draw into that.
     fn drawing_in(device: wgpu::Device, queue: wgpu::Queue, work: wgpu::TextureFormat) -> Self {
         // Read before the device moves into the compositor below.
-        let budget = pool_budget_for(device.adapter_info().device_type);
+        let card = crate::memory::Memory::of_device(&device)
+            .card()
+            .and_then(|heap| heap.budget);
+        let budget = pool_budget_for(device.adapter_info().device_type, card);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("concat compositor"),
             source: wgpu::ShaderSource::Wgsl(format!("{MASK_WGSL}{SHADER}").into()),
@@ -2397,6 +2490,7 @@ impl WgpuCompositor {
             pool: HashMap::new(),
             pool_bytes: 0,
             pool_budget: budget,
+            pressure_seen: crate::memory::pressure(),
             pool_textures: 0,
             composites: 0,
             uploads: 0,
@@ -2414,6 +2508,7 @@ impl WgpuCompositor {
             },
             mask_stack_source: format!("{MASK_WGSL}{MASK_STACK_WGSL}").into(),
             dead: false,
+            strikes: 0,
             gone: std::sync::Arc::default(),
             lost_reason: std::sync::Arc::default(),
             post_mortem: None,
@@ -2453,6 +2548,41 @@ impl WgpuCompositor {
                 timeout: Some(DEVICE_WAIT),
             })
             .map(drop)
+    }
+
+    /// A buffer map's answer, waited for; None when none will come.
+    ///
+    /// The answer is handed over by whichever thread's poll of the device
+    /// serves it, and that need not be this one's: a second compositor on
+    /// the device - an export beside the monitor, the effect cards - can
+    /// take the answer up in its own poll and hand it over a moment after
+    /// this thread's poll has come back with nothing left to do. Looking
+    /// once and finding nothing there was read as a dead device, and the
+    /// monitor drew on the processor, without effects, until Concat was
+    /// started again. So the answer is waited for, the device polled
+    /// between looks in case it is this thread that has to serve it, for
+    /// as long as any wait on the device is given.
+    fn answered(
+        &self,
+        mapped: &std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    ) -> Option<Result<(), wgpu::BufferAsyncError>> {
+        use std::sync::mpsc::RecvTimeoutError;
+        let began = std::time::Instant::now();
+        loop {
+            match mapped.recv_timeout(std::time::Duration::from_millis(1)) {
+                Ok(answer) => return Some(answer),
+                // The map was let go unanswered: its device is gone.
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.gone.load(std::sync::atomic::Ordering::Relaxed)
+                        || began.elapsed() >= DEVICE_WAIT
+                    {
+                        return None;
+                    }
+                    let _ = self.device.poll(wgpu::PollType::Poll);
+                }
+            }
+        }
     }
 
     /// What a pooled texture costs a pixel, in the working format.
@@ -3158,7 +3288,7 @@ impl WgpuCompositor {
             self.dead = true;
             return None;
         }
-        if !matches!(mapped_rx.try_recv(), Ok(Ok(()))) {
+        if !matches!(self.answered(&mapped_rx), Some(Ok(()))) {
             return None;
         }
         let data = slice.get_mapped_range().ok()?;
@@ -3342,6 +3472,25 @@ impl WgpuCompositor {
             REVEAL_CACHE,
             self.composites,
         );
+        // A device of this process ran out of memory since the last
+        // composite: the card is fuller than the budget allowed for -
+        // other programs took theirs, or the decoders and the window hold
+        // more than was thought - so the pool holds half as much from now
+        // on, and lets the rest go below. Every draw refused for memory
+        // until then was a frame lost, and in #873 the device next.
+        let pressure = crate::memory::pressure();
+        if pressure != self.pressure_seen {
+            self.pressure_seen = pressure;
+            let halved = (self.pool_budget / 2).max(POOL_FLOOR);
+            if halved < self.pool_budget {
+                log::warn!(
+                    "compositor: the card ran out of memory; its layer textures held to {} from {}",
+                    concat_log::bytes(halved),
+                    concat_log::bytes(self.pool_budget)
+                );
+                self.pool_budget = halved;
+            }
+        }
         // Back under budget, least recently drawn first, never a texture
         // this composite claimed: a pool grows past the budget only when
         // one composite needs that much.
@@ -4623,13 +4772,13 @@ impl WgpuCompositor {
             );
             return None;
         }
-        match mapped_rx.try_recv() {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
+        match self.answered(&mapped_rx) {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
                 log::error!("GPU readback: the frame's buffer would not map: {error}");
                 return None;
             }
-            Err(_) => {
+            None => {
                 log::error!("GPU readback: the device finished without answering the map");
                 return None;
             }
@@ -4757,9 +4906,11 @@ impl WgpuCompositor {
             failed,
         } = readback;
         let black = || crate::Drawn::Rgba(Frame::black(shape.width, shape.height));
-        if self.dead() || failed {
-            self.dead = true;
+        if self.dead() {
             return Some(black());
+        }
+        if failed {
+            return self.failed_in_flight(black());
         }
         let waited = self.device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission),
@@ -4769,20 +4920,17 @@ impl WgpuCompositor {
             log::error!(
                 "GPU readback: the device did not finish the frame within {DEVICE_WAIT:?}: {error}"
             );
-            self.dead = true;
-            return Some(black());
+            return self.failed_in_flight(black());
         }
-        match mapped.try_recv() {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
+        match self.answered(&mapped) {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
                 log::error!("GPU readback: the frame's buffer would not map: {error}");
-                self.dead = true;
-                return Some(black());
+                return self.failed_in_flight(black());
             }
-            Err(_) => {
+            None => {
                 log::error!("GPU readback: the device finished without answering the map");
-                self.dead = true;
-                return Some(black());
+                return self.failed_in_flight(black());
             }
         }
         let frame = shape.drawn_from(&staging);
@@ -4793,11 +4941,11 @@ impl WgpuCompositor {
             self.spare.push(staging);
         }
         match frame {
-            Some(frame) => Some(frame),
-            None => {
-                self.dead = true;
-                Some(black())
+            Some(frame) => {
+                self.drew_frame();
+                Some(frame)
             }
+            None => self.failed_in_flight(black()),
         }
     }
 }
@@ -4805,6 +4953,10 @@ impl WgpuCompositor {
 /// How many frames [`Compositor::submit`] keeps on their way back at most,
 /// and how many spare staging buffers are kept for them.
 const READBACKS: usize = 3;
+
+/// Frames in a row that may fail on a device that says it is still there
+/// before it is given up anyway; see [`WgpuCompositor::failed_frame`].
+const STRIKES: u32 = 3;
 
 /// One plane of a read-back frame: where its rows start in the staging
 /// buffer, how far apart they are there, and how much of each is picture.
@@ -5055,59 +5207,23 @@ impl Compositor for WgpuCompositor {
     fn render(&mut self, plan: &FramePlan) -> Frame {
         // A dead device never comes back for this instance. What it hands
         // back is black, never a mid-export panic, and `lost` says so: the
-        // export stops with an error rather than write a file of black.
-        if self.dead() {
-            self.say_why(|| plan.summary());
-            return Frame::black(plan.width, plan.height);
-        }
-        // Whatever the device says went wrong with this frame is caught
-        // here: memory it ran out of - an 8 GB card shared with the
-        // window, the decoder and the encoder (#297) - or a call it
-        // refused. Uncaught, it was logged and the frame went to the
-        // encoder wrong (audit 2026-10-11, finding 8). A frame drawn under
-        // one is a failed frame, as a failed readback is: the compositor is
-        // dead, and the export draws it again on a fresh device. The
-        // passes' own scopes inside still catch what they catch first, and
-        // what a scope misses still reaches the handler, which counts it.
-        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
-        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let (draws, vertices) = self.prepare(plan);
-        self.write_vertices(&vertices);
-        let frame = self.render_and_read(plan.width, plan.height, &draws, clear_of(plan.canvas));
-        let refused = pollster::block_on(validation.pop());
-        let exhausted = pollster::block_on(memory.pop());
-        if exhausted.is_some() {
-            self.ran_out_of_memory();
-        }
-        let errors = [exhausted, refused].into_iter().flatten();
-        let mut failed = frame.is_none();
-        for error in errors {
-            log::error!(
-                "GPU composite at {:.3}s failed: {error}",
-                plan.time.as_f64()
-            );
-            failed = true;
-        }
-        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
-            log::error!(
-                "GPU composite at {:.3}s was drawn while the device reported an error",
-                plan.time.as_f64()
-            );
-            failed = true;
-        }
-        match frame {
-            Some(frame) if !failed => frame,
-            _ => {
-                self.dead = true;
+        // export stops with an error rather than write a file of black. A
+        // frame that fails on a device that is still there is drawn again
+        // on it, until it draws or the device is given up
+        // (`failed_frame`), so the loop ends.
+        loop {
+            if self.dead() {
                 self.say_why(|| plan.summary());
-                Frame::black(plan.width, plan.height)
+                return Frame::black(plan.width, plan.height);
+            }
+            if let Some(frame) = self.render_once(plan) {
+                return frame;
             }
         }
     }
 
     fn render_into_view(&mut self, plan: &FramePlan, target: &wgpu::TextureView) -> bool {
-        if self.dead || (self.deliver_hdr && !self.surface_10bit) {
+        if self.dead() || (self.deliver_hdr && !self.surface_10bit) {
             return false;
         }
         let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
@@ -5136,8 +5252,11 @@ impl Compositor for WgpuCompositor {
             log::error!("GPU surface composite at {:.3}s was drawn while the device reported an error", plan.time.as_f64());
             failed = true;
         }
+        // counted as the frames are: a device that keeps failing is given up
         if failed {
-            self.dead = true;
+            self.failed_frame();
+        } else {
+            self.drew_frame();
         }
         !failed
     }
@@ -5150,7 +5269,7 @@ impl Compositor for WgpuCompositor {
         overlays: &FramePlan,
         target: &wgpu::TextureView,
     ) -> bool {
-        if self.dead
+        if self.dead()
             || (self.deliver_hdr && !self.surface_10bit)
             || from.width != to.width
             || from.height != to.height
@@ -5210,8 +5329,11 @@ impl Compositor for WgpuCompositor {
             log::error!("GPU transition surface composite ran while the device reported an error");
             failed = true;
         }
+        // counted as the frames are: a device that keeps failing is given up
         if failed {
-            self.dead = true;
+            self.failed_frame();
+        } else {
+            self.drew_frame();
         }
         !failed
     }
@@ -5244,6 +5366,82 @@ impl Compositor for WgpuCompositor {
     }
 
     fn combine(
+        &mut self,
+        width: u32,
+        height: u32,
+        time: f32,
+        from: &Frame,
+        to: &Frame,
+        pass: &TransitionPass,
+    ) -> Option<Frame> {
+        // As `render`: drawn again on a device that is still there, until
+        // it draws or the device is given up.
+        loop {
+            if let Some(frame) = self.combine_once(width, height, time, from, to, pass) {
+                return Some(frame);
+            }
+            if self.dead() {
+                return None;
+            }
+        }
+    }
+}
+
+impl WgpuCompositor {
+    /// One drawing of `plan`: the frame, or `None` when it failed, the
+    /// failure counted against the device (`failed_frame`).
+    fn render_once(&mut self, plan: &FramePlan) -> Option<Frame> {
+        // Whatever the device says went wrong with this frame is caught
+        // here: memory it ran out of - an 8 GB card shared with the
+        // window, the decoder and the encoder (#297) - or a call it
+        // refused. Uncaught, it was logged and the frame went to the
+        // encoder wrong (audit 2026-10-11, finding 8). A frame drawn under
+        // one is a failed frame, as a failed readback is, and is drawn again
+        // (`failed_frame`). The
+        // passes' own scopes inside still catch what they catch first, and
+        // what a scope misses still reaches the handler, which counts it.
+        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let (draws, vertices) = self.prepare(plan);
+        self.write_vertices(&vertices);
+        let frame = self.render_and_read(plan.width, plan.height, &draws, clear_of(plan.canvas));
+        let refused = pollster::block_on(validation.pop());
+        let exhausted = pollster::block_on(memory.pop());
+        if exhausted.is_some() {
+            self.ran_out_of_memory();
+        }
+        let errors = [exhausted, refused].into_iter().flatten();
+        let mut failed = frame.is_none();
+        for error in errors {
+            log::error!(
+                "GPU composite at {:.3}s failed: {error}",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
+            log::error!(
+                "GPU composite at {:.3}s was drawn while the device reported an error",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        match frame {
+            Some(frame) if !failed => {
+                self.drew_frame();
+                Some(frame)
+            }
+            _ => {
+                self.failed_frame();
+                None
+            }
+        }
+    }
+
+    /// One drawing of a transition; see [`Compositor::combine`].
+    #[allow(clippy::too_many_arguments)]
+    fn combine_once(
         &mut self,
         width: u32,
         height: u32,
@@ -5308,15 +5506,18 @@ impl Compositor for WgpuCompositor {
         }
         self.queue.submit([encoder.finish()]);
         let frame = self.read_back();
-        if frame.is_none() {
-            self.dead = true;
-            self.say_why(|| format!("the transition {} at {width}x{height}", pass.key));
+        match frame {
+            Some(_) => self.drew_frame(),
+            None => {
+                self.failed_frame();
+                if self.dead() {
+                    self.say_why(|| format!("the transition {} at {width}x{height}", pass.key));
+                }
+            }
         }
         frame
     }
-}
 
-impl WgpuCompositor {
     /// Draws into the readback target and copies it out: one submit, one
     /// wait. `None` when the device did not deliver the pixels.
     fn render_and_read(

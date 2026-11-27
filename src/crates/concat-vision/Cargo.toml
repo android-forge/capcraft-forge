@@ -14,6 +14,7 @@ description = "What the engine sees in a picture: the person mask behind a cutou
 infer = ["dep:ort"]
 
 [dependencies]
+log = "0.4"
 concat-core.workspace = true
 concat-project.workspace = true
 # Masks on disk are eight-bit grey PNGs: a tenth the size of raw bytes, and

@@ -148,6 +148,7 @@ pub(crate) fn isolate(
             channels: 1,
             format: SampleFormat::F32,
             stream: None,
+            stretch: None,
         },
     )
     .map_err(|error| error.to_string())?;

@@ -156,6 +156,7 @@ impl MobileSession {
                     channels: 1,
                     format: SampleFormat::F32,
                     stream,
+                    stretch: None,
                 },
             )
             .map_err(|error| failed(&error))?

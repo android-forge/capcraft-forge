@@ -17,12 +17,14 @@ concat-export = { path = "crates/concat-export" }
 concat-host = { path = "crates/concat-host" }
 concat-mcp = { path = "crates/concat-mcp" }
 concat-speech = { path = "crates/concat-speech" }
+concat-stretch = { path = "crates/concat-stretch" }
+concat-worker = { path = "crates/concat-worker" }
 concat-effects = { path = "crates/concat-effects" }
 concat-text = { path = "crates/concat-text" }
 concat-vision = { path = "crates/concat-vision" }
 concat-log = { path = "crates/concat-log" }
 
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive", "env"] }
 # JSON Schemas for the API's request types, behind the `schema` features of

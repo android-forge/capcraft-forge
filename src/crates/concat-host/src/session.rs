@@ -121,7 +121,7 @@ impl Session {
         let mut upgraded: Vec<(String, String)> = Vec::new();
         editor.upgrade_links(|link| {
             let old = link.id.clone();
-            let changed = catalogue.upgrade(link);
+            let changed = crate::upgrade_link(catalogue, link);
             let pair = (old, link.id.clone());
             // A link carried over to its own package's newer version opens
             // as it looked, near enough, and says nothing.

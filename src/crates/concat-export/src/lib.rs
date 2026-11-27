@@ -2821,7 +2821,7 @@ fn progress_due(index: i64, since: std::time::Duration) -> bool {
 /// alongside its chain - unlike an effect's knobs, it is fixed for the
 /// clip's whole life, so it is looked up rather than resolved.
 fn passes_at(
-    chains: &HashMap<ClipId, Vec<AppliedFilter>>,
+    chains: &HashMap<ClipId, Vec<concat_effects::AppliedFilter>>,
     reveal_maps: &HashMap<ClipId, Arc<RevealMap>>,
     timeline: &Timeline,
     clip: ClipId,

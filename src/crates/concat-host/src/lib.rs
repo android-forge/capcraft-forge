@@ -84,3 +84,18 @@ pub fn scheduler() -> &'static std::sync::Arc<concat_media::Prefetcher> {
         ))
     })
 }
+
+/// Moves a saved link to a retired package onto its stand-in, as the
+/// catalogue says; true when it changed. The catalogue works on the
+/// engine's copy of a link, so the link is read across and its id, knobs
+/// and switch written back.
+pub(crate) fn upgrade_link(catalogue: &concat_effects::Catalogue, link: &mut concat_project::model::AppliedFilter) -> bool {
+    let mut engine = concat_export::chains::engine_filter(link);
+    let changed = catalogue.upgrade(&mut engine);
+    if changed {
+        link.id = engine.id;
+        link.params = engine.params;
+        link.enabled = engine.enabled;
+    }
+    changed
+}

@@ -328,7 +328,7 @@ pub fn instantiate(
     // A template saved before an effect was retired opens the way a
     // project does: its links read as links to the stand-ins.
     let catalogue = concat_effects::Catalogue::builtin();
-    editor.upgrade_links(|link| catalogue.upgrade(link));
+    editor.upgrade_links(|link| crate::upgrade_link(catalogue, link));
     if !fills.is_empty() {
         editor
             .apply(Command::Batch {

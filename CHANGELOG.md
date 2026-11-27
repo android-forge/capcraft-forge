@@ -5,6 +5,14 @@ dated, as the licence asks; `#` numbers are the original project's.
 
 ## Unreleased
 
+### 28 November 2026
+- Engine from Concat 0.2.13: 22 new looks (a Flash shelf - Flash, Strobe, Flicker, Beat Pulse, RGB Flash; Glitch, VHS
+  Tracking, Old Film, Lens Flare, Split Screen, Mirror, Kaleidoscope, Blur Frame, Light Leak, Zoom Pulse, Duotone; the
+  transitions Flash, Luma Wipe, Doors, Blinds, Mosaic and Ripple), Concat's rendering and decoding fixes (a failed
+  frame is drawn again rather than losing the device; video decoders held to what the graphics memory has room for),
+  pitch-kept time stretching, and the studio voice about seven times faster (its models run in int8). Forge keeps
+  its own project format, export and voices: 0.2.13 replaces Concat's project model, which Forge is built on.
+
 ### 27 November 2026
 Engine updated to [Concat v0.2.12](https://github.com/jub0t/Concat/releases/tag/v0.2.12) by Jareer Abdullah (jub0t)
 and Concat's contributors, from the v0.2.8 base merged on 28 October (v0.2.9, v0.2.10, v0.2.11 and v0.2.12; release

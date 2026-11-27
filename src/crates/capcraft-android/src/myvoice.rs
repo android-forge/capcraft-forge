@@ -183,6 +183,7 @@ fn write(recording: &str, to: &std::path::Path) -> Result<(), String> {
             channels: 1,
             format: SampleFormat::F32,
             stream: None,
+            stretch: None,
         },
     )
     .map_err(|error| error.to_string())?

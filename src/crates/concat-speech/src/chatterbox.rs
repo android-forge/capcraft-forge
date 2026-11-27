@@ -306,8 +306,10 @@ fn session(path: &Path, accelerated: bool) -> Result<Session, String> {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = accelerated;
+    // matrix products in int8 (Concat 0.2.13): the export leaves them in
+    // f32, which cost the language model 100 ms a token where int8 takes 8
     builder
-        .commit_from_file(path)
+        .commit_from_file(concat_vision::int8::int8_graph(path))
         .map_err(|error| format!("{}: {error}", path.display()))
 }
 

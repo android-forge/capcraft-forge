@@ -1330,6 +1330,7 @@ fn decode(
             rate: PCM_RATE,
             channels: 2,
             format: SampleFormat::I16,
+            stretch: None,
             stream: spec.audio_stream.map(|index| index as usize),
         },
     )
