@@ -159,7 +159,7 @@ private fun ColumnScope.PackagesContent(vm: EditorViewModel, kind: String, targe
             "filter" -> it.id != "concat.adjust" && it.category != "Adjust"
             // keying and masking have tools of their own (Remove BG, Mask), and the colour and
             // detail corrections are Adjust's
-            "effect" -> it.category !in setOf("Cutout", "Color", "Basic", "Text")
+            "effect" -> it.category !in setOf("Cutout", "Color", "Basic", "Text") && it.id !in ADJUST_DUPLICATES
             // loudness, noise and voice cleaning are ticks in the Volume panel
             "audio" -> it.id !in CLEANER_IDS
             else -> true
@@ -491,7 +491,8 @@ private fun filterToAll(vm: EditorViewModel, clipId: String, ids: Set<String>) {
  * One knob of the Adjust tab: the key it sets, on the engine's Adjust or on [PLUS], its range and
  * where it rests. HSL and Graphs are sheets of their own rather than one slider.
  */
-private data class Knob(val key: String, val label: String, val min: Float, val max: Float, val default: Float, val pkg: String = ADJUST)
+/** One Adjust knob; [group] is its place in [KNOB_GROUPS]. */
+private data class Knob(val key: String, val label: String, val min: Float, val max: Float, val default: Float, val pkg: String = ADJUST, val group: Int = 0)
 
 private const val ADJUST = "concat.adjust"
 
@@ -503,29 +504,45 @@ private const val HSL = "hsl"
 private const val GRAPHS = "graphs"
 private const val WHEELS = "wheels"
 
-/** The knobs in the reference's order. Its Hue is the green-to-magenta tint the engine calls tint. */
+/**
+ * The knobs, in the groups LightCraft and FilmCraft lay the same controls out in: light, then colour,
+ * then detail and effects, then the curve and the wheels. Tint is the green-to-magenta knob the
+ * reference calls Hue (real hue is in HSL).
+ */
 private val KNOBS = listOf(
-    // in stops of light, as a camera has it
-    Knob("exposure", "Exposure", -3f, 3f, 0f),
-    Knob("brightness", "Brightness", -100f, 100f, 0f),
-    Knob("contrast", "Contrast", -100f, 100f, 0f),
-    Knob("saturation", "Saturation", -100f, 100f, 0f),
-    Knob("brilliance", "Brilliance", -100f, 100f, 0f, PLUS),
-    Knob("sharpen", "Sharpen", 0f, 100f, 0f),
-    Knob("clarity", "Clarity", -100f, 100f, 0f, PLUS),
-    Knob(HSL, "HSL", 0f, 0f, 0f, PLUS),
-    Knob(GRAPHS, "Graphs", 0f, 0f, 0f),
-    Knob(WHEELS, "Color wheel", 0f, 0f, 0f),
-    Knob("highlights", "Highlights", -100f, 100f, 0f),
-    Knob("shadows", "Shadows", -100f, 100f, 0f),
-    Knob("whites", "Whites", -100f, 100f, 0f),
-    Knob("blacks", "Blacks", -100f, 100f, 0f),
-    Knob("temperature", "Temp", 2000f, 11000f, 6500f),
-    Knob("tint", "Hue", -100f, 100f, 0f),
-    Knob("fade", "Fade", 0f, 100f, 0f),
-    Knob("vignette", "Vignette", 0f, 100f, 0f),
-    Knob("grain", "Grain", 0f, 100f, 0f, PLUS),
+    // ── Light: in stops of light, as a camera has it
+    Knob("exposure", "Exposure", -3f, 3f, 0f, group = 0),
+    Knob("brightness", "Brightness", -100f, 100f, 0f, group = 0),
+    Knob("contrast", "Contrast", -100f, 100f, 0f, group = 0),
+    Knob("highlights", "Highlights", -100f, 100f, 0f, group = 0),
+    Knob("shadows", "Shadows", -100f, 100f, 0f, group = 0),
+    Knob("whites", "Whites", -100f, 100f, 0f, group = 0),
+    Knob("blacks", "Blacks", -100f, 100f, 0f, group = 0),
+    Knob("brilliance", "Brilliance", -100f, 100f, 0f, PLUS, group = 0),
+    // ── Color
+    Knob("temperature", "Temp", 2000f, 11000f, 6500f, group = 1),
+    Knob("tint", "Tint", -100f, 100f, 0f, group = 1),
+    Knob("saturation", "Saturation", -100f, 100f, 0f, group = 1),
+    Knob(HSL, "HSL", 0f, 0f, 0f, PLUS, group = 1),
+    // ── Detail and effects
+    Knob("sharpen", "Sharpen", 0f, 100f, 0f, group = 2),
+    Knob("clarity", "Clarity", -100f, 100f, 0f, PLUS, group = 2),
+    Knob("fade", "Fade", 0f, 100f, 0f, group = 2),
+    Knob("vignette", "Vignette", 0f, 100f, 0f, group = 2),
+    Knob("grain", "Grain", 0f, 100f, 0f, PLUS, group = 2),
+    // ── the tone curves and the colour wheels, each a sheet of its own
+    Knob(GRAPHS, "Curves", 0f, 0f, 0f, group = 3),
+    Knob(WHEELS, "Color wheel", 0f, 0f, 0f, group = 3),
 )
+
+/** The names over the knob groups, by [Knob.group]. */
+private val KNOB_GROUPS = listOf("Light", "Color", "Detail", "Curves")
+
+/**
+ * Packages that are also knobs in Adjust. They stay in the engine for old projects and adjustment
+ * layers, but the effect browser leaves them out so each control is in one place.
+ */
+internal val ADJUST_DUPLICATES = setOf("concat.vignette", "concat.film-grain")
 
 /** A smart tool before the knobs: worked out from the picture under the playhead, then set on them. */
 private class SmartTool(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val colourOnly: Boolean, val sheet: String? = null)
@@ -682,7 +699,7 @@ private fun ColumnScope.PresetsContent(vm: EditorViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text(name, style = Type.Body.copy(color = Palette.Text))
                     Text(
-                        keys.map { key -> KNOBS.firstOrNull { it.key == key }?.label ?: if (key in HSL_KEYS) "HSL" else if ("." in key) "Graphs" else key }
+                        keys.map { key -> KNOBS.firstOrNull { it.key == key }?.label ?: if (key in HSL_KEYS) "HSL" else if ("." in key) "Curves" else key }
                             .distinct().joinToString(" · "),
                         style = Type.Small.copy(fontSize = 11.sp, color = Palette.TextSecondary),
                         maxLines = 1,
@@ -699,9 +716,9 @@ private fun ColumnScope.PresetsContent(vm: EditorViewModel) {
 }
 
 /**
- * The Adjust tab: Smart and Customize over one row of round buttons - the smart tools, then a knob
- * each in the reference's order - the chosen one's slider under them (HSL, Graphs and Color wheel
- * open sheets instead), and Reset, Apply to all and Save preset below.
+ * The Adjust tab: Smart and the knobs' groups (Light, Color, Detail, Curves) over one row of round
+ * buttons - the smart tools, then the knobs group by group - the chosen one's slider under them (HSL,
+ * Curves and Color wheel open sheets instead), and Reset, Apply to all and Save preset below.
  */
 @Composable
 private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
@@ -870,21 +887,42 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
         // an open sheet takes the place of the tools, so a phone with less height still shows all of it;
         // its fold-away button brings them back
         if (sheet == null) {
-            // Smart and Customize: where each part of the row starts, the lit one where the row was sent
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 2.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                listOf("Smart", "Customize").forEachIndexed { i, name ->
-                    Text(
-                        name,
-                        style = Type.Body.copy(
-                            fontSize = 15.sp,
-                            color = if (section == i) Palette.Text else Palette.TextSecondary,
-                            fontWeight = if (section == i) FontWeight.SemiBold else FontWeight.Normal,
-                        ),
-                        modifier = Modifier.clickable {
+            /** Whether anything [k] sets is off its neutral. */
+            fun changedKnob(k: Knob) = when (k.key) {
+                HSL -> HSL_KEYS.any { plus.optDouble(it, 0.0) != 0.0 }
+                GRAPHS -> CURVE_KEYS.any { adjust.has(it) }
+                WHEELS -> WHEEL_KEYS.any { adjust.optDouble(it, 0.0) != 0.0 }
+                else -> paramsOf(k).has(k.key) && paramsOf(k).optDouble(k.key) != k.default.toDouble()
+            }
+            // Smart and the knobs' groups: where each part of the row starts, the lit one where the row
+            // was sent, and a dot on a group with anything in it changed
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                (listOf("Smart") + KNOB_GROUPS).forEachIndexed { i, name ->
+                    val changed = i > 0 && KNOBS.any { it.group == i - 1 && changedKnob(it) }
+                    Row(
+                        Modifier.clickable {
                             section = i
-                            scope.launch { row.animateScrollToItem(if (i == 0) 0 else SMART.size + 1) }
+                            val first = KNOBS.indexOfFirst { it.group == i - 1 }
+                            scope.launch { row.animateScrollToItem(if (i == 0) 0 else SMART.size + 1 + first) }
                         }.padding(vertical = 6.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            name,
+                            style = Type.Body.copy(
+                                fontSize = 15.sp,
+                                color = if (section == i) Palette.Text else Palette.TextSecondary,
+                                fontWeight = if (section == i) FontWeight.SemiBold else FontWeight.Normal,
+                            ),
+                        )
+                        if (changed) {
+                            Spacer(Modifier.width(4.dp))
+                            Box(Modifier.size(5.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Palette.Accent))
+                        }
+                    }
                 }
             }
             LazyRow(Modifier.fillMaxWidth(), state = row, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp), verticalAlignment = Alignment.Top) {
@@ -906,21 +944,21 @@ private fun ColumnScope.AdjustContent(vm: EditorViewModel) {
                 }
                 items(KNOBS.size) { i ->
                     val k = KNOBS[i]
-                    val changed = when (k.key) {
-                        HSL -> HSL_KEYS.any { plus.optDouble(it, 0.0) != 0.0 }
-                        GRAPHS -> CURVE_KEYS.any { adjust.has(it) }
-                        WHEELS -> WHEEL_KEYS.any { adjust.optDouble(it, 0.0) != 0.0 }
-                        else -> paramsOf(k).has(k.key) && paramsOf(k).optDouble(k.key) != k.default.toDouble()
-                    }
-                    AdjustTool(k.label, i == which, changed, onClick = {
-                        which = i
-                        section = 1
-                        sheet = k.key.takeIf { it == HSL || it == GRAPHS || it == WHEELS }
-                    }) { tint ->
-                        if (k.key == HSL) {
-                            Text("HSL", style = Type.Small.copy(fontSize = 13.sp, color = tint))
-                        } else {
-                            Glyph(knobIcon(k.key), tint, size = 22.dp)
+                    Row(verticalAlignment = Alignment.Top) {
+                        // a thin line where one group ends and the next begins
+                        if (i > 0 && KNOBS[i - 1].group != k.group) {
+                            Box(Modifier.padding(top = 18.dp, start = 4.dp, end = 4.dp).size(1.dp, 26.dp).background(Color(0xFF474747)))
+                        }
+                        AdjustTool(k.label, i == which, changedKnob(k), onClick = {
+                            which = i
+                            section = 1 + k.group
+                            sheet = k.key.takeIf { it == HSL || it == GRAPHS || it == WHEELS }
+                        }) { tint ->
+                            if (k.key == HSL) {
+                                Text("HSL", style = Type.Small.copy(fontSize = 13.sp, color = tint))
+                            } else {
+                                Glyph(knobIcon(k.key), tint, size = 22.dp)
+                            }
                         }
                     }
                 }

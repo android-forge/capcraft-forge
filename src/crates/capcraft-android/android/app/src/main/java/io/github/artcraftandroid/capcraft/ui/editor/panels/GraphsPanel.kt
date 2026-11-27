@@ -114,7 +114,7 @@ fun GraphsPanel(vm: EditorViewModel) {
 
     // a curve of one's own: its handles dragged on a square below the shelf
     var custom by remember(clip.id, target) { mutableStateOf(current != null && GRAPHS.none { g -> g.points.indices.all { abs(g.points[it] - current[it]) < 0.005 } }) }
-    PanelFrame("Graphs", vm, height = if (custom) 340.dp else 230.dp) {
+    PanelFrame("Keyframes", vm, height = if (custom) 340.dp else 230.dp) {
         if (target == null) {
             Spacer(Modifier.height(36.dp))
             Text(

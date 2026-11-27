@@ -3,6 +3,29 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## Unreleased
+
+### 27 November 2026
+The editor's tools reorganised (the first three steps of `docs/proposals/app-cleanup-and-tools.md`). Nothing was removed.
+- A picture's bar is Split, Speed, Volume, Duplicate and Delete, always in the same places, then five drawers: **Edit**,
+  **Look**, **Smart** (the models and heavy processing), **Motion** and **Sound**. That's 10 tools where there were
+  about 37 in one row. The drawer last used stays open for the next picture picked.
+- Text, stickers, captions and sounds have short bars of their own with a **More** drawer (a sound's are **Smart** and
+  **Clean**).
+- The top level is Edit, Audio, Text, Captions, Effects, Overlay, Color, Background, Ratio and Project. Stickers and
+  Graphics are only under Text, Auto captions and lyrics only under Captions, Filters and Adjust are one Color, and
+  Transcript, Filler words, Auto highlight and Replace media are under Project. Preview quality moved to a ⋮ menu in
+  the top bar.
+- Renamed for what they do: Splice is Blend, Maintrack and Overlay are Move to main and Move to overlay, Graphs is
+  Keyframes, Basic is Position, Advanced is Exact values, Video quality is Enhance (Photo quality on photos), the Audio
+  group's Extract is From a video, and in Adjust, Graphs is Curves and Hue is Tint.
+- Adjust's knobs are grouped Light, Color, Detail and Curves, with a tab for each group that jumps to it and shows a
+  dot when anything in the group is changed.
+- Search finds tools inside the drawers, and by their old names too. A one-time tip says the tools have moved.
+- The search sheet's "Reduce video noise" suggestion, which turned on the sound's noise reducer, now says "Reduce
+  background noise".
+- The effect browser no longer offers Vignette and Film grain, which are Adjust's knobs.
+
 ## 0.0.8 (24 November 2026)
 
 ### 24 November 2026
