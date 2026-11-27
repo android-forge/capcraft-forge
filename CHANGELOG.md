@@ -6,6 +6,9 @@ dated, as the licence asks; `#` numbers are the original project's.
 ## Unreleased
 
 ### 27 November 2026
+- Film looks (in Filters, under Film): 13 film stocks and grades - Vision3 500T and 250D, Eterna 500, Ektachrome 100,
+  Delta 3200, CineStill 800T, Kodak Gold, teal and orange, bleach bypass, night bloom, documentary, day for night and
+  cross process - each with an amount, after 0xzgbot's color-grading-film-emulation skill (MIT).
 - Reel FX (in Look): 51 talking-head effects - orbit, spotlight, backdrop word, glass widgets, LED sign, checklist,
   tier list, match cut and the rest - ported from Vibha Ramprakash's claude-video-effects (MIT). Each is placed on a
   stretch of the clip, follows the face (OpenCV's YuNet, built in) and can sit behind the person (Remove BG's person

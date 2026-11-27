@@ -289,3 +289,9 @@ it on the GPU when the app first needs the card (`concat-host`'s
   `concat-vision` (`models/yunet.onnx`). It finds the face the effects follow.
 - Space Mono Bold and Playfair Display (SIL Open Font License 1.1), in
   `src/crates/capcraft-reelfx/fonts/` with their licence texts.
+
+## Film looks
+
+- The 13 `capcraft.film-*` packages in `src/crates/concat-effects/packages`
+  follow the recipes of color_grading_film_emulation by 0xzgbot
+  (hermes-media-skill-pack, MIT), rewritten as Forge shaders.
