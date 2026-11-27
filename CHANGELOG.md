@@ -3,6 +3,26 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## Unreleased
+
+### 27 November 2026
+Engine updated to [Concat v0.2.12](https://github.com/jub0t/Concat/releases/tag/v0.2.12) by Jareer Abdullah (jub0t)
+and Concat's contributors, from the v0.2.8 base merged on 28 October (v0.2.9, v0.2.10, v0.2.11 and v0.2.12; release
+notes at https://github.com/jub0t/Concat/releases). Where Forge and Concat had each built the same thing, the better one
+was kept:
+- From Concat: exports drawn ahead and handed to the encoder on its own thread as YUV (about 2.4× faster where the
+  Android surface encoder is not used), the encoder stall and black-frame fixes at cuts and joins (#747, #756, #790),
+  variable-frame-rate and screen recordings played frame by frame (#457), GPU-loss recovery during export, colour emoji
+  painted from `COLR` v1 with each picture cached, editable shapes (width, height, corners, gradients, outlines, dashes,
+  shadows, trim; Forge's Hexagon and Diamond are now six- and four-sided polygons), stacked masks per clip, caption
+  pruning of made-up lines over silence and music, keyframe-aware nearest-frame seeks, and enhance at any scale up to 2K.
+- Kept from Forge: the direct Android MediaCodec surface export, Kokoro, Pocket and Supertonic voices (Concat removed
+  them for Chatterbox, which is desktop only), a picture stream chosen past a cover image, per-word caption timings,
+  and adjustment layers that know their own length.
+- Looks Concat renamed (Polaroid, Rain, Milk and eleven others) still open under their old names in older projects.
+- Concat v0.2.13 is not merged yet: it replaces the project model with a new document crate, which Forge's Android code
+  has to be ported to first.
+
 ## 0.0.8 (24 November 2026)
 
 ### 24 November 2026

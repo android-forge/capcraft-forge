@@ -239,18 +239,24 @@ pub(crate) struct BuiltTimeline {
     pub(crate) stabilized: HashMap<ClipId, StabilizeJob>,
 }
 
-/// A packaged transition over a cut. The incoming clip has been overlapped
-/// onto the outgoing one and moved to `to_track`; over `[start, end)` the
-/// compositor combines the stack below `to_track` (the outgoing picture) with
-/// the incoming layer through the package's two-input shader. A machine with
-/// no GPU shows the dissolve the incoming clip already carries instead.
+/// A transition, as the compositor draws it: over `[start, end)`, the
+/// stack beneath `track` drawn twice - as it is before the cut, `from`'s
+/// clips in it and `to`'s left out, and as it is after, the other way
+/// round - and the two combined through the package's two-input shader.
+/// With no cut under it both sets are empty and the two pictures are the
+/// same. A machine with no GPU dissolves between them instead.
 #[derive(Clone, Debug)]
 pub(crate) struct TransitionSpan {
     pub(crate) start: Rational,
     pub(crate) end: Rational,
-    pub(crate) to_track: usize,
+    pub(crate) track: usize,
     pub(crate) id: String,
     pub(crate) params: BTreeMap<String, f64>,
+    /// The outgoing side's clips: the clip before the cut and its stand-in
+    /// after it. Filled in as the timeline is built.
+    pub(crate) from: std::collections::HashSet<ClipId>,
+    /// The incoming side's: the clip after the cut and its stand-in before.
+    pub(crate) to: std::collections::HashSet<ClipId>,
 }
 
 impl TransitionSpan {
@@ -321,7 +327,7 @@ pub(crate) fn build_timeline(
     request: &ExportRequest,
     rate: FrameRate,
     visible: &[&ExportClip],
-    transitions: Vec<TransitionSpan>,
+    mut transitions: Vec<TransitionSpan>,
 ) -> BuiltTimeline {
     let mut timeline = Timeline::new(request.width, request.height, rate);
     timeline.canvas = request.canvas;
@@ -347,9 +353,12 @@ pub(crate) fn build_timeline(
     for clip in visible {
         // Quantise to the frame grid on the way in. The UI works in f64
         // seconds; the engine works in exact rationals, and this is the seam
-        // where a value stops being approximate.
+        // where a value stops being approximate. The two ends are rounded,
+        // not the start and the length: two clips that touch then touch on
+        // the grid too, where a start and a length rounded apart left a
+        // frame between them black (#756) or drew one frame twice over.
         let start = quantise_at(clip.start, rate, request.effect_time_offset);
-        let duration = quantise(clip.duration, rate);
+        let duration = clip_end(clip, rate, request.effect_time_offset) - start;
         if duration.is_zero() {
             continue;
         }
@@ -374,17 +383,22 @@ pub(crate) fn build_timeline(
 
         let mut engine_clip = Clip::new(MediaRef::new(&clip.path), start, duration);
         engine_clip.source_start = quantise(clip.source_start, rate);
-        engine_clip.hold = clip.hold;
+        // A still is one picture, held: read once and the same frame drawn
+        // at every instant, which the compositor then never uploads twice.
+        // Paced like footage, a title was decoded, converted, copied and
+        // uploaded again at every frame it was on (#754).
+        engine_clip.hold = clip.hold || clip.kind == ClipKind::Image;
         // The same clamp the audio path applies, so a 2x clip means the same
         // thing to picture and sound. A still has no meaningful rate.
         if clip.kind != ClipKind::Image {
             engine_clip.speed =
                 Rational::approximate(audio::clamp_speed(clip.speed)).unwrap_or(Rational::ONE);
-            engine_clip.retime = clip.retime();
+            engine_clip.retime = clip.engine_curve();
         }
         engine_clip.animation = animation_of(&clip.animation);
+        engine_clip.motion = clip.motion.as_ref().and_then(|motion| motion.engine());
         engine_clip.blend = concat_core::timeline::Blend::parse(&clip.blend);
-        engine_clip.mask = clip.mask.map(|mask| mask.engine());
+        engine_clip.masks = clip.masks.iter().map(Mask::engine).collect();
         engine_clip.overscan = overscan_of(clip);
         engine_clip.transform = Transform {
             scale: clip.scale,
@@ -400,7 +414,17 @@ pub(crate) fn build_timeline(
         engine_clip.video_fade_in = quantise(clip.video_fade_in, rate);
 
         if let Some(id) = timeline.add_clip(tracks[clip.track], engine_clip) {
-            tracks_of.insert(id, clip.track);
+            // A stand-in is stacked where the clip it extends is.
+            tracks_of.insert(id, clip.stack_at.unwrap_or(clip.track));
+            for &(span, incoming) in &clip.roles {
+                if let Some(span) = transitions.get_mut(span) {
+                    if incoming {
+                        span.to.insert(id);
+                    } else {
+                        span.from.insert(id);
+                    }
+                }
+            }
             if clip.kind == ClipKind::Image {
                 stills.insert(id);
             }
@@ -529,22 +553,17 @@ pub(crate) fn animation_of(keys: &[ExportKey]) -> Option<Animation> {
     if keys.is_empty() {
         return None;
     }
-    let mut tracks: [Vec<Key>; 13] = Default::default();
+    let mut tracks: [Vec<Key>; 8] = Default::default();
     for key in keys {
         let slot = match key.property.as_str() {
             "scale" => 0,
             "offsetX" => 1,
             "offsetY" => 2,
             "rotation" => 3,
-            "opacity" => 4,
-            "volume" => 5,
-            "maskX" => 6,
-            "maskY" => 7,
-            "maskWidth" => 8,
-            "maskHeight" => 9,
-            "maskRotation" => 10,
-            "maskRoundness" => 11,
-            "maskFeather" => 12,
+            "stretchX" => 4,
+            "stretchY" => 5,
+            "opacity" => 6,
+            "volume" => 7,
             _ => continue,
         };
         let [x1, y1, x2, y2] = key.ease;
@@ -554,37 +573,16 @@ pub(crate) fn animation_of(keys: &[ExportKey]) -> Option<Animation> {
             ease: Ease::new(x1, y1, x2, y2),
         });
     }
-    let [
-        scale,
-        x,
-        y,
-        rotation,
-        opacity,
-        volume,
-        mask_x,
-        mask_y,
-        mask_width,
-        mask_height,
-        mask_rotation,
-        mask_roundness,
-        mask_feather,
-    ] = tracks;
+    let [scale, x, y, rotation, wide, tall, opacity, volume] = tracks;
     let animation = Animation {
         scale: Track::new(scale),
         offset_x: Track::new(x),
         offset_y: Track::new(y),
         rotation: Track::new(rotation),
+        stretch_x: Track::new(wide),
+        stretch_y: Track::new(tall),
         opacity: Track::new(opacity),
         volume: Track::new(volume),
-        mask: concat_core::animate::MaskTracks {
-            x: Track::new(mask_x),
-            y: Track::new(mask_y),
-            width: Track::new(mask_width),
-            height: Track::new(mask_height),
-            rotation: Track::new(mask_rotation),
-            roundness: Track::new(mask_roundness),
-            feather: Track::new(mask_feather),
-        },
     };
     (!animation.is_empty()).then_some(animation)
 }
@@ -642,6 +640,12 @@ fn overscan_of(clip: &ExportClip) -> f64 {
 
 pub(crate) fn quantise(seconds: f64, rate: FrameRate) -> Rational {
     rate.time_of_frame((seconds * rate.fps().as_f64()).round().max(0.0) as i64)
+}
+
+/// Where a clip ends on the frame grid: its end rounded as its start is,
+/// so the clip after it, starting where it ends, starts on the same frame.
+pub(crate) fn clip_end(clip: &ExportClip, rate: FrameRate, origin: f64) -> Rational {
+    quantise_at(clip.start + clip.duration, rate, origin)
 }
 
 /// Rebase a frame-grid timestamp without rounding a raw subtraction. Audio

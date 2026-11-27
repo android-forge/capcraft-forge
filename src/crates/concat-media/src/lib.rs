@@ -39,7 +39,7 @@ pub use error::{Error, Result};
 pub use ffi::{init, linked_version};
 pub use hardware::{HwDevice, HwPolicy, hardware_decode, set_hardware_decode, set_mediacodec_readers};
 pub use peaks::{Peaks, Pyramid};
-pub use pool::{CacheStats, FrameCache, FrameRequest, ReaderPool, Reading};
+pub use pool::{CacheStats, FrameCache, FrameRequest, Nearest, ReaderPool, Reading};
 pub use prefetch::{Cursor, Direction, Moment, Prefetcher, Priority};
 pub use probe::{AudioStream, MediaInfo, VideoStream, probe};
 pub use samples::{AudioDecoder, AudioOptions, SampleFormat};

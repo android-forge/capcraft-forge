@@ -249,6 +249,28 @@ own accelerator behind it where the runtime has one: CoreML on macOS and
 iOS, NNAPI on Android. How each platform carries the runtime is under
 "ONNX Runtime" above.
 
+## Models and voices in the source tree from Concat v0.2.12
+
+Merged with Concat v0.2.12, the source tree carries files that the Android app
+does not build in today (they are behind `concat-speech` features the app does
+not turn on), listed here because the repository distributes them:
+
+- DeepFilterNet 3's ONNX export (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`
+  from https://github.com/Rikorose/DeepFilterNet, Copyright (c) 2021 Hendrik
+  Schröter, code and weights MIT or Apache-2.0). Concat's voice isolation.
+  Licence texts in `src/crates/concat-speech/assets/deepfilternet3/`.
+- Beat This!'s small model (`small0`, https://github.com/CPJKU/beat_this,
+  Copyright (c) 2024 Institute of Computational Perception, JKU Linz, Austria;
+  code and weights MIT), exported to ONNX by Concat. Licence text in
+  `src/crates/concat-speech/assets/beat-this/`.
+- Four voice samples from LibriVox readings by Elizabeth Klett, Mark F. Smith,
+  Ruth Golding and Bob Neufeld (https://librivox.org), which LibriVox readers
+  dedicate to the public domain; `src/crates/concat-speech/voices/README.md`
+  names each source. Chatterbox's stock voices, desktop only.
+- Spleeter's 2-stems networks (Deezer, MIT), in the half-float ONNX export
+  sherpa-onnx publishes, are named in `concat-vision`'s model list as a
+  download; nothing in the Android app fetches them yet.
+
 ## The model mirror
 
 Every downloaded model named above is mirrored onto a release of Concat's own

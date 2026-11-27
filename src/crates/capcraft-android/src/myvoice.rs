@@ -135,6 +135,8 @@ pub fn keep_my_voice(
                     model_id,
                     words: false,
                     translate: false,
+                    // whisper hears which language it is
+                    language: None,
                 },
                 move |stage| {
                     let (done, name) = stage_of(stage);

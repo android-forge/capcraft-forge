@@ -46,6 +46,16 @@ pub struct VideoStream {
     /// Whether the stream holds more than eight bits a sample: ten-bit
     /// HEVC from a camera's log or HDR profile, ProRes.
     pub deep: bool,
+    /// Where the stream's keyframes are, in order, in seconds from the
+    /// file's own start (see `ffi::origin`), as the container's index has
+    /// them: the pictures a seek can show without decoding any other.
+    /// Empty where the container keeps no index - MPEG-TS and MPEG-PS -
+    /// and for a stream every frame of which is one. The times are the
+    /// index's: the decode timestamp where the container keeps no other,
+    /// up to a frame or two before the picture's own on a stream with
+    /// B-frames. A scrub reads them to find the nearest picture it can
+    /// show at once; see `ReaderPool::frame_nearest`.
+    pub keyframes: std::sync::Arc<[Rational]>,
 }
 
 /// What an audio stream looks like.
@@ -111,8 +121,9 @@ pub fn probe(path: impl AsRef<Path>) -> Result<MediaInfo> {
     let duration =
         (duration > 0).then(|| Rational::new(duration, i64::from(ffmpeg::sys::AV_TIME_BASE)));
 
+    let origin = ffi::origin(&input);
     let video = match picture_stream(&input) {
-        Some(stream) => Some(video_stream(&stream, path)?),
+        Some(stream) => Some(video_stream(&stream, path, origin)?),
         None => None,
     };
     let audio_streams: Vec<AudioStream> = input
@@ -195,7 +206,11 @@ pub(crate) fn audio_stream_index(
     input.streams().find(is_audio).map(|stream| stream.index())
 }
 
-fn video_stream(stream: &ffmpeg::format::stream::Stream<'_>, path: &Path) -> Result<VideoStream> {
+fn video_stream(
+    stream: &ffmpeg::format::stream::Stream<'_>,
+    path: &Path,
+    origin: Rational,
+) -> Result<VideoStream> {
     let parameters = stream.parameters();
     let (width, height) = (parameters.width(), parameters.height());
     if width == 0 || height == 0 {
@@ -248,7 +263,36 @@ fn video_stream(stream: &ffmpeg::format::stream::Stream<'_>, path: &Path) -> Res
         deep: crate::hardware::deep(ffmpeg::format::Pixel::from(ffmpeg::sys::AVPixelFormat(
             unsafe { (*parameters.as_ptr()).format },
         ))),
+        keyframes: keyframes(stream, origin),
     })
+}
+
+/// The stream's keyframes from its container's index, in order; see
+/// [`VideoStream::keyframes`]. An index whose every entry is a keyframe -
+/// an intra-only codec, or a container that lists only the keyframes it
+/// can seek to and marks them all - says nothing a scrub can use beyond
+/// the frame times themselves, and is kept as it is.
+fn keyframes(
+    stream: &ffmpeg::format::stream::Stream<'_>,
+    origin: Rational,
+) -> std::sync::Arc<[Rational]> {
+    let time_base = stream.time_base();
+    // SAFETY: the stream belongs to an input open for this call; the index
+    // is libavformat's own array, read by position below the count it
+    // reports, and nothing adds to it while the input is not read.
+    unsafe {
+        let raw = stream.as_ptr().cast_mut();
+        let count = ffmpeg::sys::avformat_index_get_entries_count(raw);
+        (0..count)
+            .filter_map(|at| {
+                let entry = ffmpeg::sys::avformat_index_get_entry(raw, at).as_ref()?;
+                (entry.flags() & ffmpeg::sys::AVINDEX_KEYFRAME != 0)
+                    .then(|| ffi::seconds(entry.timestamp, time_base))
+                    .flatten()
+                    .map(|at| at - origin)
+            })
+            .collect()
+    }
 }
 
 fn rational(value: ffmpeg::Rational) -> Option<Rational> {
@@ -445,11 +489,18 @@ mod tests {
             ("pq.mp4", Some(true), Signal::Pq),
         ] {
             let path = dir.join(name);
-            let mut encoder = match hdr {
+            let encoder = match hdr {
                 None => Encoder::create(&path, 64, 64, rate, &options),
                 Some(pq) => Encoder::create_mislabelled_hdr(&path, 64, 64, rate, &options, pq),
-            }
-            .expect("encodes");
+            };
+            let mut encoder = match encoder {
+                Ok(encoder) => encoder,
+                Err(error) if hdr.is_some() && VideoCodec::Hevc.ten_bit_only_on_hardware() => {
+                    eprintln!("{name}: no ten-bit HEVC encoder opens here ({error}); skipped");
+                    continue;
+                }
+                Err(error) => panic!("{name} encodes: {error}"),
+            };
             for _ in 0..3 {
                 encoder.write_frame(&Frame::black(64, 64)).expect("writes");
             }
@@ -458,5 +509,66 @@ mod tests {
             assert_eq!(info.video.expect("a picture").signal, want, "{name}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An MP3 with its album art in the ID3 tag: one APIC frame holding a
+    /// JPEG, then silent MPEG-1 Layer III frames (128 kb/s, 44.1 kHz; a
+    /// frame of zeros after its header is a frame of silence). Written by
+    /// hand so no MP3 encoder is needed, which an LGPL FFmpeg lacks.
+    fn covered_mp3(path: &Path) {
+        use concat_core::frame::Frame;
+        let cover = crate::encode::jpeg(&Frame::black(64, 64), 2).expect("a jpeg");
+        let mut apic = vec![0u8]; // ISO-8859-1
+        apic.extend_from_slice(b"image/jpeg\0");
+        apic.push(3); // front cover
+        apic.push(0); // no description
+        apic.extend_from_slice(&cover);
+        let mut frame = b"APIC".to_vec();
+        frame.extend_from_slice(&(apic.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&apic);
+        let size = frame.len() as u32;
+        let synchsafe = [
+            (size >> 21) as u8 & 0x7f,
+            (size >> 14) as u8 & 0x7f,
+            (size >> 7) as u8 & 0x7f,
+            size as u8 & 0x7f,
+        ];
+        let mut bytes = b"ID3\x03\x00\x00".to_vec();
+        bytes.extend_from_slice(&synchsafe);
+        bytes.extend_from_slice(&frame);
+        for _ in 0..100 {
+            let mut silent = vec![0u8; 417];
+            silent[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x64]);
+            bytes.extend_from_slice(&silent);
+        }
+        std::fs::write(path, bytes).expect("writes the mp3");
+    }
+
+    /// A song's album art is a picture in the file, but not the clip's
+    /// picture: the probe reports the sound and no video, so the song goes
+    /// on the timeline as sound and its cover is never drawn (#730).
+    #[test]
+    fn an_audio_files_cover_art_is_not_its_picture() {
+        let dir = std::env::temp_dir().join(format!("concat-probe-cover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch folder");
+        let path = dir.join("song.mp3");
+        covered_mp3(&path);
+
+        {
+            use ffmpeg::format::stream::Disposition;
+            let input = ffmpeg::format::input(&path).expect("opens");
+            assert!(
+                input
+                    .streams()
+                    .any(|stream| stream.disposition().contains(Disposition::ATTACHED_PIC)),
+                "the fixture carries its cover as an attached picture"
+            );
+        }
+        let info = probe(&path).expect("probes");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(info.audio.is_some(), "the song is heard");
+        assert!(info.video.is_none(), "the cover is not the clip's picture");
     }
 }

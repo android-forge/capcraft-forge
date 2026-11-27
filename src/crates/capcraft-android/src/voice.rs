@@ -184,6 +184,7 @@ pub(crate) fn isolate(
         duration: seconds,
         source_start: 0.0,
         speed: 1.0,
+        tempo: Vec::new(),
         preserve_pitch: false,
         volume: 1.0,
         volume_curve: Default::default(),

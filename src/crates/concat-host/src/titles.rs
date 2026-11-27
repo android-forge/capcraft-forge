@@ -19,6 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use concat_core::frame::Frame;
@@ -101,6 +102,18 @@ const LIVE_BYTES: usize = 128 * 1024 * 1024;
 /// size. Past it the first painted are kept and the rest painted again
 /// each time; see [`LivePaintings::keep`].
 const LIVE_CEILING: usize = 512 * 1024 * 1024;
+
+/// A `1 / part` share of a machine's `total` memory, never less than
+/// `floor`: what the live paintings may hold on a machine that has more
+/// to give. On 16 GB, half a gigabyte kept and two in all; on 64 GB, two
+/// and eight - several hundred captions at the monitor's size, held as a
+/// drag repaints the one being moved, where a fixed ceiling painted every
+/// caption past it again at each step.
+fn live_share(total: Option<u64>, part: u64, floor: usize) -> usize {
+    total
+        .and_then(|total| usize::try_from(total / part).ok())
+        .map_or(floor, |share| share.max(floor))
+}
 
 /// One live painting, and the pass that last asked for it.
 struct LivePainting {
@@ -204,7 +217,10 @@ impl Titles {
             fonts: Mutex::new(None),
             loaded_files: Mutex::new(HashSet::new()),
             memo: Mutex::new(HashMap::new()),
-            live: Mutex::new(LivePaintings::new(LIVE_BYTES, LIVE_CEILING)),
+            live: Mutex::new(LivePaintings::new(
+                live_share(crate::memory::total(), 32, LIVE_BYTES),
+                live_share(crate::memory::total(), 8, LIVE_CEILING),
+            )),
         }
     }
 
@@ -227,7 +243,34 @@ impl Titles {
     /// each, for a `width` × `height` frame. One that fails to paint is left
     /// out and said once on stderr; the rest of the edit still renders.
     pub fn clips(&self, project: &Project, width: u32, height: u32) -> Vec<TitleClip> {
-        self.clips_with(project, width, height, false)
+        self.clips_with(project, width, height, false, true, None)
+            .unwrap_or_default()
+            .0
+    }
+
+    /// [`Titles::clips`] for a job that can be stopped while its titles
+    /// paint - an export: hundreds of captions are seconds of painting on a
+    /// phone. None once `cancel` is set, the paintings finished so far kept
+    /// for the next time they are asked for.
+    pub fn clips_unless(
+        &self,
+        project: &Project,
+        width: u32,
+        height: u32,
+        cancel: &AtomicBool,
+    ) -> Option<Vec<TitleClip>> {
+        self.clips_with(project, width, height, false, true, Some(cancel))
+            .map(|(clips, _)| clips)
+    }
+
+    /// [`Titles::clips`] without painting: the titles painted already, and
+    /// whether that is every one. For the window, which must never wait on
+    /// a painter (hundreds of captions are seconds of painting on a phone)
+    /// and paints what is missing on a thread of its own, drawing what is
+    /// there meanwhile.
+    pub fn ready(&self, project: &Project, width: u32, height: u32) -> (Vec<TitleClip>, bool) {
+        self.clips_with(project, width, height, false, false, None)
+            .unwrap_or_default()
     }
 
     /// [`Titles::clips`] for a monitor showing a change as it is made:
@@ -237,28 +280,49 @@ impl Titles {
     /// touches the disk, which is what makes a drag smooth: a PNG per
     /// pointer step, encoded, written and decoded again, was the lag.
     pub fn clips_live(&self, project: &Project, width: u32, height: u32) -> Vec<TitleClip> {
-        self.clips_with(project, width, height, true)
+        self.clips_with(project, width, height, true, true, None)
+            .unwrap_or_default()
+            .0
     }
 
-    fn clips_with(&self, project: &Project, width: u32, height: u32, live: bool) -> Vec<TitleClip> {
+    /// The titles as image clips, and whether every one is there: `paint`
+    /// paints those that are not, and without it they are left out. None
+    /// once `cancel` is set.
+    fn clips_with(
+        &self,
+        project: &Project,
+        width: u32,
+        height: u32,
+        live: bool,
+        paint: bool,
+        cancel: Option<&AtomicBool>,
+    ) -> Option<(Vec<TitleClip>, bool)> {
+        let stopped = || cancel.is_some_and(|cancel| cancel.load(Ordering::Relaxed));
         if live {
             self.live.lock().unwrap_or_else(|e| e.into_inner()).begin();
         }
+        let (plain_text, plain_shape) = (TextStyle::default(), ShapeStyle::default());
+        let keys = keys_of(project, width, height, (&plain_text, &plain_shape));
+        if paint {
+            self.paint_ahead(project, width, height, live, &keys, &stopped);
+        }
+        if stopped() {
+            return None;
+        }
         let timeline = project.active();
         let mut out = Vec::new();
-        for clip in &timeline.clips {
-            let (text, shape);
-            let painting = match clip.kind {
-                ModelClipKind::Text => {
-                    text = clip.text.clone().unwrap_or_default();
-                    Painting::Title(&text)
-                }
-                ModelClipKind::Shape => {
-                    shape = clip.shape.clone().unwrap_or_default();
-                    Painting::Shape(&shape)
-                }
-                _ => continue,
+        let mut complete = true;
+        for (clip, key) in timeline.clips.iter().zip(keys) {
+            let Some((key, painting)) = key else {
+                continue;
             };
+            if stopped() {
+                return None;
+            }
+            if !paint && !live && self.kept_painting(key, width, height).is_none() {
+                complete = false;
+                continue;
+            }
             let Some(index) = timeline
                 .tracks
                 .iter()
@@ -268,10 +332,10 @@ impl Titles {
             };
             let track = &timeline.tracks[index];
             let painted = if live {
-                self.painted_live(project, painting, width, height)
+                self.painted_live(project, key, painting, width, height)
                     .map(|(path, art, frame)| (path, art, Some(frame)))
             } else {
-                self.painted(project, painting, width, height)
+                self.painted(project, key, painting, width, height)
                     .map(|(path, art)| (path, art, None))
             };
             let (path, art, frame) = match painted {
@@ -288,7 +352,24 @@ impl Titles {
                     hidden: !track.visible,
                     muted: true,
                     volume: 0.0,
-                    animation: concat_export::flatten::export_keys(clip),
+                    // A title's width and height keys go the way its
+                    // constant pull does, below: never onto the glyphs.
+                    animation: concat_export::flatten::export_keys(clip)
+                        .into_iter()
+                        .filter(|key| {
+                            matches!(painting, Painting::Shape(_))
+                                || !matches!(key.property.as_str(), "stretchX" | "stretchY")
+                        })
+                        .collect(),
+                    // What a media clip carries in the flattening and a
+                    // title or a shape would otherwise lose here, starting
+                    // from blank: the Animate moves, the mask and the
+                    // fades. Without them no In, Out or Loop played on any
+                    // title, caption or shape.
+                    motion: clip.motion.clone(),
+                    masks: clip.masks.clone(),
+                    fade_in: clip.fade_in,
+                    fade_out: clip.fade_out,
                     flip_h: clip.flip_h,
                     flip_v: clip.flip_v,
                     blend: clip.blend.clone(),
@@ -311,11 +392,11 @@ impl Titles {
                     // the rectangle that was wanted.
                     stretch_x: match painting {
                         Painting::Title(_) => 1.0,
-                        Painting::Shape(_) => clip.stretch_x,
+                        Painting::Shape(_) => export_base(clip, KeyProperty::StretchX),
                     },
                     stretch_y: match painting {
                         Painting::Title(_) => 1.0,
-                        Painting::Shape(_) => clip.stretch_y,
+                        Painting::Shape(_) => export_base(clip, KeyProperty::StretchY),
                     },
                     // The style's own opacity multiplies the clip's: a
                     // half-transparent title fades to half, not to solid.
@@ -348,7 +429,7 @@ impl Titles {
                 frame,
             });
         }
-        out
+        Some((out, complete))
     }
 
     /// One style at one size, painted in memory: the name the monitor is
@@ -356,21 +437,43 @@ impl Titles {
     fn painted_live(
         &self,
         project: &Project,
+        key: u64,
         painting: Painting<'_>,
         width: u32,
         height: u32,
     ) -> Result<(PathBuf, Art, Arc<Frame>), String> {
-        let key = key_of(project, painting, width, height);
-        let path = PathBuf::from(format!("memory://titles/{key:016x}"));
-        if let Some((art, frame)) = self.live.lock().unwrap_or_else(|e| e.into_inner()).get(key) {
-            return Ok((path, art, frame));
+        if let Some(found) = self.live_painting(key) {
+            return Ok(found);
         }
+        let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
+        let fonts = self.fonts_for(project, &mut fonts);
+        self.paint_live(fonts, key, painting, width, height)
+    }
+
+    /// The live painting kept under `key`, if there is one.
+    fn live_painting(&self, key: u64) -> Option<(PathBuf, Art, Arc<Frame>)> {
+        let path = PathBuf::from(format!("memory://titles/{key:016x}"));
+        let (art, frame) = self
+            .live
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)?;
+        Some((path, art, frame))
+    }
+
+    /// Paints one style in memory with `fonts`, and keeps it under `key`.
+    fn paint_live(
+        &self,
+        fonts: &Fonts,
+        key: u64,
+        painting: Painting<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(PathBuf, Art, Arc<Frame>), String> {
+        let path = PathBuf::from(format!("memory://titles/{key:016x}"));
         let rendered = match painting {
             Painting::Title(style) => {
-                let title = title_style(style);
-                let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
-                let fonts = self.fonts_for(project, &mut fonts);
-                concat_text::render_frame(fonts, &title, width, height)
+                concat_text::render_frame(fonts, &title_style(style), width, height)
                     .map_err(|error| error.to_string())?
             }
             Painting::Shape(style) => {
@@ -401,14 +504,23 @@ impl Titles {
     fn painted(
         &self,
         project: &Project,
+        key: u64,
         painting: Painting<'_>,
         width: u32,
         height: u32,
     ) -> Result<(PathBuf, Art), String> {
-        let key = key_of(project, painting, width, height);
+        if let Some(found) = self.kept_painting(key, width, height) {
+            return Ok(found);
+        }
+        let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
+        let fonts = self.fonts_for(project, &mut fonts);
+        self.paint_kept(fonts, key, painting, width, height)
+    }
+
+    /// The PNG kept under `key` and the block it holds, if it is on disk.
+    fn kept_painting(&self, key: u64, width: u32, height: u32) -> Option<(PathBuf, Art)> {
         let png = self.dir.join(format!("{key:016x}.png"));
         let side = self.dir.join(format!("{key:016x}.json"));
-
         if let Some(art) = self
             .memo
             .lock()
@@ -416,7 +528,7 @@ impl Titles {
             .get(&key)
             && png.is_file()
         {
-            return Ok((png, art.clone()));
+            return Some((png, art.clone()));
         }
         // On disk from an earlier session: the sidecar says how big the
         // block was and where, and which words it held, which the PNG
@@ -425,15 +537,25 @@ impl Titles {
             && let Some(art) = read_block(&side, width, height)
         {
             self.remember(key, art.clone());
-            return Ok((png, art));
+            return Some((png, art));
         }
+        None
+    }
 
+    /// Paints one style with `fonts` into a PNG kept under `key`.
+    fn paint_kept(
+        &self,
+        fonts: &Fonts,
+        key: u64,
+        painting: Painting<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(PathBuf, Art), String> {
+        let png = self.dir.join(format!("{key:016x}.png"));
+        let side = self.dir.join(format!("{key:016x}.json"));
         let rendered = match painting {
             Painting::Title(style) => {
-                let title = title_style(style);
-                let mut fonts = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
-                let fonts = self.fonts_for(project, &mut fonts);
-                concat_text::render(fonts, &title, width, height)
+                concat_text::render(fonts, &title_style(style), width, height)
                     .map_err(|error| error.to_string())?
             }
             Painting::Shape(style) => concat_text::render_shape(&shape_style(style), width, height)
@@ -469,6 +591,82 @@ impl Titles {
         Ok((png, art))
     }
 
+    /// Paints every title and shape on the active timeline that is not
+    /// painted yet, on every core at once, so the pass over the timeline
+    /// after finds each one kept. A transcribed interview is hundreds of
+    /// captions, each painted on its own; one after another they were
+    /// seconds of a window that did not answer.
+    ///
+    /// The faces are shared by every thread: they are loaded first, with
+    /// the project's own, and only read while the titles paint. Each
+    /// thread stops at its next title once `stopped` says so.
+    fn paint_ahead(
+        &self,
+        project: &Project,
+        width: u32,
+        height: u32,
+        live: bool,
+        keys: &[Option<(u64, Painting<'_>)>],
+        stopped: &(dyn Fn() -> bool + Sync),
+    ) {
+        let mut seen = HashSet::new();
+        let todo: Vec<(u64, Painting<'_>)> = keys
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|(key, _)| seen.insert(*key))
+            .filter(|(key, _)| {
+                if live {
+                    self.live_painting(*key).is_none()
+                } else {
+                    // Painted this session is enough to leave it to the
+                    // pass, which looks for its file anyway: one look on
+                    // the disk a title, not two.
+                    !self
+                        .memo
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .contains_key(key)
+                        && self.kept_painting(*key, width, height).is_none()
+                }
+            })
+            .collect();
+        // One alone paints on this thread, in the pass, as it always did.
+        if todo.len() < 2 {
+            return;
+        }
+        let threads = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZero::get)
+            .min(todo.len());
+        let mut held = self.fonts.lock().unwrap_or_else(|e| e.into_inner());
+        let fonts: &Fonts = self.fonts_for(project, &mut held);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..threads {
+                scope.spawn(|| {
+                    loop {
+                        if stopped() {
+                            return;
+                        }
+                        let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(&(key, painting)) = todo.get(at) else {
+                            return;
+                        };
+                        // A failure is said by the pass, which paints that
+                        // one again and logs why.
+                        let _ = if live {
+                            self.paint_live(fonts, key, painting, width, height)
+                                .map(|_| ())
+                        } else {
+                            self.paint_kept(fonts, key, painting, width, height)
+                                .map(|_| ())
+                        };
+                    }
+                });
+            }
+        });
+    }
+
     /// The faces, loaded once, with the project's own files added - each
     /// loaded once for the process.
     fn fonts_for<'a>(&self, project: &Project, held: &'a mut Option<Fonts>) -> &'a Fonts {
@@ -496,6 +694,30 @@ impl Titles {
 /// FNV-1a over the bytes, as the other caches on disk are keyed, because a
 /// file's name has to mean the same thing after a toolchain upgrade and the
 /// standard hasher makes no such promise.
+/// Each clip's key and painting, in the timeline's order - `None` for a
+/// clip that is neither a title nor a shape - so a pass names each once.
+/// A clip with no style of its own is painted in `plain`.
+fn keys_of<'a>(
+    project: &'a Project,
+    width: u32,
+    height: u32,
+    plain: (&'a TextStyle, &'a ShapeStyle),
+) -> Vec<Option<(u64, Painting<'a>)>> {
+    project
+        .active()
+        .clips
+        .iter()
+        .map(|clip| {
+            let painting = match clip.kind {
+                ModelClipKind::Text => Painting::Title(clip.text.as_ref().unwrap_or(plain.0)),
+                ModelClipKind::Shape => Painting::Shape(clip.shape.as_ref().unwrap_or(plain.1)),
+                _ => return None,
+            };
+            Some((key_of(project, painting, width, height), painting))
+        })
+        .collect()
+}
+
 fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) -> u64 {
     let mut bytes = Vec::new();
     // The style as JSON: every field, in a stable order, with no need to
@@ -525,10 +747,13 @@ fn key_of(project: &Project, painting: Painting<'_>, width: u32, height: u32) ->
     // for a per-word reveal effect to read back. 5: a title's lines are as
     // tall as their biggest word, and each look is painted on its own.
     // 6: a canvas grows past the frame to hold ink that runs past it, and
-    // the sidecar says how big it is. 7: bubbles - an oval with the same
-    // margin all round, a tail that meets it without a gap - grow it too.
-    // 8: version 1 colour glyphs, the emoji of newer phones, are painted.
-    bytes.extend_from_slice(&8u32.to_le_bytes());
+    // the sidecar says how big it is. 7 (Forge): bubbles - an oval with the
+    // same margin all round, a tail that meets it without a gap - grow it
+    // too. 8 (Forge): version 1 colour glyphs, the emoji of newer phones,
+    // are painted. 9: shapes gained their own width and height, corners,
+    // gradients, outline placement, dashes, line ends, shadows and trim
+    // (Concat's 7).
+    bytes.extend_from_slice(&9u32.to_le_bytes());
     crate::media::fnv1a(&bytes)
 }
 
@@ -669,8 +894,18 @@ fn title_style(style: &TextStyle) -> TitleStyle {
     }
 }
 
-/// The document's shape, in the painter's terms.
+/// The document's shape, in the painter's terms: the box resolved, a
+/// line's ends and the figure's own counts filled in.
 fn shape_style(style: &ShapeStyle) -> concat_text::ShapeStyle {
+    use concat_project::model::{LineHead, StrokeAlign, StrokeDash};
+    let head = |head: LineHead| match head {
+        LineHead::None => concat_text::Head::None,
+        LineHead::Arrow => concat_text::Head::Arrow,
+        LineHead::Triangle => concat_text::Head::Triangle,
+        LineHead::Circle => concat_text::Head::Circle,
+        LineHead::Bar => concat_text::Head::Bar,
+    };
+    let (width, height) = style.figure_box();
     concat_text::ShapeStyle {
         figure: match style.kind {
             ShapeKind::Square => Figure::Square,
@@ -678,17 +913,48 @@ fn shape_style(style: &ShapeStyle) -> concat_text::ShapeStyle {
             ShapeKind::Triangle => Figure::Triangle,
             ShapeKind::Parallelogram => Figure::Parallelogram,
             ShapeKind::Trapezoid => Figure::Trapezoid,
-            ShapeKind::Line => Figure::Line,
-            ShapeKind::Arrow => Figure::Arrow,
-            ShapeKind::Star => Figure::Star,
+            ShapeKind::Line | ShapeKind::Arrow => Figure::Line,
+            ShapeKind::Polygon => Figure::Polygon(style.sides),
+            ShapeKind::Star => Figure::Star(style.points, style.inner_radius as f32),
             ShapeKind::Heart => Figure::Heart,
-            ShapeKind::Hexagon => Figure::Hexagon,
-            ShapeKind::Diamond => Figure::Diamond,
+            // Forge's own figures, now Concat's polygons.
+            ShapeKind::Hexagon => Figure::Polygon(6),
+            ShapeKind::Diamond => Figure::Polygon(4),
         },
-        size: style.size,
+        width,
+        height,
+        corner_radius: style.corner_radius,
         fill: style.fill.clone(),
+        gradient: style
+            .gradient
+            .as_ref()
+            .map(|gradient| concat_text::Gradient {
+                radial: gradient.radial,
+                color: gradient.color.clone(),
+                angle: gradient.angle,
+            }),
         stroke: style.stroke.clone(),
         stroke_width: style.stroke_width,
+        align: match style.stroke_align {
+            StrokeAlign::Center => concat_text::StrokeAlign::Center,
+            StrokeAlign::Inside => concat_text::StrokeAlign::Inside,
+            StrokeAlign::Outside => concat_text::StrokeAlign::Outside,
+        },
+        dash: match style.dash {
+            StrokeDash::Solid => concat_text::Dash::Solid,
+            StrokeDash::Dashed => concat_text::Dash::Dashed,
+            StrokeDash::Dotted => concat_text::Dash::Dotted,
+        },
+        start_head: head(style.start()),
+        end_head: head(style.end()),
+        shadow: style.shadow.as_ref().map(|shadow| concat_text::Shadow {
+            color: shadow.color.clone(),
+            blur: shadow.blur,
+            distance: shadow.distance,
+            angle: shadow.angle,
+        }),
+        trim_start: style.trim_start,
+        trim_end: style.trim_end,
     }
 }
 
@@ -751,6 +1017,28 @@ mod tests {
             out[0].clip.scale, 1.03,
             "the scale is honoured; only the stretch is not"
         );
+
+        // Nor by keys: a keyed width on a title is dropped with its
+        // constant, and its other keys still play.
+        for (property, value) in [(KeyProperty::StretchX, 3.0), (KeyProperty::Scale, 2.0)] {
+            editor
+                .apply(Command::SetClipKey {
+                    clip_id: id.clone(),
+                    property,
+                    at: 0.5,
+                    value,
+                    ease: Default::default(),
+                })
+                .expect("keys");
+        }
+        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        let names: Vec<&str> = out[0]
+            .clip
+            .animation
+            .iter()
+            .map(|key| key.property.as_str())
+            .collect();
+        assert_eq!(names, ["scale"]);
     }
 
     /// A title whose position is keyed is placed by its keys alone: the
@@ -904,6 +1192,78 @@ mod tests {
         assert_eq!(painted.content, "STRASSE ROT");
         assert_eq!((painted.runs[0].start, painted.runs[0].end), (8, 11));
         assert_eq!(painted.runs[0].color.as_deref(), Some("#ff0000"));
+        let _ = std::fs::remove_dir_all(dirs.data.parent().expect("a scratch root"));
+    }
+
+    /// The window's look paints nothing: titles not painted yet are left
+    /// out and said to be missing, and once a painter has been through,
+    /// every one is there and the look says so.
+    #[test]
+    fn ready_paints_nothing_and_says_what_is_missing() {
+        let dirs = scratch("ready_paints");
+        let mut editor = Editor::new();
+        for start in [0.0, 2.0, 4.0] {
+            editor
+                .apply(Command::AddTextClip {
+                    above: true,
+                    track_id: None,
+                    start,
+                    style: None,
+                    duration: Some(1.5),
+                    offset_y: None,
+                })
+                .expect("a title is added");
+        }
+        let titles = Titles::new(&dirs);
+        let (none, complete) = titles.ready(editor.project(), 640, 360);
+        assert!(
+            none.is_empty() && !complete,
+            "nothing painted, and it says so"
+        );
+        assert_eq!(titles.clips(editor.project(), 640, 360).len(), 3);
+        let (all, complete) = titles.ready(editor.project(), 640, 360);
+        assert_eq!(all.len(), 3);
+        assert!(complete);
+        let _ = std::fs::remove_dir_all(dirs.data.parent().expect("a scratch root"));
+    }
+
+    /// An export stopped while its titles paint gets nothing back, and
+    /// paints nothing more; one that goes on gets every title, at the size
+    /// it asked for.
+    #[test]
+    fn a_stopped_export_paints_no_titles() {
+        let dirs = scratch("stopped_paint");
+        let mut editor = Editor::new();
+        for start in [0.0, 2.0, 4.0] {
+            editor
+                .apply(Command::AddTextClip {
+                    above: true,
+                    track_id: None,
+                    start,
+                    style: None,
+                    duration: Some(1.5),
+                    offset_y: None,
+                })
+                .expect("a title is added");
+        }
+        let titles = Titles::new(&dirs);
+        let stop = AtomicBool::new(true);
+        assert!(
+            titles
+                .clips_unless(editor.project(), 1280, 720, &stop)
+                .is_none()
+        );
+        let (none, _) = titles.ready(editor.project(), 1280, 720);
+        assert!(none.is_empty(), "nothing was painted once it was stopped");
+        stop.store(false, Ordering::Relaxed);
+        let all = titles
+            .clips_unless(editor.project(), 1280, 720, &stop)
+            .expect("not stopped");
+        assert_eq!(all.len(), 3);
+        assert!(
+            all.iter().all(|title| title.clip.media_width == Some(1280)
+                && title.clip.media_height == Some(720))
+        );
         let _ = std::fs::remove_dir_all(dirs.data.parent().expect("a scratch root"));
     }
 
@@ -1067,7 +1427,7 @@ mod tests {
                     track_id: None,
                     start: index as f64,
                     style: Some(concat_project::model::ShapeStyle {
-                        size: 0.1 + index as f64 * 0.001,
+                        width: 0.1 + index as f64 * 0.001,
                         ..Default::default()
                     }),
                     duration: Some(1.0),
@@ -1171,5 +1531,53 @@ mod tests {
             Path::new(&out[0].clip.path).is_file(),
             "painted to disk like a title"
         );
+    }
+
+    /// A shape's Animate moves, mask and fades rejoin with it. The title
+    /// path builds its clip from blank, and left all three behind: no In,
+    /// Out or Loop ever played on a title, a caption or a shape.
+    #[test]
+    fn a_shape_rejoins_with_its_motion_mask_and_fades() {
+        use concat_project::commands::ClipPatch;
+        use concat_project::model::{ClipMotion, ClipMove, Mask, MaskShape};
+        let dirs = scratch("shape-motion");
+        let mut editor = Editor::new();
+        let id = editor
+            .apply(Command::AddShapeClip {
+                above: true,
+                track_id: None,
+                start: 0.0,
+                style: None,
+                duration: Some(3.0),
+                name: "Square".to_owned(),
+            })
+            .expect("a shape is added")
+            .created_id
+            .expect("with an id");
+        let motion = ClipMotion {
+            enter: Some(ClipMove {
+                kind: "pop".to_owned(),
+                seconds: 0.5,
+            }),
+            ..ClipMotion::default()
+        };
+        let masks = vec![Mask::of("mask-1", "", MaskShape::Circle)];
+        editor
+            .apply(Command::UpdateClip {
+                clip_id: id,
+                patch: ClipPatch {
+                    motion: Some(Some(motion.clone())),
+                    masks: Some(masks.clone()),
+                    fade_in: Some(0.25),
+                    fade_out: Some(0.75),
+                    ..ClipPatch::default()
+                },
+            })
+            .expect("animated, masked and faded");
+
+        let out = Titles::new(&dirs).clips(editor.project(), 640, 360);
+        assert_eq!(out[0].clip.motion, Some(motion));
+        assert_eq!(out[0].clip.masks, masks);
+        assert_eq!((out[0].clip.fade_in, out[0].clip.fade_out), (0.25, 0.75));
     }
 }

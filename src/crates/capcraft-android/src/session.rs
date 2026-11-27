@@ -917,6 +917,9 @@ impl MobileSession {
             paused: motion == Motion::Still,
             color_space,
             canvas: settings.canvas,
+            // Forge scrubs from its own scrub copies; Concat's nearest
+            // keyframe is left off until the two are measured side by side.
+            nearest: false,
         };
         let rgba = context
             .monitor
@@ -1508,6 +1511,9 @@ impl MobileSession {
             paused: false,
             color_space,
             canvas: settings.canvas,
+            // Forge scrubs from its own scrub copies; Concat's nearest
+            // keyframe is left off until the two are measured side by side.
+            nearest: false,
         };
         let rgba = context
             .monitor

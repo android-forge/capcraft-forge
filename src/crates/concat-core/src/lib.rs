@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! Core vocabulary of the Concat engine.
 //!
@@ -21,8 +21,11 @@ pub mod arena;
 pub mod frame;
 pub mod gpu_import;
 pub mod mask;
+pub mod motion;
 pub mod retime;
 pub mod shader;
+#[cfg(test)]
+mod speed_curve_tests;
 pub mod time;
 pub mod timeline;
 
