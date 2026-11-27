@@ -143,6 +143,92 @@ impl CutoutJob {
     }
 }
 
+/// Retouch's skin as the frame loop reads it: the skin model's masks of the
+/// clip's media, mapped onto the picture its passes see, as a map the
+/// Retouch shader reads through `reveal_order()` (see
+/// `capcraft.retouch/effect.wgsl`). A pixel is `1 + 254 × skin`, so the
+/// shader can tell a map from none, which reads 0 everywhere: an instant
+/// not analysed yet is retouched by colour, as before.
+pub(crate) struct SkinJob {
+    store: MaskStore,
+    mapping: Mapping,
+    /// The maps made last, by the mask they were made from.
+    made: std::sync::Mutex<std::collections::VecDeque<(Arc<concat_vision::Mask>, Arc<RevealMap>)>>,
+}
+
+impl SkinJob {
+    /// The job for a retouched clip whose skin has been analysed, or `None`.
+    /// `treated` as for [`CutoutJob::of`]: whether the clip's crop and flips
+    /// are in the frame already. When they are not, the compositor draws
+    /// them before the clip's effects, so the map takes them too.
+    pub(crate) fn of(clip: &ExportClip, treated: bool) -> Option<SkinJob> {
+        if clip.skin_dir.is_empty() {
+            return None;
+        }
+        let store = MaskStore::open(Path::new(&clip.skin_dir));
+        if store.is_empty() {
+            return None;
+        }
+        Some(SkinJob {
+            store,
+            mapping: if treated {
+                Mapping::IDENTITY
+            } else {
+                Mapping {
+                    crop: clip
+                        .crop
+                        .map(|edges| edges.map(|edge| edge as f32))
+                        .unwrap_or([0.0; 4]),
+                    flip_h: clip.flip_h,
+                    flip_v: clip.flip_v,
+                }
+            },
+            made: std::sync::Mutex::new(std::collections::VecDeque::new()),
+        })
+    }
+
+    /// The skin map at `source_time`, or `None` when that instant has no
+    /// mask yet.
+    pub(crate) fn map_at(&self, source_time: Rational) -> Option<Arc<RevealMap>> {
+        let mask = self.store.mask_at(source_time.as_f64())?;
+        if let Ok(made) = self.made.lock()
+            && let Some((_, map)) = made.iter().find(|(from, _)| Arc::ptr_eq(from, &mask))
+        {
+            return Some(Arc::clone(map));
+        }
+        let (width, height) = (mask.width(), mask.height());
+        let mut gray = Vec::with_capacity(width as usize * height as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let (u, v) = self.mapping.source_of(
+                    (x as f32 + 0.5) / width as f32,
+                    (y as f32 + 0.5) / height as f32,
+                );
+                gray.push(1 + (mask.sample(u, v).clamp(0.0, 1.0) * 254.0 + 0.5) as u8);
+            }
+        }
+        // the identity the renderer caches the upload by: what the map holds
+        let mut id: u64 = 0xcbf2_9ce4_8422_2325 ^ 0x736b_696e;
+        for &byte in &gray {
+            id ^= u64::from(byte);
+            id = id.wrapping_mul(0x0100_0000_01b3);
+        }
+        let map = Arc::new(RevealMap {
+            id,
+            width,
+            height,
+            gray: gray.into(),
+        });
+        if let Ok(mut made) = self.made.lock() {
+            made.push_back((mask, Arc::clone(&map)));
+            while made.len() > 3 {
+                made.pop_front();
+            }
+        }
+        Some(map)
+    }
+}
+
 /// A stabilization as the frame loop runs it: the clip's correction for
 /// every frame it shows, worked out once from the media's measured
 /// movement and the clip's settings when the timeline is built. Nothing
@@ -232,6 +318,8 @@ pub(crate) struct BuiltTimeline {
     pub(crate) transitions: Vec<TransitionSpan>,
     /// The clips whose background a mask takes away.
     pub(crate) cutouts: HashMap<ClipId, CutoutJob>,
+    /// The retouched clips whose skin has been found.
+    pub(crate) skins: HashMap<ClipId, SkinJob>,
     /// What fills the frame behind each picture that has a background; see
     /// [`crate::with_backdrops`].
     pub(crate) backdrops: HashMap<ClipId, crate::ExportBackdrop>,
@@ -335,6 +423,7 @@ pub(crate) fn build_timeline(
     let mut chains: HashMap<ClipId, Vec<AppliedFilter>> = HashMap::new();
     let mut reveal_maps: HashMap<ClipId, Arc<RevealMap>> = HashMap::new();
     let mut cutouts: HashMap<ClipId, CutoutJob> = HashMap::new();
+    let mut skins: HashMap<ClipId, SkinJob> = HashMap::new();
     let mut backdrops: HashMap<ClipId, crate::ExportBackdrop> = HashMap::new();
     let mut stabilized: HashMap<ClipId, StabilizeJob> = HashMap::new();
     let mut highlight: Option<ClipId> = None;
@@ -448,6 +537,9 @@ pub(crate) fn build_timeline(
             if let Some(job) = CutoutJob::of(clip, planned.is_none()) {
                 cutouts.insert(id, job);
             }
+            if let Some(job) = SkinJob::of(clip, planned.is_none()) {
+                skins.insert(id, job);
+            }
             if clip.highlighted {
                 highlight = Some(id);
             }
@@ -470,6 +562,7 @@ pub(crate) fn build_timeline(
         chains,
         reveal_maps,
         cutouts,
+        skins,
         stabilized,
         highlight,
         backdrops,

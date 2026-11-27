@@ -79,7 +79,7 @@ pub use mask::Mask;
 pub use models::ModelId;
 #[cfg(feature = "infer")]
 pub use segment::Segmenter;
-pub use store::{MaskStore, mask_dir, region_dir};
+pub use store::{MaskStore, mask_dir, region_dir, skin_dir};
 
 /// Masks are found this many times a second of source. Ten is where a
 /// person's outline stops visibly lagging their movement, and where a

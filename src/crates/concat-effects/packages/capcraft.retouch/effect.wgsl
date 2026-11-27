@@ -21,11 +21,26 @@ fn retouch_skin(c: vec3<f32>) -> f32 {
     return warm * mild * lit;
 }
 
+// How much the pixel at `uv` is skin: what the skin model found, when the
+// clip has been analysed - the engine hands its mask over as this pass's
+// map, each pixel 1 + 254 x skin, so a map is never 0 - and otherwise the
+// colour guess above. Light past white is still left alone either way.
+fn retouch_skin_at(uv: vec2<f32>, c: vec3<f32>) -> f32 {
+    if (any(c > vec3<f32>(1.0)) || any(c < vec3<f32>(0.0))) {
+        return 0.0;
+    }
+    let found = reveal_order(uv);
+    if (found > 0.5 / 255.0) {
+        return clamp((found * 255.0 - 1.0) / 254.0, 0.0, 1.0);
+    }
+    return retouch_skin(c);
+}
+
 // Skin softened by an edge-keeping average of the pixels around it - the
 // more like skin, the more - and lifted towards white by `brighten`.
 fn effect(uv: vec2<f32>) -> vec4<f32> {
     let c = sample(uv);
-    let skin = retouch_skin(c.rgb);
+    let skin = retouch_skin_at(uv, c.rgb);
     if (skin <= 0.0) {
         return c;
     }

@@ -24,8 +24,12 @@ pub mod chains;
 pub mod flatten;
 mod resolve;
 
+/// CapCraft's Retouch package, which reads the skin masks when a clip has
+/// them; see `resolve::SkinJob`.
+pub(crate) const RETOUCH: &str = "capcraft.retouch";
+
 use resolve::{
-    BuiltTimeline, TransitionSpan, Treatment, animation_of, build_timeline, quantise, quantise_at,
+    BuiltTimeline, SkinJob, TransitionSpan, Treatment, animation_of, build_timeline, quantise, quantise_at,
 };
 
 use std::collections::{BTreeMap, HashMap};
@@ -240,6 +244,11 @@ pub struct ExportClip {
     /// - or empty when the flattener had no project folder to name it by.
     #[serde(default)]
     pub mask_dir: String,
+    /// Where this clip's media has its skin masks - see
+    /// `concat_vision::skin_dir` - when it is retouched; empty otherwise.
+    /// Retouch smooths what they say is skin, and goes by colour without them.
+    #[serde(default)]
+    pub skin_dir: String,
     /// The camera's shake taken out, as the document holds it. Rendered
     /// only with `motion_dir`: a clip whose movement is not measured yet
     /// shows as shot.
@@ -362,6 +371,7 @@ impl ExportClip {
             cutout: None,
             mask: None,
             mask_dir: String::new(),
+            skin_dir: String::new(),
             stabilize: None,
             motion_dir: String::new(),
             highlighted: false,
@@ -1847,6 +1857,7 @@ fn render_picture(
         chains,
         reveal_maps,
         cutouts,
+        skins,
         stabilized,
         highlight: _,
         backdrops,
@@ -1963,7 +1974,7 @@ fn render_picture(
                         layer,
                         frame,
                         tracks.get(&layer.clip).copied().unwrap_or(0),
-                        passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
+                        passes_at(&chains, &reveal_maps, &skins, &timeline, layer.clip, time, layer.source_time),
                         geometry.get(&layer.clip),
                         shapes_at(&shapes, layer, time, rate),
                         stabilized.get(&layer.clip),
@@ -2032,7 +2043,7 @@ fn render_picture(
                         layer,
                         std::sync::Arc::new(frame),
                         tracks.get(&layer.clip).copied().unwrap_or(0),
-                        passes_at(&chains, &reveal_maps, &timeline, layer.clip, time),
+                        passes_at(&chains, &reveal_maps, &skins, &timeline, layer.clip, time, layer.source_time),
                         geometry.get(&layer.clip),
                         shapes_at(&shapes, layer, time, rate),
                         stabilized.get(&layer.clip),
@@ -2238,9 +2249,11 @@ fn progress_due(index: i64, since: std::time::Duration) -> bool {
 fn passes_at(
     chains: &HashMap<ClipId, Vec<AppliedFilter>>,
     reveal_maps: &HashMap<ClipId, Arc<RevealMap>>,
+    skins: &HashMap<ClipId, SkinJob>,
     timeline: &Timeline,
     clip: ClipId,
     time: Rational,
+    source_time: Rational,
 ) -> Vec<ShaderPass> {
     let Some(effects) = chains.get(&clip) else {
         return Vec::new();
@@ -2248,7 +2261,15 @@ fn passes_at(
     let at = timeline
         .clip(clip)
         .map_or(0.0, |engine_clip| engine_clip.fraction_at(time));
-    Catalogue::builtin().shader_passes_at(effects, at, reveal_maps.get(&clip).cloned())
+    let mut passes =
+        Catalogue::builtin().shader_passes_at(effects, at, reveal_maps.get(&clip).cloned());
+    // Retouch reads the skin the model found at this instant, where it has
+    if let Some(map) = skins.get(&clip).and_then(|job| job.map_at(source_time)) {
+        for pass in passes.iter_mut().filter(|pass| pass.package == RETOUCH) {
+            pass.reveal_map = Some(Arc::clone(&map));
+        }
+    }
+    passes
 }
 
 /// Only the shader clock moves. Planning, source decoding, animated effect
@@ -2743,6 +2764,7 @@ pub fn preview_sources_of(
         chains,
         reveal_maps,
         cutouts,
+        skins,
         stabilized,
         highlight,
         backdrops,
@@ -2791,7 +2813,7 @@ pub fn preview_sources_of(
                     layer,
                     frame,
                     tracks.get(&layer.clip).copied().unwrap_or(0),
-                    passes_at(chains, reveal_maps, timeline, layer.clip, time),
+                    passes_at(chains, reveal_maps, skins, timeline, layer.clip, time, layer.source_time),
                     geometry.get(&layer.clip),
                     shapes_at(shapes, layer, time, rate),
                     stabilized.get(&layer.clip),

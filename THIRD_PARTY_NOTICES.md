@@ -214,6 +214,11 @@ except the first:
   Apache-2.0), compiled into the `concat-vision` crate; see
   `src/crates/concat-vision/models/NOTICE.md`. The answer when nothing
   has been downloaded.
+- Google's MediaPipe Selfie Multiclass Segmentation (Apache-2.0), from
+  https://huggingface.co/litert-community/MediaPipe-ImageSegmenter-Selfie-Multiclass,
+  converted to ONNX by CapCraft Forge and compiled into `concat-vision`;
+  see `src/crates/concat-vision/models/NOTICE.md`. Not a cutout: Retouch's
+  skin, the face's and the body's.
 - Robust Video Matting, the MobileNetV3 variant, by Peter Lin and others
   (https://github.com/PeterL1n/RobustVideoMatting, GPL-3.0), from that
   repository's releases, downloaded on first use. The person model.

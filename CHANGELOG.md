@@ -3,6 +3,15 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## Unreleased
+
+### 27 November 2026
+- Retouch finds skin with a model: Google's MediaPipe Selfie Multiclass Segmentation (Apache-2.0), converted to ONNX
+  and built into the app, so nothing is downloaded. Once Retouch is on a photo or video, the face's and the body's skin
+  are found on the phone, ten looks a second, kept with the project like Remove BG's masks, with "Finding skin" and its
+  progress in the panel. Skin-coloured walls, wood and sand are no longer smoothed, and darker skin that the colour
+  guess missed is. Until a stretch has been looked at, Retouch goes by colour as before.
+
 ## 0.0.8 (24 November 2026)
 
 ### 24 November 2026
