@@ -322,6 +322,8 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
         Tool("videoeffects", "Video effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Layer) },
         Tool("bodyeffects", "Body effects", LucideIcons.UserRound) { vm.panel = Panel.BodyEffects },
         Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere },
+        // laid on the effects row as items of their own
+        Tool("reelfx", "Reel FX", LucideIcons.Clapperboard, aliases = listOf("Effects pack", "Spotlight", "Orbit")) { vm.panel = Panel.ReelFx },
     )
     "background" -> listOf(
         Tool("bgcolor", "Color", LucideIcons.Palette) { vm.panel = Panel.Background(0) },
@@ -671,6 +673,13 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind): List<To
             duplicate,
             split,
             Tool("layer", "Layer", LucideIcons.Layers) { vm.panel = Panel.Layer },
+            delete,
+        ) else if (clip.kind == "layer" && (vm.clipJson(clip.id)?.optJSONArray("reelFx")?.length() ?: 0) > 0) listOf(
+            // a reel effect: its settings; its opacity (keyed or not) is how hard it draws
+            Tool("adjust", "Adjust", LucideIcons.SlidersHorizontal) { vm.panel = Panel.ReelFx },
+            Tool("layer", "Opacity", LucideIcons.Layers) { vm.panel = Panel.Layer },
+            duplicate,
+            split,
             delete,
         ) else listOf(
             // an effect: its settings, another in its place, and what it treats

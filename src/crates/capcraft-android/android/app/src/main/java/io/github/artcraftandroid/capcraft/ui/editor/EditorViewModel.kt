@@ -1216,6 +1216,11 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     }
 
     /** Adds a filter or effect layer at the playhead and selects it. */
+    /** Reel effect [fx] laid on the effect row at the playhead as an item of its own, and selected. */
+    fun addReelLayer(fx: String, name: String, durationUs: Long = 3_000_000) {
+        edit(select = { it.createdId.ifEmpty { null } }) { addReelLayer(fx, name, playhead, durationUs) }
+    }
+
     fun addLayer(effectId: String, name: String, durationUs: Long = 3_000_000) {
         edit(select = { it.createdId.ifEmpty { null } }) { addLayer(effectId, name, playhead, durationUs) }
     }

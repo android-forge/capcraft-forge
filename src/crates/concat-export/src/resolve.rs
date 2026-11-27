@@ -172,7 +172,11 @@ impl FxJob {
         let runs: Vec<capcraft_reelfx::Run> = clip
             .reel_fx
             .iter()
-            .filter_map(|e| capcraft_reelfx::Run::new(&e.fx, e.start as f32, e.end as f32, e.options.clone()))
+            .filter_map(|e| {
+                let mut run = capcraft_reelfx::Run::new(&e.fx, e.start as f32, e.end as f32, e.options.clone())?;
+                run.strength = e.strength.iter().map(|&(t, k)| (t as f32, k as f32)).collect();
+                Some(run)
+            })
             .collect();
         if runs.is_empty() {
             return None;

@@ -91,8 +91,10 @@ impl Faces {
     /// asked for, paired with the media's id.
     pub fn requests(project: &Project, project_dir: &Path) -> Vec<(String, FaceRequest, AnalyseRequest)> {
         let mut out: Vec<(String, FaceRequest, AnalyseRequest)> = Vec::new();
-        for clip in &project.active().clips {
-            if clip.reel_fx.is_empty() || !clip.kind.is_visual() {
+        let timeline = project.active();
+        for clip in &timeline.clips {
+            let reel_fx = timeline.reel_fx_on(clip);
+            if reel_fx.is_empty() || !clip.kind.is_visual() {
                 continue;
             }
             let Some(media) = project.media_by_id(&clip.media_id) else {
@@ -103,11 +105,10 @@ impl Faces {
             }
             // only the stretches the effects cover, and half a second either side
             let speed = clip.speed.max(0.0625);
-            let ranges: Vec<(f64, f64)> = clip
-                .reel_fx
+            let ranges: Vec<(f64, f64)> = reel_fx
                 .iter()
                 .map(|e| {
-                    let a = clip.source_start + (e.start - 0.5).max(0.0) * speed;
+                    let a = clip.source_start + (e.start - 0.5).clamp(0.0, clip.duration) * speed;
                     let b = clip.source_start + (e.end + 0.5).min(clip.duration) * speed;
                     (a, b.max(a))
                 })

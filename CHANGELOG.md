@@ -6,6 +6,9 @@ dated, as the licence asks; `#` numbers are the original project's.
 ## Unreleased
 
 ### 27 November 2026
+- Reel FX on the timeline: Effects > Reel FX lays each effect on the effects row as an item of its own, drawn on the
+  pictures beneath it - move it, trim or extend it, and key its opacity to fade it in and out. Each effect shows only
+  the settings it reads (Swipe's after look and Backdrop Word's font as choices), not a generic words box.
 - Film looks (in Filters, under Film): 13 film stocks and grades - Vision3 500T and 250D, Eterna 500, Ektachrome 100,
   Delta 3200, CineStill 800T, Kodak Gold, teal and orange, bleach bypass, night bloom, documentary, day for night and
   cross process - each with an amount, after 0xzgbot's color-grading-film-emulation skill (MIT).

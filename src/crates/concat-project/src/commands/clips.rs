@@ -236,7 +236,9 @@ pub(super) fn apply(
                 ClipKind::Layer
             };
             let mut clip = Clip::blank(id.clone(), track_id, kind, name, start, duration);
-            if sound {
+            // no package is a layer for Forge's reel effects, set after
+            if effect_id.is_empty() {
+            } else if sound {
                 clip.filters = vec![AppliedFilter::new(effect_id)];
             } else {
                 clip.video_effects = vec![AppliedFilter::new(effect_id)];

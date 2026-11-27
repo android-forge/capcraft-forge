@@ -93,7 +93,7 @@ pub(super) fn apply(
                 applied |= assign(&mut clip.background, background.map(Background::tidy));
             }
             if let Some(effects) = patch.reel_fx
-                && clip.kind.is_visual()
+                && (clip.kind.is_visual() || clip.kind == ClipKind::Layer)
             {
                 let effects = effects
                     .into_iter()

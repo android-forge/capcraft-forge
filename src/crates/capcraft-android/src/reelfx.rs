@@ -52,10 +52,21 @@ impl MobileSession {
     fn reel_requests(&self, clip_id: &str) -> Result<Vec<(concat_host::FaceRequest, concat_host::AnalyseRequest)>, MobileError> {
         self.with_session(|session| {
             let project = session.project();
-            let media = project.active().clips.iter().find(|c| c.id == clip_id).map(|c| c.media_id.clone()).unwrap_or_default();
+            let timeline = project.active();
+            // a reel layer's: the pictures beneath it it draws on
+            let media: Vec<String> = match timeline.clips.iter().find(|c| c.id == clip_id) {
+                Some(c) if c.kind == concat_project::model::ClipKind::Layer => timeline
+                    .clips
+                    .iter()
+                    .filter(|v| v.start < c.start + c.duration && c.start < v.start + v.duration)
+                    .map(|v| v.media_id.clone())
+                    .collect(),
+                Some(c) => vec![c.media_id.clone()],
+                None => Vec::new(),
+            };
             Ok(Faces::requests(project, std::path::Path::new(session.path()))
                 .into_iter()
-                .filter(|(id, _, _)| *id == media)
+                .filter(|(id, _, _)| media.contains(id))
                 .map(|(_, f, m)| (f, m))
                 .collect())
         })
@@ -64,6 +75,53 @@ impl MobileSession {
 
 #[uniffi::export]
 impl MobileSession {
+    /// Lays reel effect `fx` on the effect row at `at_us` for `duration_us`,
+    /// as an item of its own over the pictures beneath it: moved, trimmed
+    /// and keyed (its opacity the effect's strength) as any layer is.
+    pub fn add_reel_layer(&self, fx: String, name: String, at_us: i64, duration_us: i64) -> Result<crate::session::TimelineView, MobileError> {
+        if capcraft_reelfx::find(&fx).is_none() {
+            return Err(MobileError::from(format!("no reel effect {fx}")));
+        }
+        let start = (at_us as f64 / 1e6).max(0.0);
+        let duration = (duration_us as f64 / 1e6).max(0.1);
+        let before: std::collections::HashSet<String> = self.timeline().clips.iter().map(|c| c.id.clone()).collect();
+        self.place_many(
+            crate::lanes::RowKind::Effect,
+            start,
+            duration,
+            |track_id| {
+                vec![concat_project::commands::Command::AddLayerClip {
+                    track_id: Some(track_id),
+                    start,
+                    duration: Some(duration),
+                    effect_id: String::new(),
+                    name,
+                    sound: false,
+                }]
+            },
+            |after| {
+                after
+                    .clips
+                    .iter()
+                    .filter(|c| !before.contains(&c.id))
+                    .map(|c| concat_project::commands::Command::UpdateClip {
+                        clip_id: c.id.clone(),
+                        patch: concat_project::commands::ClipPatch {
+                            reel_fx: Some(vec![concat_project::model::ReelEffect {
+                                fx: fx.clone(),
+                                start: 0.0,
+                                end: c.duration,
+                                options: Default::default(),
+                                strength: Vec::new(),
+                            }]),
+                            ..Default::default()
+                        },
+                    })
+                    .collect()
+            },
+        )
+    }
+
     /// Whether clip `clip_id`'s reel effects still have a face or a person
     /// to find.
     pub fn reel_tracking_missing(&self, clip_id: String) -> Result<bool, MobileError> {

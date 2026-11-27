@@ -336,7 +336,7 @@ pub(crate) const SWIPE: Effect = Effect {
     name: "swipe",
     title: "Swipe",
     desc: "A before and after slider sweeps across you",
-    options: "grade: the after look (moody)",
+    options: "grade: the after look: moody, bw, warm, cool or pop",
     cards: false,
     draw: swipe,
 };

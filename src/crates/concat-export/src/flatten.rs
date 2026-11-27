@@ -94,6 +94,8 @@ pub fn flatten_timeline_in(
             }
 
             let media = project.media.iter().find(|item| item.id == clip.media_id)?;
+            // the clip's own reel effects and those of the reel layers over it
+            let reel_fx = timeline.reel_fx_on(clip);
 
             let kind = match clip.kind {
                 ModelClipKind::Video => ClipKind::Video,
@@ -182,15 +184,15 @@ pub fn flatten_timeline_in(
                     }
                     _ => String::new(),
                 },
-                reel_fx: if matches!(kind, ClipKind::Video | ClipKind::Image) { clip.reel_fx.clone() } else { Vec::new() },
+                reel_fx: reel_fx.clone(),
                 person_dir: match project_dir {
-                    Some(dir) if !clip.reel_fx.is_empty() => concat_vision::mask_dir(dir, &media.path, concat_project::model::Subject::Person)
+                    Some(dir) if !reel_fx.is_empty() => concat_vision::mask_dir(dir, &media.path, concat_project::model::Subject::Person)
                         .to_string_lossy()
                         .into_owned(),
                     _ => String::new(),
                 },
                 face_file: match project_dir {
-                    Some(dir) if !clip.reel_fx.is_empty() => concat_vision::faces::face_file(dir, &media.path).to_string_lossy().into_owned(),
+                    Some(dir) if !reel_fx.is_empty() => concat_vision::faces::face_file(dir, &media.path).to_string_lossy().into_owned(),
                     _ => String::new(),
                 },
                 stabilize: clip.stabilize.filter(|_| kind == ClipKind::Video),

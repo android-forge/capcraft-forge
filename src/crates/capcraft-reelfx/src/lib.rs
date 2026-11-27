@@ -106,6 +106,9 @@ pub struct Run {
     /// Its settings.
     pub o: BTreeMap<String, String>,
     /// Pictures the card effects lay out: the user's own, or the clip's.
+    /// How hard it is drawn, as `(seconds, 0..=1)` points to join; empty
+    /// is full strength.
+    pub strength: Vec<(f32, f32)>,
     pub cards: Arc<Vec<Pixmap>>,
     state: HashMap<String, Arc<dyn Any + Send + Sync>>,
 }
@@ -126,6 +129,7 @@ impl Run {
             d: (end - start).max(0.05),
             o,
             cards: Arc::new(Vec::new()),
+            strength: Vec::new(),
             state: HashMap::new(),
         })
     }
@@ -138,6 +142,22 @@ impl Run {
     /// The setting `key`, or `default`.
     pub fn s(&self, key: &str, default: &str) -> String {
         self.o.get(key).cloned().unwrap_or_else(|| default.to_owned())
+    }
+
+    /// How hard it is drawn at `t`.
+    pub fn strength_at(&self, t: f32) -> f32 {
+        let p = &self.strength;
+        let Some(first) = p.first() else { return 1.0 };
+        if t <= first.0 {
+            return first.1;
+        }
+        for w in p.windows(2) {
+            let ((a, x), (b, y)) = (w[0], w[1]);
+            if t <= b {
+                return if b > a { x + (y - x) * (t - a) / (b - a) } else { y };
+            }
+        }
+        p[p.len() - 1].1
     }
 
     /// The setting `key` as a number, or `default`.
@@ -244,7 +264,18 @@ pub fn draw(rgba: &mut [u8], w: usize, h: usize, mask: Option<&[f32]>, face: Opt
     };
     for run in runs.iter_mut().filter(|r| r.covers(t)) {
         c.lt = t - run.start;
+        let k = run.strength_at(t).clamp(0.0, 1.0);
+        if k <= 0.0 {
+            continue;
+        }
+        // drawn in full, then laid over what was there by its strength
+        let before = (k < 0.999).then(|| c.img.clone());
         (run.effect.draw)(&mut c, run);
+        if let Some(before) = before {
+            for (v, o) in c.img.iter_mut().zip(&before) {
+                *v = o + (*v - o) * k;
+            }
+        }
     }
     for (px, v) in rgba.chunks_exact_mut(4).zip(c.img.chunks_exact(3)) {
         for i in 0..3 {
