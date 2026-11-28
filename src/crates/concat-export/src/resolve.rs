@@ -258,6 +258,10 @@ impl FxJob {
         let t = (time.as_f64() - self.clip_start) as f32;
         let mut runs = self.runs.lock().ok()?;
         if !runs.iter().any(|r| r.covers(t)) {
+            // off: the frame-sized mask kept for the next frame is let go
+            if let Ok(mut kept) = self.mapped.lock() {
+                *kept = None;
+            }
             return None;
         }
         let (w, h) = (frame.width() as usize, frame.height() as usize);

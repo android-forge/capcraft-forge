@@ -84,7 +84,6 @@ internal data class Collage(
 internal val COLLAGE_FRAMES = listOf("1:1" to (1080 to 1080), "4:5" to (1080 to 1350), "3:4" to (1080 to 1440), "9:16" to (1080 to 1920), "16:9" to (1920 to 1080))
 
 /** Colours for the gaps. */
-private val GAP_COLOURS = listOf("#ffffff", "#000000", "#f4e9d8", "#ffd60a", "#ff9230", "#ee2222", "#ff4fa3", "#7c5cff", "#0a84ff", "#34c759", "#9ad7c4", "#2e2e30")
 
 /** Rows of [counts] cells each, the rows equally tall and each row's cells equally wide. */
 private fun rows(vararg counts: Int): List<Cell> = counts.withIndex().flatMap { (r, n) ->
@@ -294,6 +293,8 @@ fun CollagePanel(vm: EditorViewModel) {
 /** The collage's tabs, for its panel in the editor and for its own screen. */
 @Composable
 fun CollageTools(vm: EditorViewModel) {
+    // a picture picked in another collage is not one picked here
+    androidx.compose.runtime.LaunchedEffect(vm.path) { CollagePick.id = null }
     val kept = remember(vm.timeline?.revision) { vm.session?.collage() } ?: return
     var tab by remember { mutableStateOf(0) }
     var swapFrom by remember { mutableStateOf<Int?>(null) }
@@ -308,7 +309,7 @@ fun CollageTools(vm: EditorViewModel) {
             0 -> Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Pictures", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(64.dp))
-                    Pill("", false, LucideIcons.Minus, "Remove the last picture") {
+                    Pill("", false, LucideIcons.Minus, "Remove the last picture", choice = false) {
                         if (kept.ids.size > 2) {
                             val last = kept.ids.last()
                             vm.edit {
@@ -320,7 +321,7 @@ fun CollageTools(vm: EditorViewModel) {
                         } else vm.message = "A collage keeps at least two pictures"
                     }
                     Text("${kept.ids.size}", style = Type.BodyStrong.copy(color = Palette.Text), modifier = Modifier.padding(horizontal = 12.dp))
-                    Pill("", false, LucideIcons.Plus, "Add a picture") {
+                    Pill("", false, LucideIcons.Plus, "Add a picture", choice = false) {
                         if (kept.ids.size >= 9) vm.message = "A collage holds up to nine pictures"
                         else MediaPick.open(MediaKinds.BOTH, multiple = false) { uris ->
                             val uri = uris.firstOrNull() ?: return@open
@@ -363,7 +364,7 @@ fun CollageTools(vm: EditorViewModel) {
                                 vm.edit { layCollage(view(), kept.copy(adjust = kept.adjust + (picked to Triple(v, ox, oy))), media, zoomGesture) }
                             }, { vm.endGesture(); zoomGesture = collageGesture() }, title = "Picture ${kept.ids.indexOf(picked) + 1} zoom")
                         }
-                        Pill("Reset", false) { lay(kept.copy(adjust = kept.adjust - picked)) }
+                        Pill("Reset", false, choice = false) { lay(kept.copy(adjust = kept.adjust - picked)) }
                     }
                 }
                 Text("Tap a picture to zoom it with a slider, or pinch it; drag to move it, double-tap to reset", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp), modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
@@ -384,11 +385,11 @@ fun CollageTools(vm: EditorViewModel) {
                 ValueSlider(kept.gap * 1000f, 0f..60f, { "%.0f".format(it) }, { v -> lay(kept.copy(gap = v / 1000f)) }, { vm.endGesture() }, title = "Width")
                 ValueSlider(kept.radius * 100f, 0f..100f, { "%.0f".format(it) }, { v -> lay(kept.copy(radius = v / 100f)) }, { vm.endGesture() }, title = "Radius")
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GAP_COLOURS.forEach { hex ->
+                    PICK_COLOURS.forEach { hex ->
                         val on = hex.equals(kept.color, ignoreCase = true)
                         Box(
                             Modifier.minimumInteractiveComponentSize()
-                                .semantics { contentDescription = "Gap colour ${dotName(hex)}" }
+                                .semantics { contentDescription = "Gap colour ${colourName(hex).lowercase()}" }
                                 .selectable(selected = on, role = Role.RadioButton) { lay(kept.copy(color = hex)) },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -441,22 +442,16 @@ private fun StyleTile(style: String, n: Int, on: Boolean) {
 
 /** A rounded label to tap, lit when [on]. */
 @Composable
-private fun Pill(label: String, on: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, description: String? = null, onClick: () -> Unit) {
+private fun Pill(label: String, on: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, description: String? = null, choice: Boolean = true, onClick: () -> Unit) {
     Box(
         Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.DockBack)
-            .selectable(selected = on, role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+            .then(if (choice) Modifier.selectable(selected = on, role = Role.Button, onClick = onClick) else Modifier.clickable(role = Role.Button, onClick = onClick))
+            .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (icon != null) androidx.compose.material3.Icon(icon, contentDescription = description, tint = Palette.Text, modifier = Modifier.size(18.dp))
         else Text(label, style = Type.Small.copy(color = if (on) Palette.OnAccent else Palette.Text, fontSize = 13.sp))
     }
-}
-
-/** What a screen reader calls a gap colour. */
-private fun dotName(hex: String): String = when (hex.lowercase()) {
-    "#ffffff" -> "white"; "#000000" -> "black"; "#f4e9d8" -> "cream"; "#ffd60a" -> "yellow"; "#ff9230" -> "orange"
-    "#ee2222" -> "red"; "#ff4fa3" -> "pink"; "#7c5cff" -> "purple"; "#0a84ff" -> "blue"; "#34c759" -> "green"
-    "#9ad7c4" -> "mint"; "#2e2e30" -> "charcoal"; else -> hex
 }
 
 /** The picture tapped on the collage screen, for its zoom slider. */

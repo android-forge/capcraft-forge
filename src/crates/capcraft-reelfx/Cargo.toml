@@ -8,6 +8,7 @@ publish = false
 description = "Forge's reel effects: talking-head effects drawn on a clip's own frames, around the person and the face that are tracked in it. Ported from Vibha Ramprakash's claude-video-effects (MIT)."
 
 [dependencies]
+rayon = "1.12"
 concat-text.workspace = true
 # Fill, stroke and anti-aliasing of the effects' cards, words and lines.
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }

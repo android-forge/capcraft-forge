@@ -174,8 +174,8 @@ internal fun colourName(hex: String): String = when (hex.lowercase()) {
 }
 
 /** Colours to pick from. */
-private val REEL_SWATCHES = listOf(
-    "#ffffff", "#f4e9d8", "#ffd60a", "#ff9230", "#ee2222", "#ff4fa3", "#7c5cff", "#0a84ff", "#34c759", "#22c55e", "#141416", "#000000",
+internal val PICK_COLOURS = listOf(
+    "#ffffff", "#f4e9d8", "#ffd60a", "#ff9230", "#ee2222", "#ff4fa3", "#7c5cff", "#0a84ff", "#34c759", "#9ad7c4", "#2e2e30", "#000000",
 )
 
 /**
@@ -323,14 +323,14 @@ fun ReelFxPanel(vm: EditorViewModel) {
                 }
                 // a sound at the effect's start, the ones that suit it first
                 val sounds = (SUITS[name].orEmpty() + listOf("Whoosh", "Pop", "Riser", "Impact", "Sparkle", "Ding", "Camera flash", "Typewriter", "Glitch")).distinct()
-                Choices("Sound", sounds, "", { it }) { sound ->
+                Choices("Sound", sounds, "", { it }, choice = false) { sound ->
                     vm.scrub(c.startUs + (if (layer) 0L else (e.optDouble("start") * 1_000_000).toLong()))
                     addSoundFx(vm, sound, scope)
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (info?.cards == true || read.any { it.key == "images" }) {
                         val context = androidx.compose.ui.platform.LocalContext.current
-                        Chip("Your images", false) {
+                        Chip("Your images", false, choice = false) {
                             MediaPick.open(MediaKinds.IMAGE, multiple = true) { uris ->
                                 scope.launch(Threads.commands) {
                                     // copies kept in the project's own media, as any import is: they go with the project
@@ -342,7 +342,7 @@ fun ReelFxPanel(vm: EditorViewModel) {
                             }
                         }
                     }
-                    Chip("Remove", false) {
+                    Chip("Remove", false, choice = false) {
                         if (layer) { vm.edit { delete(listOf(c.id)) }; vm.select(null); vm.panel = null } else setReelFx(vm, c.id, list.filterIndexed { j, _ -> j != i })
                         chosen = null
                     }
@@ -354,11 +354,11 @@ fun ReelFxPanel(vm: EditorViewModel) {
 
 /** A row of chips, one chosen. */
 @Composable
-private fun Choices(title: String, choices: List<String>, now: String, name: (String) -> String, onPick: (String) -> Unit) {
+private fun Choices(title: String, choices: List<String>, now: String, name: (String) -> String, choice: Boolean = true, onPick: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            choices.forEach { c -> Chip(name(c), c.equals(now, ignoreCase = true)) { onPick(c) } }
+            choices.forEach { c -> Chip(name(c), c.equals(now, ignoreCase = true), choice) { onPick(c) } }
         }
     }
 }
@@ -366,7 +366,7 @@ private fun Choices(title: String, choices: List<String>, now: String, name: (St
 /** Colours as dots to tap; the one in use ringed. */
 @Composable
 private fun Swatches(title: String, now: String, onPick: (String) -> Unit) {
-    val all = (listOf(now.lowercase()) + REEL_SWATCHES).distinct()
+    val all = (listOf(now.lowercase()) + PICK_COLOURS).distinct()
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -438,10 +438,11 @@ private fun Box_(value: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
 }
 
 @Composable
-private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
+private fun Chip(label: String, on: Boolean, choice: Boolean = true, onClick: () -> Unit) {
     Box(
         Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.DockBack)
-            .selectable(selected = on, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+            .then(if (choice) Modifier.selectable(selected = on, role = Role.Button, onClick = onClick) else Modifier.clickable(role = Role.Button, onClick = onClick))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = Type.Small.copy(color = if (on) Palette.OnAccent else Palette.Text, fontSize = 13.sp), maxLines = 1)

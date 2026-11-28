@@ -485,6 +485,7 @@ name = "capcraft-reelfx"
 version = "0.2.12"
 dependencies = [
  "concat-text",
+ "rayon",
  "tiny-skia 0.12.0",
  "ttf-parser",
 ]

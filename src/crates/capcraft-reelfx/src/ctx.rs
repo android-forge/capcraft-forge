@@ -73,18 +73,15 @@ impl Grade {
 /// and the band. A frame at export size is millions of pixels, and one
 /// core at a time made an effect hundreds of milliseconds a frame.
 pub fn par_rows<T: Send>(buf: &mut [T], unit: usize, rows: usize, f: impl Fn(usize, &mut [T]) + Sync) {
-    let cores = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+    use rayon::prelude::*;
+    // rayon's threads are made once and kept: a frame runs several of these
+    let cores = rayon::current_num_threads().max(1);
     let per = rows.div_ceil(cores).max(1);
     if cores == 1 || rows < 64 {
         f(0, buf);
         return;
     }
-    std::thread::scope(|scope| {
-        for (i, band) in buf.chunks_mut(per * unit).enumerate() {
-            let f = &f;
-            scope.spawn(move || f(i * per, band));
-        }
-    });
+    buf.par_chunks_mut(per * unit).enumerate().for_each(|(i, band)| f(i * per, band));
 }
 
 /// `x` to the power `p` for `x` in `0..=1`, from a table: `powf` on every
