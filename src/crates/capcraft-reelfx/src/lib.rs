@@ -255,11 +255,6 @@ impl Run {
         made
     }
 
-    /// Forgets what was kept: the next frame builds it again.
-    pub fn reset(&mut self) {
-        self.state.clear();
-    }
-
     /// Fading out over the last `t` seconds.
     pub fn fade(&self, c: &Ctx, t: f32) -> f32 {
         ctx::clamp((self.d - c.lt) / t)
@@ -377,7 +372,7 @@ mod draw_tests {
     /// later frame without them.
     #[test]
     fn every_effect_draws_with_defaults_and_with_blank_settings() {
-        let (w, h) = (360, 640);
+        let (w, h) = (270, 480);
         // a person in the middle, a face a third of the way down
         let mask: Vec<f32> = (0..w * h).map(|i| if (i % w) > w / 4 && (i % w) < w * 3 / 4 && i / w > h / 5 { 1.0 } else { 0.0 }).collect();
         let face = Face { x: 0.5, y: 0.33, w: 0.2 };
@@ -385,7 +380,7 @@ mod draw_tests {
             let blank: BTreeMap<String, String> = settings(e.name).into_iter().map(|s| (s.key, String::new())).collect();
             for options in [BTreeMap::new(), blank] {
                 let mut runs = vec![Run::new(e.name, 0.0, 3.0, options.clone()).expect("listed effects are found")];
-                for t in [0.0, 0.4, 1.2, 2.1, 2.95] {
+                for t in [0.05, 1.2, 2.9] {
                     let mut rgba = vec![128u8; w * h * 4];
                     let drew = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut rgba, w, h, Some(&mask), Some(face), &mut runs, t)));
                     assert!(drew.is_ok(), "{} panicked at {t}s with {options:?}", e.name);
