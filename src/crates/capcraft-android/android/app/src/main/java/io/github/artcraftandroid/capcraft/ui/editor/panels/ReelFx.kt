@@ -23,6 +23,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import io.github.artcraftandroid.capcraft.ui.LucideIcons
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -150,6 +156,23 @@ private val SUITS = mapOf(
     "shortcut-rain" to listOf("Keyboard", "Typewriter"),
 )
 
+/** What a screen reader calls a colour dot. */
+internal fun colourName(hex: String): String = when (hex.lowercase()) {
+    "#ffffff" -> "White"
+    "#000000" -> "Black"
+    "#f4e9d8" -> "Cream"
+    "#ffd60a" -> "Yellow"
+    "#ff9230" -> "Orange"
+    "#ee2222" -> "Red"
+    "#ff4fa3" -> "Pink"
+    "#7c5cff" -> "Purple"
+    "#0a84ff" -> "Blue"
+    "#34c759", "#22c55e" -> "Green"
+    "#141416", "#2e2e30" -> "Charcoal"
+    "#9ad7c4" -> "Mint"
+    else -> "Colour $hex"
+}
+
 /** Colours to pick from. */
 private val REEL_SWATCHES = listOf(
     "#ffffff", "#f4e9d8", "#ffd60a", "#ff9230", "#ee2222", "#ff4fa3", "#7c5cff", "#0a84ff", "#34c759", "#22c55e", "#141416", "#000000",
@@ -206,7 +229,7 @@ fun ReelFxPanel(vm: EditorViewModel) {
             tracking?.let { Text("Finding you  ${(it * 100).toInt()}%", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.padding(bottom = 6.dp)) }
             // the clip's effects, and Add; a layer is one effect, timed on the timeline
             if (layer) {
-                Text("Move and trim it on the effects row. Its opacity, keyed, is how strong it is.", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp))
+                Text("Move and trim it on the effects row. Its opacity, keyed, is how strong it is.", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp))
                 if (chosen == null) chosen = 0
             } else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 list.forEachIndexed { i, e ->
@@ -220,7 +243,7 @@ fun ReelFxPanel(vm: EditorViewModel) {
                 LazyVerticalGrid(GridCells.Fixed(2), Modifier.fillMaxWidth().height(230.dp), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(all) { fx ->
                         Column(
-                            Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2E2E30)).clickable {
+                            Modifier.clip(RoundedCornerShape(8.dp)).background(Palette.CardPressed).clickable {
                                 // an item of its own on the effects row, selected so its settings show
                                 vm.addReelLayer(fx.name, fx.title)
                                 adding = false
@@ -228,7 +251,7 @@ fun ReelFxPanel(vm: EditorViewModel) {
                             }.padding(10.dp),
                         ) {
                             Text(fx.title, style = Type.BodyStrong.copy(color = Palette.Text, fontSize = 14.sp), maxLines = 1)
-                            Text(fx.desc, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(fx.desc, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -244,7 +267,7 @@ fun ReelFxPanel(vm: EditorViewModel) {
                 setReelFx(vm, c.id, copy, gesture)
             }
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                info?.let { Text(it.desc, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp), maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                info?.let { Text(it.desc, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp), maxLines = 2, overflow = TextOverflow.Ellipsis) }
                 if (!layer) {
                     ValueSlider(e.optDouble("start").toFloat(), 0f..lengthS.toFloat(), { "%.1fs".format(it) },
                         { v -> change("reelfx-start") { it.put("start", v.toDouble().coerceAtMost(it.optDouble("end") - 0.2)) } }, { vm.endGesture() }, title = "Start")
@@ -351,10 +374,17 @@ private fun Swatches(title: String, now: String, onPick: (String) -> Unit) {
                 val color = runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrDefault(Color.White)
                 val on = hex.equals(now, ignoreCase = true)
                 Box(
-                    Modifier.size(30.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (on) Palette.Accent else Color.Transparent).padding(3.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape).background(color).clickable { onPick(hex) },
-                )
+                    Modifier.minimumInteractiveComponentSize()
+                        .semantics { contentDescription = colourName(hex) }
+                        .selectable(selected = on, role = Role.RadioButton) { onPick(hex) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.size(30.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (on) Palette.Accent else Color.Transparent).padding(3.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape).background(color),
+                    )
+                }
             }
         }
     }
@@ -377,7 +407,12 @@ private fun Lines(title: String, value: String, onLeave: () -> Unit, onDone: (St
                     Box(Modifier.weight(1f)) { Box_(item, onLeave) { put(it) } }
                 }
                 if (items.size > 1) {
-                    Text("✕", style = Type.Body.copy(color = Palette.TextSecondary), modifier = Modifier.clickable { onDone(items.filterIndexed { j, _ -> j != i }.joinToString("|")) }.padding(horizontal = 10.dp, vertical = 6.dp))
+                    Box(
+                        Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button) { onDone(items.filterIndexed { j, _ -> j != i }.joinToString("|")) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.material3.Icon(LucideIcons.X, contentDescription = "Remove line ${i + 1}", tint = Palette.TextSecondary, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         }
@@ -397,7 +432,7 @@ private fun Box_(value: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
         singleLine = true,
         textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
         cursorBrush = SolidColor(Palette.Accent),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp)
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Palette.CardPressed).padding(horizontal = 10.dp, vertical = 8.dp)
             .onFocusChanged { if (!it.isFocused) onLeave() },
     )
 }
@@ -405,7 +440,9 @@ private fun Box_(value: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
 @Composable
 private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Color(0xFF3A3A3C)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.DockBack)
+            .selectable(selected = on, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(label, style = Type.Small.copy(color = if (on) Palette.OnAccent else Palette.Text, fontSize = 13.sp), maxLines = 1)
     }
@@ -424,7 +461,7 @@ private fun Field(title: String, value: String, hint: String, onLeave: () -> Uni
             maxLines = 4,
             textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
             cursorBrush = SolidColor(Palette.Accent),
-            modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp)
+            modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Palette.CardPressed).padding(horizontal = 10.dp, vertical = 8.dp)
                 .onFocusChanged { if (!it.isFocused) onLeave() },
             decorationBox = { inner ->
                 Box {
@@ -471,7 +508,7 @@ fun ReelWordsBox(vm: EditorViewModel) {
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(id) { runCatching { focus.requestFocus() } }
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable { ReelWords.open = false }, contentAlignment = Alignment.Center) {
-        Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF242426)).clickable(enabled = false) {}.padding(14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(12.dp)).background(Palette.Card).clickable(enabled = false) {}.padding(14.dp)) {
             Text("Words · one line each", style = Type.Small.copy(color = Palette.TextSecondary))
             Spacer(Modifier.height(8.dp))
             BasicTextField(
