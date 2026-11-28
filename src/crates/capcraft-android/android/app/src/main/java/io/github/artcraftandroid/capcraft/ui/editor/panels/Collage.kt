@@ -1,6 +1,12 @@
 package io.github.artcraftandroid.capcraft.ui.editor.panels
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import io.github.artcraftandroid.capcraft.ui.LucideIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -301,7 +308,7 @@ fun CollageTools(vm: EditorViewModel) {
             0 -> Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Pictures", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(64.dp))
-                    Pill("−", false) {
+                    Pill("", false, LucideIcons.Minus, "Remove the last picture") {
                         if (kept.ids.size > 2) {
                             val last = kept.ids.last()
                             vm.edit {
@@ -313,7 +320,7 @@ fun CollageTools(vm: EditorViewModel) {
                         } else vm.message = "A collage keeps at least two pictures"
                     }
                     Text("${kept.ids.size}", style = Type.BodyStrong.copy(color = Palette.Text), modifier = Modifier.padding(horizontal = 12.dp))
-                    Pill("+", false) {
+                    Pill("", false, LucideIcons.Plus, "Add a picture") {
                         if (kept.ids.size >= 9) vm.message = "A collage holds up to nine pictures"
                         else MediaPick.open(MediaKinds.BOTH, multiple = false) { uris ->
                             val uri = uris.firstOrNull() ?: return@open
@@ -345,7 +352,21 @@ fun CollageTools(vm: EditorViewModel) {
                         }
                     }
                 }
-                Text("Pinch a picture to zoom, drag to move it, double-tap to reset", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp), modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
+                // the tapped picture's zoom, without a pinch
+                val picked = CollagePick.id?.takeIf { it in kept.ids }
+                if (picked != null) {
+                    val (z, ox, oy) = kept.adjust[picked] ?: Triple(1f, 0f, 0f)
+                    var zoomGesture by remember(picked) { mutableStateOf(collageGesture()) }
+                    Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) {
+                            ValueSlider(z, 1f..6f, { "%.1f×".format(it) }, { v ->
+                                vm.edit { layCollage(view(), kept.copy(adjust = kept.adjust + (picked to Triple(v, ox, oy))), media, zoomGesture) }
+                            }, { vm.endGesture(); zoomGesture = collageGesture() }, title = "Picture ${kept.ids.indexOf(picked) + 1} zoom")
+                        }
+                        Pill("Reset", false) { lay(kept.copy(adjust = kept.adjust - picked)) }
+                    }
+                }
+                Text("Tap a picture to zoom it with a slider, or pinch it; drag to move it, double-tap to reset", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp), modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
                 if (swapFrom != null) Text("Tap another cell to swap", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.padding(horizontal = 12.dp))
                 LazyRow(Modifier.fillMaxWidth().padding(top = 8.dp), contentPadding = PaddingValues(horizontal = 10.dp)) {
                     items(layouts.size) { i -> LayoutTile(layouts[i], kept.style.isEmpty() && i == kept.layout) { lay(kept.copy(layout = i, style = "")) } }
@@ -353,7 +374,7 @@ fun CollageTools(vm: EditorViewModel) {
             }
             1 -> Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 COLLAGE_STYLES.forEach { st ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { lay(kept.copy(style = st.id)) }) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.selectable(selected = st.id == kept.style, role = Role.Button) { lay(kept.copy(style = st.id)) }) {
                         StyleTile(st.id, kept.ids.size, st.id == kept.style)
                         Text(st.name, style = Type.Small.copy(color = if (st.id == kept.style) Palette.Accent else Palette.Text, fontSize = 12.sp), modifier = Modifier.padding(top = 4.dp))
                     }
@@ -366,9 +387,16 @@ fun CollageTools(vm: EditorViewModel) {
                     GAP_COLOURS.forEach { hex ->
                         val on = hex.equals(kept.color, ignoreCase = true)
                         Box(
-                            Modifier.size(30.dp).clip(CircleShape).background(if (on) Palette.Accent else Color.Transparent).padding(3.dp)
-                                .clip(CircleShape).background(Color(android.graphics.Color.parseColor(hex))).clickable { lay(kept.copy(color = hex)) },
-                        )
+                            Modifier.minimumInteractiveComponentSize()
+                                .semantics { contentDescription = "Gap colour ${dotName(hex)}" }
+                                .selectable(selected = on, role = Role.RadioButton) { lay(kept.copy(color = hex)) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                Modifier.size(30.dp).clip(CircleShape).background(if (on) Palette.Accent else Color.Transparent).padding(3.dp)
+                                    .clip(CircleShape).background(Color(android.graphics.Color.parseColor(hex))),
+                            )
+                        }
                     }
                 }
             }
@@ -413,17 +441,34 @@ private fun StyleTile(style: String, n: Int, on: Boolean) {
 
 /** A rounded label to tap, lit when [on]. */
 @Composable
-private fun Pill(label: String, on: Boolean, onClick: () -> Unit) {
-    Box(Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Color(0xFF3A3A3C)).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp)) {
-        Text(label, style = Type.Small.copy(color = if (on) Palette.OnAccent else Palette.Text, fontSize = 13.sp))
+private fun Pill(label: String, on: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, description: String? = null, onClick: () -> Unit) {
+    Box(
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.DockBack)
+            .selectable(selected = on, role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (icon != null) androidx.compose.material3.Icon(icon, contentDescription = description, tint = Palette.Text, modifier = Modifier.size(18.dp))
+        else Text(label, style = Type.Small.copy(color = if (on) Palette.OnAccent else Palette.Text, fontSize = 13.sp))
     }
+}
+
+/** What a screen reader calls a gap colour. */
+private fun dotName(hex: String): String = when (hex.lowercase()) {
+    "#ffffff" -> "white"; "#000000" -> "black"; "#f4e9d8" -> "cream"; "#ffd60a" -> "yellow"; "#ff9230" -> "orange"
+    "#ee2222" -> "red"; "#ff4fa3" -> "pink"; "#7c5cff" -> "purple"; "#0a84ff" -> "blue"; "#34c759" -> "green"
+    "#9ad7c4" -> "mint"; "#2e2e30" -> "charcoal"; else -> hex
+}
+
+/** The picture tapped on the collage screen, for its zoom slider. */
+internal object CollagePick {
+    var id by mutableStateOf<String?>(null)
 }
 
 /** The current layout's cells, numbered; the one picked for a swap lit. */
 @Composable
 private fun CellMap(cells: List<Cell>, picked: Int?, onTap: (Int) -> Unit) {
     Canvas(
-        Modifier.size(64.dp).pointerInput(cells) {
+        Modifier.size(96.dp).semantics { contentDescription = "Swap two pictures: tap one cell, then another" }.pointerInput(cells) {
             detectTapGestures { p ->
                 val i = cells.indexOfFirst { c -> p.x / size.width in c.x..(c.x + c.w) && p.y / size.height in c.y..(c.y + c.h) }
                 if (i >= 0) onTap(i)
@@ -434,7 +479,7 @@ private fun CellMap(cells: List<Cell>, picked: Int?, onTap: (Int) -> Unit) {
         cells.forEachIndexed { i, c ->
             val at = Offset(c.x * size.width + gap / 2, c.y * size.height + gap / 2)
             val box = Size(c.w * size.width - gap, c.h * size.height - gap)
-            drawRect(if (i == picked) Palette.Accent else Color(0xFF3A3A3C), at, box)
+            drawRect(if (i == picked) Palette.Accent else Palette.DockBack, at, box)
         }
     }
 }
@@ -442,7 +487,7 @@ private fun CellMap(cells: List<Cell>, picked: Int?, onTap: (Int) -> Unit) {
 /** A layout drawn as its cells: outlined, and filled and cyan-edged when chosen. */
 @Composable
 private fun LayoutTile(cells: List<Cell>, selected: Boolean, onClick: () -> Unit) {
-    Canvas(Modifier.padding(horizontal = 9.dp).size(48.dp).clickable(onClick = onClick)) {
+    Canvas(Modifier.padding(horizontal = 9.dp).size(48.dp).semantics { contentDescription = "Layout of ${cells.size}" }.selectable(selected = selected, role = Role.Button, onClick = onClick)) {
         val gap = 1.5.dp.toPx()
         val edge = if (selected) Palette.Accent else Color(0xFFDDDDDD)
         cells.forEach { c ->
@@ -463,7 +508,17 @@ fun CollageAdjust(vm: EditorViewModel, modifier: Modifier) {
     val kept by androidx.compose.runtime.rememberUpdatedState(remember(vm.timeline?.revision) { vm.session?.collage() })
     val media = remember { java.io.File(vm.path, "media") }
     Box(
-        modifier.pointerInput(Unit) {
+        modifier.drawBehind {
+            // the picked picture outlined, so it is clear which the slider moves
+            val c = kept ?: return@drawBehind
+            val t = vm.timeline ?: return@drawBehind
+            val id = CollagePick.id?.takeIf { it in c.ids } ?: return@drawBehind
+            val fa = t.width.toFloat() / t.height.toFloat()
+            val (w, h) = if (size.width / size.height > fa) size.height * fa to size.height else size.width to size.width / fa
+            val (l, top) = (size.width - w) / 2 to (size.height - h) / 2
+            val cell = collageCells(c, t.width.toInt(), t.height.toInt())?.getOrNull(c.ids.indexOf(id)) ?: return@drawBehind
+            drawRect(Palette.Accent, Offset(l + cell.x * w, top + cell.y * h), Size(cell.w * w, cell.h * h), style = Stroke(2.dp.toPx()))
+        }.pointerInput(Unit) {
             // the frame as the preview fits it, centred in this box
             fun frame(): androidx.compose.ui.geometry.Rect? {
                 val t = vm.timeline ?: return null
@@ -519,6 +574,7 @@ fun CollageAdjust(vm: EditorViewModel, modifier: Modifier) {
                     val next = c0.copy(adjust = c0.adjust + (id to Triple(zoom, ox, oy)))
                     vm.edit { layCollage(view(), next, media, g).also { endGesture() } }
                 } else {
+                    CollagePick.id = id
                     // a second tap soon after the first puts the picture back as it was laid
                     val now = System.currentTimeMillis()
                     if (now - lastTap < 350 && c0.adjust.containsKey(id)) {
