@@ -68,6 +68,48 @@ impl Grade {
     }
 }
 
+/// Runs `f` over `buf` cut into bands of whole rows (`unit` values a row,
+/// `rows` rows), each band on a core of its own: the first row of the band
+/// and the band. A frame at export size is millions of pixels, and one
+/// core at a time made an effect hundreds of milliseconds a frame.
+pub fn par_rows<T: Send>(buf: &mut [T], unit: usize, rows: usize, f: impl Fn(usize, &mut [T]) + Sync) {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+    let per = rows.div_ceil(cores).max(1);
+    if cores == 1 || rows < 64 {
+        f(0, buf);
+        return;
+    }
+    std::thread::scope(|scope| {
+        for (i, band) in buf.chunks_mut(per * unit).enumerate() {
+            let f = &f;
+            scope.spawn(move || f(i * per, band));
+        }
+    });
+}
+
+/// `x` to the power `p` for `x` in `0..=1`, from a table: `powf` on every
+/// channel of every pixel was most of a grade's time.
+fn pow_table(x: f32, table: &[f32; 4097]) -> f32 {
+    let at = x.clamp(0.0, 1.0) * 4096.0;
+    let i = at as usize;
+    if i >= 4096 {
+        return table[4096];
+    }
+    table[i] + (table[i + 1] - table[i]) * (at - i as f32)
+}
+
+/// `x^1.3` on `0..=1`, as the moody grade lifts its shadows.
+fn pow13(x: f32) -> f32 {
+    static T: std::sync::OnceLock<Box<[f32; 4097]>> = std::sync::OnceLock::new();
+    pow_table(x, T.get_or_init(|| Box::new(std::array::from_fn(|i| (i as f32 / 4096.0).powf(1.3)))))
+}
+
+/// `x^1.6` on `0..=1`, as a spotlight's pool falls off.
+pub fn pow16(x: f32) -> f32 {
+    static T: std::sync::OnceLock<Box<[f32; 4097]>> = std::sync::OnceLock::new();
+    pow_table(x, T.get_or_init(|| Box::new(std::array::from_fn(|i| (i as f32 / 4096.0).powf(1.6)))))
+}
+
 /// `rgb` graded `kind`, as `fx.py`'s `grade`.
 pub fn grade_px(c: [f32; 3], kind: Grade) -> [f32; 3] {
     let lum = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
@@ -91,7 +133,7 @@ pub fn grade_px(c: [f32; 3], kind: Grade) -> [f32; 3] {
             let light = [0.05, 0.015, -0.04];
             let mut o = [0.0; 3];
             for i in 0..3 {
-                let v = cl(lum + (c[i] - lum) * 0.6).powf(1.3) * 0.88;
+                let v = pow13(cl(lum + (c[i] - lum) * 0.6)) * 0.88;
                 let v = v + (1.0 - lum) * shade[i] + lum * light[i];
                 o[i] = cl((v - 0.42) * 1.12 + 0.42);
             }
@@ -143,10 +185,13 @@ impl Ctx {
     /// A copy of the frame graded `kind`.
     pub fn graded(&self, kind: Grade) -> Vec<f32> {
         let mut out = vec![0f32; self.img.len()];
-        for i in 0..self.w * self.h {
-            let g = grade_px(self.px(i), kind);
-            out[i * 3..i * 3 + 3].copy_from_slice(&g);
-        }
+        let (w, img) = (self.w, &self.img);
+        par_rows(&mut out, w * 3, self.h, |y0, band| {
+            let start = y0 * w * 3;
+            for (o, i) in band.chunks_exact_mut(3).zip(img[start..].chunks_exact(3)) {
+                o.copy_from_slice(&grade_px([i[0], i[1], i[2]], kind));
+            }
+        });
         out
     }
 
@@ -318,25 +363,35 @@ impl Ctx {
     /// The frame and mask resampled: each output pixel `(x, y)` reads the
     /// source at `src(x, y)`, reflected past the edges when `reflect`, and
     /// carried out otherwise.
-    pub fn warp(&mut self, src: impl Fn(f32, f32) -> (f32, f32), mirror: bool) {
+    pub fn warp(&mut self, src: impl Fn(f32, f32) -> (f32, f32) + Sync, mirror: bool) {
         let (w, h) = (self.w, self.h);
         let mut img = vec![0f32; self.img.len()];
         let mut m = vec![0f32; self.m.len()];
-        let mut rgb = [0f32; 3];
-        let mut one = [0f32; 1];
-        for y in 0..h {
-            for x in 0..w {
-                let (mut sx, mut sy) = src(x as f32, y as f32);
-                if mirror {
-                    sx = reflect(sx, w);
-                    sy = reflect(sy, h);
-                }
-                sample(&self.img, w, h, 3, sx, sy, &mut rgb);
-                img[(y * w + x) * 3..(y * w + x) * 3 + 3].copy_from_slice(&rgb);
-                sample(&self.m, w, h, 1, sx, sy, &mut one);
-                m[y * w + x] = one[0];
+        let at = |x: usize, y: usize| {
+            let (mut sx, mut sy) = src(x as f32, y as f32);
+            if mirror {
+                sx = reflect(sx, w);
+                sy = reflect(sy, h);
             }
-        }
+            (sx, sy)
+        };
+        let (from_img, from_m) = (&self.img, &self.m);
+        par_rows(&mut img, w * 3, h, |y0, band| {
+            let mut rgb = [0f32; 3];
+            for (k, px) in band.chunks_exact_mut(3).enumerate() {
+                let (sx, sy) = at(k % w, y0 + k / w);
+                sample(from_img, w, h, 3, sx, sy, &mut rgb);
+                px.copy_from_slice(&rgb);
+            }
+        });
+        par_rows(&mut m, w, h, |y0, band| {
+            let mut one = [0f32; 1];
+            for (k, v) in band.iter_mut().enumerate() {
+                let (sx, sy) = at(k % w, y0 + k / w);
+                sample(from_m, w, h, 1, sx, sy, &mut one);
+                *v = one[0];
+            }
+        });
         self.img = img;
         self.m = m;
     }

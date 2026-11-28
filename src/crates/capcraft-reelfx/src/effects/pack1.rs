@@ -226,6 +226,7 @@ fn spotlight(c: &mut Ctx, e: &mut Run) {
     let (w, h) = (c.w as f32, c.h as f32);
     let (fx, fy) = (c.fx, c.fy + h * 0.2);
     // the light's colour, how dark the room falls and how wide the pool is
+    let k_ = k;
     let (tint, floor, wide) = match e.s("look", "plain").as_str() {
         "warm" => ([1.14, 0.98, 0.78], 0.2, 1.0),
         "cool" => ([0.84, 0.96, 1.16], 0.2, 1.0),
@@ -233,20 +234,20 @@ fn spotlight(c: &mut Ctx, e: &mut Run) {
         "neon" => ([1.18, 0.72, 1.22], 0.14, 1.0),
         _ => ([1.0, 1.0, 1.0], 0.2, 1.0),
     };
-    for y in 0..c.h {
-        for x in 0..c.w {
-            let i = y * c.w + x;
+    let (cw, mask) = (c.w, &c.m);
+    crate::ctx::par_rows(&mut c.img, cw * 3, c.h, |y0, band| {
+        for (k, px) in band.chunks_exact_mut(3).enumerate() {
+            let (x, y) = (k % cw, y0 + k / cw);
             let d = ((x as f32 - fx) / (w * 0.5 * wide)).powi(2) + ((y as f32 - fy) / (h * 0.46 * wide)).powi(2);
-            let pool = (1.0 - d).clamp(0.0, 1.0).powf(1.6);
-            let bright = 1.0 - k * (1.0 - (floor + 0.45 * pool));
-            let m = c.m[i];
+            let pool = crate::ctx::pow16(1.0 - d);
+            let bright = 1.0 - k_ * (1.0 - (floor + 0.45 * pool));
+            let m = mask[y * cw + x];
             for ch in 0..3 {
-                let lit = 1.0 + (tint[ch] - 1.0) * k * (0.35 + 0.65 * pool);
-                let f = bright * lit * (1.0 - m) + m * (1.0 + 0.04 * k) * (1.0 + (tint[ch] - 1.0) * 0.4 * k);
-                c.img[i * 3 + ch] *= f;
+                let lit = 1.0 + (tint[ch] - 1.0) * k_ * (0.35 + 0.65 * pool);
+                px[ch] *= bright * lit * (1.0 - m) + m * (1.0 + 0.04 * k_) * (1.0 + (tint[ch] - 1.0) * 0.4 * k_);
             }
         }
-    }
+    });
     if e.has("text") {
         let word = e.s("text", "");
         let col = e.color("color", PEACH);
@@ -358,18 +359,21 @@ fn swipe(c: &mut Ctx, e: &mut Run) {
     let line = e.color("color", (255, 255, 255));
     let sp = if p < 0.5 { 1.05 - 0.95 * ease_inout(p / 0.5) } else { 0.1 + (stop - 0.1) * ease_inout((p - 0.5) / 0.4) };
     let (w, h) = (c.w as f32, c.h as f32);
-    for y in 0..c.h {
-        let line_x = sp * w + tilt * (y as f32 - h / 2.0);
-        for x in 0..c.w {
-            let i = y * c.w + x;
+    let cw = c.w;
+    let tint = [line.0, line.1, line.2].map(|v| f32::from(v) / 255.0);
+    crate::ctx::par_rows(&mut c.img, cw * 3, c.h, |y0, band| {
+        for (k, px) in band.chunks_exact_mut(3).enumerate() {
+            let (x, y) = (k % cw, y0 + k / cw);
+            let i = y * cw + x;
+            let line_x = sp * w + tilt * (y as f32 - h / 2.0);
             let a = ((x as f32 - line_x) / 3.0 + 0.5).clamp(0.0, 1.0);
             let edge = (1.0 - (x as f32 - line_x).abs() / 3.5).clamp(0.0, 1.0);
             for ch in 0..3 {
-                let v = c.img[i * 3 + ch] * (1.0 - a) + after[i * 3 + ch] * a;
-                c.img[i * 3 + ch] = v * (1.0 - edge) + edge * f32::from([line.0, line.1, line.2][ch]) / 255.0;
+                let v = px[ch] * (1.0 - a) + after[i * 3 + ch] * a;
+                px[ch] = v * (1.0 - edge) + edge * tint[ch];
             }
         }
-    }
+    });
     let hy = h * 0.62;
     let hx = sp * w + tilt * (hy - h / 2.0);
     let r = (w * 0.035).floor();
