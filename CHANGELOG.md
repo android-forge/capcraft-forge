@@ -3,7 +3,89 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
+## Unreleased
+
+### 28 November 2026
+- Engine from Concat 0.2.13: 22 new looks (a Flash shelf - Flash, Strobe, Flicker, Beat Pulse, RGB Flash; Glitch, VHS
+  Tracking, Old Film, Lens Flare, Split Screen, Mirror, Kaleidoscope, Blur Frame, Light Leak, Zoom Pulse, Duotone; the
+  transitions Flash, Luma Wipe, Doors, Blinds, Mosaic and Ripple), Concat's rendering and decoding fixes (a failed
+  frame is drawn again rather than losing the device; video decoders held to what the graphics memory has room for),
+  pitch-kept time stretching, and the studio voice about seven times faster (its models run in int8). Forge keeps
+  its own project format, export and voices: 0.2.13 replaces Concat's project model, which Forge is built on.
+
+### 27 November 2026
+Engine updated to [Concat v0.2.12](https://github.com/jub0t/Concat/releases/tag/v0.2.12) by Jareer Abdullah (jub0t)
+and Concat's contributors, from the v0.2.8 base merged on 28 October (v0.2.9, v0.2.10, v0.2.11 and v0.2.12; release
+notes at https://github.com/jub0t/Concat/releases). Where Forge and Concat had each built the same thing, the better one
+was kept:
+- From Concat: exports drawn ahead and handed to the encoder on its own thread as YUV (about 2.4× faster where the
+  Android surface encoder is not used), the encoder stall and black-frame fixes at cuts and joins (#747, #756, #790),
+  variable-frame-rate and screen recordings played frame by frame (#457), GPU-loss recovery during export, colour emoji
+  painted from `COLR` v1 with each picture cached, editable shapes (width, height, corners, gradients, outlines, dashes,
+  shadows, trim; Forge's Hexagon and Diamond are now six- and four-sided polygons), stacked masks per clip, caption
+  pruning of made-up lines over silence and music, keyframe-aware nearest-frame seeks, and enhance at any scale up to 2K.
+- Kept from Forge: the direct Android MediaCodec surface export, Kokoro, Pocket and Supertonic voices (Concat removed
+  them for Chatterbox, which is desktop only), a picture stream chosen past a cover image, per-word caption timings,
+  and adjustment layers that know their own length.
+- Looks Concat renamed (Polaroid, Rain, Milk and eleven others) still open under their old names in older projects.
+- Concat v0.2.13 is not merged yet: it replaces the project model with a new document crate, which Forge's Android code
+  has to be ported to first.
+- Reel FX settings by kind: sliders for numbers, colour dots, a line-by-line editor for lists, chips for looks, shapes
+  and every app font; tap a selected effect on the preview to edit its words there, and drag Swipe's line, The Tap,
+  Wave Trim, Pause & Point's label, Reject Stamp and Messages into place. A new effect shows itself as soon as it is
+  added, and a Sound row adds one of the built-in sounds at its start. Reel Frame has the full icon column with counts;
+  Countdown Flip has looks; Scribble has shapes; Spotlight has light presets; Fan Build, Tape Label and Glass Widgets
+  are redrawn; Match Cut takes your own pictures; Carousel Spin's near panels pass in front of you.
+- Atmosphere: the filter row is gone and the settings scroll, so the light sliders no longer overlap.
+- Reel FX on the timeline: Effects > Reel FX lays each effect on the effects row as an item of its own, drawn on the
+  pictures beneath it - move it, trim or extend it, and key its opacity to fade it in and out. Each effect shows only
+  the settings it reads (Swipe's after look and Backdrop Word's font as choices), not a generic words box.
+- Film looks (in Filters, under Film): 13 film stocks and grades - Vision3 500T and 250D, Eterna 500, Ektachrome 100,
+  Delta 3200, CineStill 800T, Kodak Gold, teal and orange, bleach bypass, night bloom, documentary, day for night and
+  cross process - each with an amount, after 0xzgbot's color-grading-film-emulation skill (MIT).
+- Reel FX (in Look): 51 talking-head effects - orbit, spotlight, backdrop word, glass widgets, LED sign, checklist,
+  tier list, match cut and the rest - ported from Vibha Ramprakash's claude-video-effects (MIT). Each is placed on a
+  stretch of the clip, follows the face (OpenCV's YuNet, built in) and can sit behind the person (Remove BG's person
+  model); the face and the person are found on the phone the first time, with the progress in the panel. Effects with
+  pictures use the clip's own frames, or images you pick. Preview and export draw the same frames; a split keeps each
+  half's effects.
+The editor's tools reorganised (the first three steps of `docs/proposals/app-cleanup-and-tools.md`). Nothing was removed.
+- A picture's bar is Split, Speed, Volume, Duplicate and Delete, always in the same places, then five drawers: **Edit**,
+  **Look**, **Smart** (the models and heavy processing), **Motion** and **Sound**. That's 10 tools where there were
+  about 37 in one row. The drawer last used stays open for the next picture picked.
+- Text, stickers, captions and sounds have short bars of their own with a **More** drawer (a sound's are **Smart** and
+  **Clean**).
+- The top level is Edit, Audio, Text, Captions, Effects, Overlay, Color, Background, Ratio and Project. Stickers and
+  Graphics are only under Text, Auto captions and lyrics only under Captions, Filters and Adjust are one Color, and
+  Transcript, Filler words, Auto highlight and Replace media are under Project. Preview quality moved to a ⋮ menu in
+  the top bar.
+- Renamed for what they do: Splice is Blend, Maintrack and Overlay are Move to main and Move to overlay, Graphs is
+  Keyframes, Basic is Position, Advanced is Exact values, Video quality is Enhance (Photo quality on photos), the Audio
+  group's Extract is From a video, and in Adjust, Graphs is Curves and Hue is Tint.
+- Adjust's knobs are grouped Light, Color, Detail and Curves, with a tab for each group that jumps to it and shows a
+  dot when anything in the group is changed.
+- Search finds tools inside the drawers, and by their old names too. A one-time tip says the tools have moved.
+- The search sheet's "Reduce video noise" suggestion, which turned on the sound's noise reducer, now says "Reduce
+  background noise".
+- The effect browser no longer offers Vignette and Film grain, which are Adjust's knobs.
+- Retouch finds skin with a model: Google's MediaPipe Selfie Multiclass Segmentation (Apache-2.0), converted to ONNX
+  and built into the app, so nothing is downloaded. Once Retouch is on a photo or video, the face's and the body's skin
+  are found on the phone, ten looks a second, kept with the project like Remove BG's masks, with "Finding skin" and its
+  progress in the panel. Skin-coloured walls, wood and sand are no longer smoothed, and darker skin that the colour
+  guess missed is. Until a stretch has been looked at, Retouch goes by colour as before.
+
 ## 0.0.8 (24 November 2026)
+
+### 28 November 2026
+- Collage is a home tool of its own: pick two to nine photos or videos and the collage opens on its own screen - the
+  picture, and Layout, Borders and Frame under it - with the whole editor a tap away ("Edit in timeline").
+  Layout adds a picture (+) or takes the last off (-) and swaps two pictures with two taps on the cell map; Borders
+  sets the gap's width, the corners' roundness and the gap's colour; Size makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
+- Collage frames of our own, drawn in the app for any number of pictures: Film (a strip with sprocket holes), Prints
+  (turned prints on paper), Love (heart-cut pictures among doodled hearts), Shapes (circles, stars and rounded tiles on
+  a gradient), Party (gold edges, stripes and confetti), Floral (soft edges among leaves) and Classic (one big picture,
+  wide white margins). On the collage screen, pinch a picture to zoom it in its space, drag to move it, double-tap to
+  put it back; each picture keeps its framing through a change of frame or size.
 
 ### 24 November 2026
 Ideas from [FilmCraft](https://github.com/storytold/filmcraft) (Apache-2.0), written here for a phone.

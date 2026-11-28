@@ -31,7 +31,8 @@ use concat_core::time::{FrameRate, Rational};
 use concat_media::{DecodeOptions, Decoder, FrameSource};
 use concat_project::model::{MediaKind, Project, Subject};
 use concat_vision::segment::Kind;
-use concat_vision::{MASK_RATE, MaskStore, ModelId, Segmenter, mask_dir, models};
+use concat_vision::segment::SKIN_MODEL_ID;
+use concat_vision::{MASK_RATE, MaskStore, ModelId, Segmenter, mask_dir, models, skin_dir};
 
 use crate::jobs::{SingleFlight, Tripwire};
 
@@ -48,6 +49,10 @@ pub struct AnalyseRequest {
     pub still: bool,
     /// What to keep.
     pub subject: Subject,
+    /// Retouch's skin rather than a cutout's subject: the skin model's masks,
+    /// kept in the media's skin folder (see `concat_vision::skin_dir`).
+    /// `subject` is not read then.
+    pub skin: bool,
     /// The stretches of source, in seconds, that clips show. Instants
     /// already analysed inside them are skipped.
     pub ranges: Vec<(f64, f64)>,
@@ -74,6 +79,7 @@ pub struct Cutouts {
     /// The app's data directory, where downloaded models live.
     data: PathBuf,
     selfie: OnceLock<Result<Arc<Segmenter>, String>>,
+    skin: OnceLock<Result<Arc<Segmenter>, String>>,
     person: Mutex<Option<Arc<Segmenter>>>,
     object: Mutex<Option<Arc<Segmenter>>>,
 }
@@ -85,6 +91,7 @@ impl Cutouts {
             gate: Arc::new(SingleFlight::new()),
             data: data.to_path_buf(),
             selfie: OnceLock::new(),
+            skin: OnceLock::new(),
             person: Mutex::new(None),
             object: Mutex::new(None),
         }
@@ -109,6 +116,11 @@ impl Cutouts {
         self.selfie
             .get_or_init(|| Segmenter::selfie().map(Arc::new))
             .clone()
+    }
+
+    /// The compiled-in skin model, loaded the first time.
+    fn skin_model(&self) -> Result<Arc<Segmenter>, String> {
+        self.skin.get_or_init(|| Segmenter::skin().map(Arc::new)).clone()
     }
 
     /// The person or object model, fetched first when it is not on disk.
@@ -152,6 +164,46 @@ impl Cutouts {
         }
     }
 
+    /// What the active timeline's retouched clips need analysed for their
+    /// skin: one request per media, covering the stretches of source its
+    /// retouched clips show, paired with the media's id as [`Cutouts::requests`] is.
+    pub fn skin_requests(project: &Project, project_dir: &Path) -> Vec<(String, AnalyseRequest)> {
+        let mut wanted: Vec<(String, AnalyseRequest)> = Vec::new();
+        for clip in &project.active().clips {
+            if !clip.kind.is_visual()
+                || !clip.video_effects.iter().any(|link| link.id == "capcraft.retouch")
+            {
+                continue;
+            }
+            let Some(media) = project.media_by_id(&clip.media_id) else {
+                continue;
+            };
+            if !matches!(media.kind, MediaKind::Video | MediaKind::Image) {
+                continue;
+            }
+            let range = (
+                clip.source_start,
+                clip.source_start + clip.duration * clip.speed.max(0.0625),
+            );
+            match wanted.iter_mut().find(|(id, _)| *id == media.id) {
+                Some((_, request)) => request.ranges.push(range),
+                None => wanted.push((
+                    media.id.clone(),
+                    AnalyseRequest {
+                        project: project_dir.to_path_buf(),
+                        media_path: media.path.clone(),
+                        media_size: (media.width.unwrap_or(0), media.height.unwrap_or(0)),
+                        still: media.kind == MediaKind::Image,
+                        subject: Subject::Auto,
+                        skin: true,
+                        ranges: vec![range],
+                    },
+                )),
+            }
+        }
+        wanted
+    }
+
     /// What the active timeline's cutouts need analysed: one request per
     /// media and subject, since two clips of one file that keep different
     /// things need different masks, each covering the stretches of source
@@ -190,6 +242,7 @@ impl Cutouts {
                         media_size: (media.width.unwrap_or(0), media.height.unwrap_or(0)),
                         still: media.kind == MediaKind::Image,
                         subject: cutout.subject,
+                        skin: false,
                         ranges: vec![range],
                     },
                 )),
@@ -200,6 +253,9 @@ impl Cutouts {
 
     /// Where `request`'s masks are kept.
     fn dir(request: &AnalyseRequest) -> PathBuf {
+        if request.skin {
+            return skin_dir(&request.project, &request.media_path);
+        }
         mask_dir(&request.project, &request.media_path, request.subject)
     }
 
@@ -213,12 +269,10 @@ impl Cutouts {
     /// A store made by a model the subject would not pick now needs all
     /// of them again.
     pub fn outstanding(request: &AnalyseRequest) -> usize {
-        let store = MaskStore::open(&mask_dir(
-            &request.project,
-            &request.media_path,
-            request.subject,
-        ));
+        let store = MaskStore::open(&Self::dir(request));
         let stale = match (request.subject, store.model()) {
+            (_, Some(model)) if request.skin => model != SKIN_MODEL_ID,
+            _ if request.skin => false,
             (_, None) => false,
             (Subject::Person, Some(model)) => model == ModelId::Object.name(),
             (Subject::Object, Some(model)) => model != ModelId::Object.name(),
@@ -243,11 +297,7 @@ impl Cutouts {
     ) -> Result<usize, String> {
         let job = self.gate.begin("cutout analysis")?;
         let cancel = job.cancel_handle();
-        let mut store = MaskStore::open(&mask_dir(
-            &request.project,
-            &request.media_path,
-            request.subject,
-        ));
+        let mut store = MaskStore::open(&Self::dir(request));
         if Self::outstanding(request) == usize::MAX {
             store.clear();
         }
@@ -256,6 +306,7 @@ impl Cutouts {
         // The model the subject names, or for automatic the one the
         // store already records; the first frame decides otherwise.
         let mut segmenter = match request.subject {
+            _ if request.skin => Some(self.skin_model()?),
             Subject::Person => Some(self.person_or_selfie(&cancel, progress)?),
             Subject::Object => Some(self.downloaded(ModelId::Object, &cancel, progress)?),
             Subject::Auto => match store.model() {
@@ -389,6 +440,27 @@ impl Cutouts {
 ///
 /// Nothing is fetched for a runtime that cannot run it: an Intel Mac older
 /// than its ONNX Runtime is told so here, before the download.
+/// [`fetch`] for a model of the table that is no cutout's - voice
+/// isolation's networks - into its place under `data`, unless it is there
+/// already. `progress` is told (received, total) as the bytes come.
+pub fn fetch_model(
+    data: &Path,
+    id: ModelId,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(u64, u64),
+) -> Result<std::path::PathBuf, String> {
+    let file = concat_vision::models::model_file(data, id);
+    if concat_vision::models::installed(data, id) {
+        return Ok(file);
+    }
+    fetch(id, &file, cancel, &mut |step| {
+        if let Progress::Fetching { received, total } = step {
+            progress(received, total);
+        }
+    })?;
+    Ok(file)
+}
+
 pub(crate) fn fetch(
     id: ModelId,
     file: &Path,

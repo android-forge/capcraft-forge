@@ -90,6 +90,72 @@ impl MobileSession {
         self.find_masks(media, listener)
     }
 
+    /// Finds the skin of clip `clip_id`'s media for Retouch, on a thread of
+    /// its own with the compiled-in skin model, reporting through `listener`,
+    /// and draws again when it is in. Done at once when the clip is not
+    /// retouched, or its skin is found already.
+    pub fn find_skin(
+        self: Arc<Self>,
+        clip_id: String,
+        listener: Arc<dyn SpeechListener>,
+    ) -> Result<(), MobileError> {
+        let requests = self.with_session(|session| {
+            let project = session.project();
+            let media = project
+                .active()
+                .clips
+                .iter()
+                .find(|clip| clip.id == clip_id)
+                .map(|clip| clip.media_id.clone())
+                .unwrap_or_default();
+            Ok(
+                Cutouts::skin_requests(project, std::path::Path::new(session.path()))
+                    .into_iter()
+                    .filter(|(id, request)| *id == media && Cutouts::outstanding(request) > 0)
+                    .map(|(_, request)| request)
+                    .collect::<Vec<_>>(),
+            )
+        })?;
+        if requests.is_empty() {
+            listener.on_done(None);
+            return Ok(());
+        }
+        let cutouts = cutouts()?;
+        std::thread::Builder::new()
+            .name("capcraft-skin".to_owned())
+            .spawn(move || {
+                for request in &requests {
+                    let mut report = |progress: Progress| reported(listener.as_ref(), progress);
+                    if let Err(message) = cutouts.analyse(request, &mut report) {
+                        listener.on_failed(message);
+                        return;
+                    }
+                }
+                // the skin is on disk now: draw again, retouched by it
+                listener.on_done(Some(self.refreshed()));
+            })
+            .map_err(|error| MobileError::Failed(format!("could not start: {error}")))?;
+        Ok(())
+    }
+
+    /// Whether clip `clip_id` is retouched and some of its skin is still to
+    /// be found.
+    pub fn skin_missing(&self, clip_id: String) -> Result<bool, MobileError> {
+        self.with_session(|session| {
+            let project = session.project();
+            let media = project
+                .active()
+                .clips
+                .iter()
+                .find(|clip| clip.id == clip_id)
+                .map(|clip| clip.media_id.clone())
+                .unwrap_or_default();
+            Ok(Cutouts::skin_requests(project, std::path::Path::new(session.path()))
+                .iter()
+                .any(|(id, request)| *id == media && Cutouts::outstanding(request) > 0))
+        })
+    }
+
     /// Stops a background removal in progress.
     pub fn cancel_background(&self) {
         if let Ok(cutouts) = cutouts() {

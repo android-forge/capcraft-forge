@@ -917,6 +917,9 @@ impl MobileSession {
             paused: motion == Motion::Still,
             color_space,
             canvas: settings.canvas,
+            // Forge scrubs from its own scrub copies; Concat's nearest
+            // keyframe is left off until the two are measured side by side.
+            nearest: false,
         };
         let rgba = context
             .monitor
@@ -1217,7 +1220,10 @@ impl MobileSession {
     }
 
     /// Sets the frame size (the canvas ratio), keeping the frame rate.
-    pub fn set_canvas(&self, width: u32, height: u32) -> Result<TimelineView, MobileError> {
+    /// [`MobileSession::set_canvas`] as part of gesture `gesture`: with the
+    /// edits made under the same name it is one undo step (a collage's new
+    /// frame and its pictures re-laid on it).
+    pub fn set_canvas_within(&self, width: u32, height: u32, gesture: String) -> Result<TimelineView, MobileError> {
         let (timeline_id, mut video): (String, VideoSettings) = {
             let state = self.lock();
             let project = state.session.project();
@@ -1225,7 +1231,16 @@ impl MobileSession {
         };
         video.width = even(width);
         video.height = even(height);
-        self.run(vec![Command::SetTimelineVideo { timeline_id, video }])
+        let mut state = self.lock();
+        let created = Self::apply_all(&mut state, vec![Command::SetTimelineVideo { timeline_id, video }], Some(&gesture))?;
+        Ok(Self::changed(&mut state, created))
+    }
+
+    pub fn set_canvas(&self, width: u32, height: u32) -> Result<TimelineView, MobileError> {
+        // one step of its own: a gesture with nothing else in it
+        let view = self.set_canvas_within(width, height, self.gesture());
+        self.end_gesture();
+        view
     }
 
     /// Sets the frame rate.
@@ -1508,6 +1523,9 @@ impl MobileSession {
             paused: false,
             color_space,
             canvas: settings.canvas,
+            // Forge scrubs from its own scrub copies; Concat's nearest
+            // keyframe is left off until the two are measured side by side.
+            nearest: false,
         };
         let rgba = context
             .monitor

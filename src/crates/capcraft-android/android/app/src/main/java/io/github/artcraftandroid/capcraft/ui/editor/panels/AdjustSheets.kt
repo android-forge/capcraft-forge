@@ -288,7 +288,7 @@ fun ColumnScope.GraphsSheet(params: JSONObject, set: (Map<String, Double?>, Stri
         }
         setNow(values, gesture)
     }
-    SheetHead("Graphs", onReset = { set(CURVE_KEYS.associateWith { null }, null) }, onClose = close)
+    SheetHead("Curves", onReset = { set(CURVE_KEYS.associateWith { null }, null) }, onClose = close)
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
         CURVES.forEachIndexed { i, (_, colour) ->
             Box(

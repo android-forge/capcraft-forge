@@ -99,6 +99,7 @@ sealed interface Panel {
     data object IsolateVoice : Panel
     data object AutoReframe : Panel
     data object Retouch : Panel
+    data object ReelFx : Panel
     data object CustomCutout : Panel
     data object ShapeStyle : Panel
     data object CaptionTemplates : Panel
@@ -136,6 +137,8 @@ internal const val KEY_NEAR_US = 1_000_000.0 / 30
 private const val SETTINGS = "capcraft-settings"
 private const val LINKAGE_KEY = "linkage"
 private const val PREVIEW_KEY = "preview-scale"
+/** Set once the "Tools have moved" tip has been shown. */
+private const val TOOLS_MOVED_KEY = "tools-moved-tip"
 
 /** Where the timeline keeps its linkage note (the bridge's `LINKAGE`). */
 private const val LINKAGE_EXTRA = "capcraftLinkage"
@@ -237,6 +240,9 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
      * over it from the start, each cropped into a cell of the first layout, with Layout open. All
      * photos, it exports a photo.
      */
+    /** The collage's own screen: the picture and the collage's tabs, with no timeline. */
+    var collageScreen by mutableStateOf(false)
+
     private fun startCollage(uris: List<Uri>) {
         val s = session ?: return
         viewModelScope.launch {
@@ -264,7 +270,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                     exportPhoto = true
                     exportGif = false
                 }
-                panel = Panel.Collage
+                collageScreen = true
             }.onFailure { fail(it) }
         }
     }
@@ -649,10 +655,34 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     var chosen: Set<String>? by mutableStateOf(null)
 
     fun select(id: String?) {
-        if (id != selected) clipLevel = null
+        // the drawer last used stays open from one picture to the next, so a run of the same edit
+        // over many clips doesn't open it again each time; anything else starts on the clip's bar
+        if (id != selected && !keepsDrawer(id)) clipLevel = null
         selected = id
         panel = null
         if (id == null && dock.lastOrNull() !is DockLevel.Group) dock = listOf(DockLevel.Root)
+    }
+
+    /** Whether the open drawer suits the clip [id] as well as the one selected now. */
+    private fun keepsDrawer(id: String?): Boolean {
+        val level = clipLevel ?: return false
+        if (id == null || level !in PICTURE_DRAWERS) return false
+        val before = selectedClip?.kind
+        val after = clip(id)?.kind
+        val pictures = setOf("video", "image")
+        // Sound is a video's only
+        return before in pictures && after in pictures && (level != "sound" || after == "video")
+    }
+
+    /**
+     * Said once, the first time the editor opens after the tools moved into drawers: where they went,
+     * and that search still finds them by their old names.
+     */
+    fun toolsMovedTip() {
+        val prefs = getApplication<Application>().getSharedPreferences(SETTINGS, android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean(TOOLS_MOVED_KEY, false)) return
+        prefs.edit().putBoolean(TOOLS_MOVED_KEY, true).apply()
+        message = "Tools have moved: a clip's bar now opens Edit, Look, Smart, Motion and Sound. Search finds them by their old names too."
     }
 
     fun togglePlay() {
@@ -1189,6 +1219,14 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
     }
 
     /** Adds a filter or effect layer at the playhead and selects it. */
+    /** Reel effect [fx] laid on the effect row at the playhead as an item of its own, and selected. */
+    fun addReelLayer(fx: String, name: String, durationUs: Long = 3_000_000) {
+        // the playhead moved two fifths in, where the effect is showing rather than still arriving
+        edit(select = { v -> v.createdId.ifEmpty { null }?.also { id -> clip(id)?.let { scrub(it.startUs + it.durationUs * 2 / 5) } } }) {
+            addReelLayer(fx, name, playhead, durationUs)
+        }
+    }
+
     fun addLayer(effectId: String, name: String, durationUs: Long = 3_000_000) {
         edit(select = { it.createdId.ifEmpty { null } }) { addLayer(effectId, name, playhead, durationUs) }
     }
@@ -1365,29 +1403,40 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(800)
-            withContext(Threads.commands) { runCatching { session?.save() } }
+            saved()
         }
+    }
+
+    /**
+     * Writes the project, and says so when it could not (a full phone, a folder gone): the edits are
+     * still here, and a later save may yet write them. True when written.
+     */
+    private suspend fun saved(): Boolean {
+        val failed = withContext(Threads.commands) { runCatching { session?.save() }.exceptionOrNull() }
+        if (failed != null) message = "Could not save the project: ${failed.userMessage}"
+        return failed == null
     }
 
     /** Writes the project now. */
     suspend fun saveNow() {
         saveJob?.cancel()
-        withContext(Threads.commands) { runCatching { session?.save() } }
+        saved()
     }
 
-    /** Saves now and lets the player go; a project left with nothing on it is deleted. */
-    suspend fun close() {
+    /**
+     * Saves now and lets the player go; a project left with nothing on it is deleted. False when the
+     * project could not be saved: the editor stays open, saying why, rather than close on lost edits.
+     */
+    suspend fun close(): Boolean {
         saveJob?.cancel()
         val empty = timeline?.rows?.all { it.clips.isEmpty() } ?: false
+        if (!empty && !saved()) return false
         withContext(Threads.commands) {
             runCatching { pause() }
             runCatching { clearPlayback() }
-            if (empty) {
-                runCatching { io.github.artcraftandroid.capcraft.core.deleteProject(path) }
-            } else {
-                runCatching { session?.save() }
-            }
+            if (empty) runCatching { io.github.artcraftandroid.capcraft.core.deleteProject(path) }
         }
+        return true
     }
 
     override fun onCleared() {

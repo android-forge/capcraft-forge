@@ -214,6 +214,11 @@ except the first:
   Apache-2.0), compiled into the `concat-vision` crate; see
   `src/crates/concat-vision/models/NOTICE.md`. The answer when nothing
   has been downloaded.
+- Google's MediaPipe Selfie Multiclass Segmentation (Apache-2.0), from
+  https://huggingface.co/litert-community/MediaPipe-ImageSegmenter-Selfie-Multiclass,
+  converted to ONNX by CapCraft Forge and compiled into `concat-vision`;
+  see `src/crates/concat-vision/models/NOTICE.md`. Not a cutout: Retouch's
+  skin, the face's and the body's.
 - Robust Video Matting, the MobileNetV3 variant, by Peter Lin and others
   (https://github.com/PeterL1n/RobustVideoMatting, GPL-3.0), from that
   repository's releases, downloaded on first use. The person model.
@@ -249,6 +254,28 @@ own accelerator behind it where the runtime has one: CoreML on macOS and
 iOS, NNAPI on Android. How each platform carries the runtime is under
 "ONNX Runtime" above.
 
+## Models and voices in the source tree from Concat v0.2.12
+
+Merged with Concat v0.2.12, the source tree carries files that the Android app
+does not build in today (they are behind `concat-speech` features the app does
+not turn on), listed here because the repository distributes them:
+
+- DeepFilterNet 3's ONNX export (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`
+  from https://github.com/Rikorose/DeepFilterNet, Copyright (c) 2021 Hendrik
+  Schröter, code and weights MIT or Apache-2.0). Concat's voice isolation.
+  Licence texts in `src/crates/concat-speech/assets/deepfilternet3/`.
+- Beat This!'s small model (`small0`, https://github.com/CPJKU/beat_this,
+  Copyright (c) 2024 Institute of Computational Perception, JKU Linz, Austria;
+  code and weights MIT), exported to ONNX by Concat. Licence text in
+  `src/crates/concat-speech/assets/beat-this/`.
+- Four voice samples from LibriVox readings by Elizabeth Klett, Mark F. Smith,
+  Ruth Golding and Bob Neufeld (https://librivox.org), which LibriVox readers
+  dedicate to the public domain; `src/crates/concat-speech/voices/README.md`
+  names each source. Chatterbox's stock voices, desktop only.
+- Spleeter's 2-stems networks (Deezer, MIT), in the half-float ONNX export
+  sherpa-onnx publishes, are named in `concat-vision`'s model list as a
+  download; nothing in the Android app fetches them yet.
+
 ## The model mirror
 
 Every downloaded model named above is mirrored onto a release of Concat's own
@@ -275,3 +302,23 @@ https://unsplash.com/photos/2v921tlqdXE), used under the Unsplash License. The s
 and is embedded in the app; each card is the effect's own shader run over
 it on the GPU when the app first needs the card (`concat-host`'s
 `cards.rs`).
+
+## Reel effects
+
+- The 51 reel effects in `src/crates/capcraft-reelfx` are a Rust port of
+  claude-video-effects by Vibha Ramprakash
+  (https://github.com/Vibha-Ramprakash/claude-video-effects, MIT; the
+  licence text is `src/crates/capcraft-reelfx/LICENSE-claude-video-effects.txt`).
+  Defaults that imitated another company's interface or name are drawn as
+  neutral cards instead.
+- YuNet face detector, face_detection_yunet_2023mar, from OpenCV Zoo
+  (https://github.com/opencv/opencv_zoo, MIT), compiled into
+  `concat-vision` (`models/yunet.onnx`). It finds the face the effects follow.
+- Space Mono Bold and Playfair Display (SIL Open Font License 1.1), in
+  `src/crates/capcraft-reelfx/fonts/` with their licence texts.
+
+## Film looks
+
+- The 13 `capcraft.film-*` packages in `src/crates/concat-effects/packages`
+  follow the recipes of color_grading_film_emulation by 0xzgbot
+  (hermes-media-skill-pack, MIT), rewritten as Forge shaders.

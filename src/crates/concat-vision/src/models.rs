@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! The models that are downloaded rather than compiled in: what they are
 //! called, where they come from, and where they live once fetched.
@@ -48,6 +48,11 @@ pub enum ModelId {
     /// Depth Anything V2 Small: how near each part of a picture is, for
     /// light that casts shadows as the scene would.
     Depth,
+    /// Spleeter's vocals network: the singing in a song, as a magnitude
+    /// spectrum. Voice isolation's, for music; see concat-speech's vocals.
+    SpleeterVocals,
+    /// Spleeter's accompaniment network: everything but the singing.
+    SpleeterAccompaniment,
 }
 
 /// One model as the table describes it.
@@ -71,7 +76,7 @@ pub struct ModelSpec {
 }
 
 /// Every downloadable model.
-pub const MODELS: [ModelSpec; 10] = [
+pub const MODELS: [ModelSpec; 12] = [
     ModelSpec {
         id: ModelId::Person,
         file: "rvm-mobilenetv3.onnx",
@@ -152,6 +157,25 @@ pub const MODELS: [ModelSpec; 10] = [
         sha256: "01aa7a23de3f4a0ee1a2bb9997e6918104c85a9f95dea46d27b9b3fb0c6b9001",
         licence: "Apache-2.0",
     },
+    // Deezer's weights (MIT), as sherpa-onnx exported them, in half floats:
+    // the same answers as the full-precision export to a hundredth of a
+    // decibel on the test song, at half the download.
+    ModelSpec {
+        id: ModelId::SpleeterVocals,
+        file: "spleeter-2stems-vocals.fp16.onnx",
+        upstream: "https://huggingface.co/csukuangfj/sherpa-onnx-spleeter-2stems-fp16/resolve/93ba771920ade509f8cbd6825b1a90856c797e08/vocals.fp16.onnx",
+        bytes: 19_681_017,
+        sha256: "24cef84aedcd1fe87c0b743ef3370ad34dc1fabf6c9014d6128a75a538c7b668",
+        licence: "MIT",
+    },
+    ModelSpec {
+        id: ModelId::SpleeterAccompaniment,
+        file: "spleeter-2stems-accompaniment.fp16.onnx",
+        upstream: "https://huggingface.co/csukuangfj/sherpa-onnx-spleeter-2stems-fp16/resolve/93ba771920ade509f8cbd6825b1a90856c797e08/accompaniment.fp16.onnx",
+        bytes: 19_681_024,
+        sha256: "d14cea55793cc531a5875f5f4da08207d1c5ab9292e8e0099a104eecb014fcc0",
+        licence: "MIT",
+    },
 ];
 
 impl ModelId {
@@ -176,6 +200,8 @@ impl ModelId {
             ModelId::WordsFind => "ppocr-v3-det-en",
             ModelId::WordsRead => "ppocr-v5-rec-en",
             ModelId::Depth => "depth-anything-v2-small",
+            ModelId::SpleeterVocals => "spleeter-2stems-vocals",
+            ModelId::SpleeterAccompaniment => "spleeter-2stems-accompaniment",
         }
     }
 }

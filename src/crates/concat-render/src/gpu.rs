@@ -33,7 +33,10 @@
 use std::collections::HashMap;
 
 use concat_core::frame::Frame;
-use concat_core::mask::MaskUniform;
+use concat_core::mask::{MaskStack, MaskUniform, StackUniform};
+
+/// What the mask pass's pipeline is cached under.
+const MASK_STACK_KEY: &str = "concat.mask-stack/1";
 use concat_core::shader::{Lut, RevealMap, ShaderPass, TransitionPass};
 use concat_core::timeline::Blend;
 
@@ -156,15 +159,89 @@ fn mask_distance(code: f32, p: vec2<f32>, half: vec2<f32>, radius: f32) -> f32 {
 }
 
 fn mask_coverage(a: vec4<f32>, b: vec4<f32>, c: vec4<f32>, pic: vec2<f32>) -> f32 {
+    return mask_coverage_grown(a, b, c, pic, 0.0);
+}
+
+fn mask_coverage_grown(a: vec4<f32>, b: vec4<f32>, c: vec4<f32>, pic: vec2<f32>, grow: f32) -> f32 {
     if (a.x < 0.5) {
         return 1.0;
     }
     let dx = (pic.x - 0.5 - b.x) * c.z;
     let dy = (pic.y - 0.5 - b.y) * c.w;
     let p = vec2<f32>(dx * c.x + dy * c.y, -dx * c.y + dy * c.x);
-    let d = mask_distance(a.x, p, b.zw, a.w);
+    let d = mask_distance(a.x, p, b.zw, a.w) - grow;
     let kept = 1.0 - smoothstep(-a.z * 0.5, a.z * 0.5, d);
     return select(kept, 1.0 - kept, a.y > 0.5);
+}
+"#;
+
+/// A clip's masks drawn into its matte: `concat_core::mask::stack_coverage`
+/// line for line, multiplied with the matte it is given (a cutout's, or
+/// the one white pixel), its coverage in alpha. The layer's draw samples
+/// it as it samples any matte. Bound like an effect pass - the layer at
+/// group 0, the frame block and `Params` at group 1 - so it compiles and
+/// draws through the same pipeline cache.
+const MASK_STACK_WGSL: &str = r#"
+struct Frame {
+    @align(16) size: vec2<f32>,
+    time: f32,
+    intensity: f32,
+    clip_time: f32,
+}
+
+struct Params {
+    header: vec4<f32>,
+    masks: array<vec4<f32>, 32>,
+}
+
+@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(1) var source_sampler: sampler;
+@group(1) @binding(0) var<uniform> frame: Frame;
+@group(1) @binding(1) var<uniform> params: Params;
+
+struct VsOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) index: u32) -> VsOut {
+    let x = f32(i32(index & 1u) * 4 - 1);
+    let y = f32(i32(index >> 1u) * 4 - 1);
+    var out: VsOut;
+    out.position = vec4<f32>(x, y, 0.0, 1.0);
+    out.uv = vec2<f32>((x + 1.0) * 0.5, 1.0 - (y + 1.0) * 0.5);
+    return out;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let matte = textureSampleLevel(source, source_sampler, in.uv, 0.0).a;
+    let count = i32(round(params.header.x));
+    var kept = 1.0;
+    if (count > 0 && i32(round(params.masks[3].x)) == 1) {
+        kept = 0.0;
+    }
+    for (var i = 0; i < 8; i = i + 1) {
+        if (i >= count) {
+            break;
+        }
+        let a = params.masks[i * 4];
+        let b = params.masks[i * 4 + 1];
+        let c = params.masks[i * 4 + 2];
+        let d = params.masks[i * 4 + 3];
+        let k = mask_coverage_grown(a, b, c, in.uv, d.z);
+        let covered = k * d.y;
+        let mode = i32(round(d.x));
+        if (mode == 1) {
+            kept = kept + covered - kept * covered;
+        } else if (mode == 2) {
+            kept = kept * (1.0 - covered);
+        } else if (mode == 3) {
+            kept = kept * (1.0 - d.y + k * d.y);
+        }
+    }
+    return vec4<f32>(1.0, 1.0, 1.0, matte * kept);
 }
 "#;
 
@@ -346,6 +423,137 @@ const WORK_FALLBACK: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// device or ends with an error. Thirty seconds is far past the slowest
 /// frame a software adapter draws at 8K.
 pub const DEVICE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The instance flags every device Concat opens is made with: wgpu's
+/// defaults less indirect-call validation, which builds a compute pipeline
+/// as each device opens to check indirect draws Concat never makes. On an
+/// Intel Iris Pro Mac that pipeline met an internal compiler error, and on
+/// a GCN Radeon under OpenCore Legacy Patcher a `-std=metal3.2` the
+/// compiler refused; either way the device was lost as it opened and no
+/// window ever came up (#600, #423). `WGPU_VALIDATION_INDIRECT_CALL=1`
+/// turns it back on.
+pub fn instance_flags() -> wgpu::InstanceFlags {
+    (wgpu::InstanceFlags::default() - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL).with_env()
+}
+
+/// The flags a rung's instance is made with: [`instance_flags`], and on
+/// Windows' software renderer (WARP) shaders compiled without the
+/// compiler's optimisations. Optimised, one of the compositor's shaders
+/// made WARP remove the device on the first frame it drew, every time,
+/// in every build that ships - the tests, built for debugging, compile
+/// unoptimised and never saw it. CI's runner, which has no GPU, showed it:
+/// with calls into the device one thread at a time, the debug layer,
+/// hardware coding and logging each tried on and off, the export drew on
+/// WARP only when the shaders were left unoptimised (#824). WARP compiles
+/// every shader again for the CPU with its own optimiser, so little is
+/// lost. `CONCAT_WARP_SHADERS=optimised`
+/// compiles them as on a GPU, for CI's runs that look for the shader.
+fn rung_flags(software: bool) -> wgpu::InstanceFlags {
+    let flags = instance_flags();
+    if cfg!(windows) && software && !warp_shaders_optimised() {
+        flags | wgpu::InstanceFlags::DEBUG
+    } else {
+        flags
+    }
+}
+
+/// The wgpu instance a device on `rung` is asked of: its APIs, its flags
+/// ([`rung_flags`]), the memory budget, and FXC for DX12's shaders.
+pub(crate) fn instance_for(rung: Rung) -> wgpu::Instance {
+    let mut descriptor = wgpu::InstanceDescriptor {
+        backends: rung.backends,
+        flags: rung_flags(rung.software),
+        memory_budget_thresholds: memory_budget(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    };
+    // FXC, never wgpu's default `Auto`: Concat ships no dxcompiler.dll,
+    // so `Auto` loads whichever one Windows finds on PATH - Obsidian's or
+    // another Electron app's - and a build that does not match wgpu, or
+    // needs instructions the CPU lacks, kills the process at the first
+    // shader (0xc000001d). FXC is in System32 and is what every machine
+    // without a stray DXC already compiles with (#418). WGPU_DX12_COMPILER
+    // still picks another, for trying DXC on a real GPU (#297).
+    descriptor.backend_options.dx12.shader_compiler =
+        wgpu::Dx12Compiler::from_env().unwrap_or(wgpu::Dx12Compiler::Fxc);
+    wgpu::Instance::new(descriptor)
+}
+
+/// Whether `CONCAT_WARP_SHADERS=optimised` asks for WARP's shaders to be
+/// compiled as a GPU's are; see [`rung_flags`].
+fn warp_shaders_optimised() -> bool {
+    std::env::var("CONCAT_WARP_SHADERS").is_ok_and(|value| {
+        let value = value.trim();
+        value.eq_ignore_ascii_case("optimised") || value.eq_ignore_ascii_case("optimized")
+    })
+}
+
+/// How near its memory budget a device lets Concat go, as Firefox ships it
+/// to every Windows user of WebGPU: past 95% a texture or buffer is refused
+/// with an out-of-memory error, which a composite catches and an export
+/// answers on the next device; past 99% the device is lost, which the
+/// export answers the same way. Without them an 8 GB card shared by the
+/// window, the decoders and an export at 4K lost its device in the driver
+/// (#223) or hung with no loss reported at all (#297). Only Direct3D 12
+/// and Vulkan read them, and on Vulkan as Concat's copy of wgpu-hal reads
+/// them: a buffer the CPU writes is gated on the heap it will land in, not
+/// the BAR it would prefer, and the BAR is left out of the loss gate (see
+/// `crate::memory` and src/patches/README.md). Every device says the
+/// figures they read as it opens and at its first refusal.
+pub const MEMORY_BUDGET: wgpu::MemoryBudgetThresholds = wgpu::MemoryBudgetThresholds {
+    for_resource_creation: Some(95),
+    for_device_loss: Some(99),
+};
+
+/// The budget every device is opened with: [`MEMORY_BUDGET`], unless
+/// `CONCAT_GPU_BUDGET` says otherwise. The published gates refused a
+/// buffer of a few hundred bytes on a nearly idle NVIDIA card on Linux,
+/// over the spent budget of its BAR, which the allocator would have gone
+/// past into system memory; the device was lost, the next would not open
+/// and an export sat at 0% (#746). Patched, that no longer happens, and
+/// this stays the way round any gate that still does harm. `off` (or `none`, `0`)
+/// lifts both and leaves out-of-memory to the driver, which the device-loss
+/// recovery answers as before; a number from 1 to 99 moves the creation
+/// gate there, the loss gate four points above it. Read once, and said in
+/// the log when it changes anything.
+pub fn memory_budget() -> wgpu::MemoryBudgetThresholds {
+    static BUDGET: std::sync::OnceLock<wgpu::MemoryBudgetThresholds> = std::sync::OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        let Ok(raw) = std::env::var("CONCAT_GPU_BUDGET") else {
+            return MEMORY_BUDGET;
+        };
+        let budget = parse_budget(&raw);
+        match budget {
+            Some(budget) => log::warn!(
+                "CONCAT_GPU_BUDGET={raw}: creation gate {:?}, loss gate {:?}",
+                budget.for_resource_creation,
+                budget.for_device_loss
+            ),
+            None => log::warn!("CONCAT_GPU_BUDGET={raw} is neither off nor 1-99; ignored"),
+        }
+        budget.unwrap_or(MEMORY_BUDGET)
+    })
+}
+
+/// `CONCAT_GPU_BUDGET`'s value as gates, or `None` for one that is not.
+fn parse_budget(raw: &str) -> Option<wgpu::MemoryBudgetThresholds> {
+    let raw = raw.trim();
+    if ["off", "none", "0"]
+        .iter()
+        .any(|off| raw.eq_ignore_ascii_case(off))
+    {
+        return Some(wgpu::MemoryBudgetThresholds {
+            for_resource_creation: None,
+            for_device_loss: None,
+        });
+    }
+    let percent: u8 = raw.trim_end_matches('%').parse().ok()?;
+    (1..=99)
+        .contains(&percent)
+        .then(|| wgpu::MemoryBudgetThresholds {
+            for_resource_creation: Some(percent),
+            for_device_loss: Some(percent.saturating_add(4).min(99)),
+        })
+}
 
 /// A picture copied texel for texel into a target of the same size, through
 /// the colour conversion at each end of the working space: an uploaded
@@ -537,6 +745,72 @@ fn to_sdr(nits: vec3<f32>) -> vec3<f32> {
 }
 "#;
 
+/// A finished frame out of the working space into the encoder's own YUV:
+/// the resolve's light (`fs_resolve`, or `fs_resolve_tone_mapped` for an
+/// HDR timeline into an SDR file) put through BT.709's coefficients into
+/// eight-bit levels in the stream's range, a plane at a time. The chroma
+/// is of each two by two block's colour. Follows `COPY_SHADER` and
+/// `TONE_MAP`; `yuv_shader` sets the two constants.
+const YUV_SHADER: &str = r#"
+fn encoded_at(texel: vec2<i32>) -> vec3<f32> {
+    var light = textureLoad(picture, texel, 0).rgb;
+    if (TONE_MAPPED) {
+        light = to_sdr(light * 203.0) / 203.0;
+    }
+    return pow(clamp(light, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.4));
+}
+
+fn luma_of(rgb: vec3<f32>) -> f32 {
+    return dot(vec3<f32>(0.2126, 0.7152, 0.0722), rgb);
+}
+
+// Cb and Cr of the block whose top left texel is twice `at`, as levels.
+fn chroma_at(at: vec2<f32>) -> vec2<f32> {
+    let base = vec2<i32>(at) * 2;
+    let rgb = (encoded_at(base) + encoded_at(base + vec2<i32>(1, 0))
+        + encoded_at(base + vec2<i32>(0, 1)) + encoded_at(base + vec2<i32>(1, 1))) * 0.25;
+    let y = luma_of(rgb);
+    let c = vec2<f32>((rgb.b - y) / 1.8556, (rgb.r - y) / 1.5748);
+    if (FULL_RANGE) {
+        return c + vec2<f32>(128.0 / 255.0);
+    }
+    return (c * 224.0 + vec2<f32>(128.0)) / 255.0;
+}
+
+@fragment
+fn fs_luma(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    let y = luma_of(encoded_at(vec2<i32>(at.xy)));
+    if (FULL_RANGE) {
+        return vec4<f32>(y, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>((y * 219.0 + 16.0) / 255.0, 0.0, 0.0, 1.0);
+}
+
+@fragment
+fn fs_chroma(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(chroma_at(at.xy), 0.0, 1.0);
+}
+
+@fragment
+fn fs_cb(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(chroma_at(at.xy).x, 0.0, 0.0, 1.0);
+}
+
+@fragment
+fn fs_cr(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(chroma_at(at.xy).y, 0.0, 0.0, 1.0);
+}
+"#;
+
+/// The YUV module for an HDR timeline into SDR or not, and for full range
+/// or limited.
+fn yuv_shader(tone_mapped: bool, full_range: bool) -> String {
+    format!(
+        "{COPY_SHADER}{TONE_MAP}\nconst TONE_MAPPED: bool = {tone_mapped};\n\
+         const FULL_RANGE: bool = {full_range};\n{YUV_SHADER}"
+    )
+}
+
 /// A deep frame (sixteen bits a channel, Rec. 2020, its source's own signal)
 /// copied into the working space: the upload of an HDR or wide-gamut clip.
 /// One entry a signal (`concat_core::frame::Signal`): the transfer undone
@@ -635,6 +909,155 @@ struct CompiledShader {
     stages: Vec<wgpu::RenderPipeline>,
 }
 
+/// Everything a package's pipeline is compiled against, taken from a
+/// compositor by [`WgpuCompositor::forge`]: compiling with it needs no
+/// compositor, and any thread may - wgpu's error scopes are the calling
+/// thread's own, and nothing here touches a queue.
+pub struct ShaderForge {
+    device: wgpu::Device,
+    work: wgpu::TextureFormat,
+    bind_layout: wgpu::BindGroupLayout,
+    uniform_layout: wgpu::BindGroupLayout,
+    lut_layout: wgpu::BindGroupLayout,
+    reveal_layout: wgpu::BindGroupLayout,
+    pictures: HashMap<usize, wgpu::BindGroupLayout>,
+}
+
+/// One pass compiled by a [`ShaderForge`], for [`WgpuCompositor::adopt`]:
+/// its pipeline, or `None` where the driver refused it.
+pub struct ForgedShader {
+    key: String,
+    compiled: Option<CompiledShader>,
+}
+
+impl ShaderForge {
+    /// Compiles `pass`. The catalogue validated the module at load, so a
+    /// failure here is a driver disagreement: caught in an error scope,
+    /// logged, and kept as refused - the layer draws untreated from then
+    /// on - rather than reaching wgpu's uncaptured-error handler, which
+    /// ends the process (audit 2026-09-23, #7).
+    pub fn compile(&self, pass: &ShaderPass) -> ForgedShader {
+        let refused = || ForgedShader {
+            key: pass.key.clone(),
+            compiled: None,
+        };
+        // A package drawn in one pass binds its layer as the pool made it;
+        // one drawn in several binds its passes' pictures beside it.
+        let inputs = if pass.stages.is_empty() {
+            &self.bind_layout
+        } else {
+            match self.pictures.get(&pass.stages.len()) {
+                Some(layout) => layout,
+                None => {
+                    log::error!("pass {}: no layout for its stages", pass.key);
+                    return refused();
+                }
+            }
+        };
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(&pass.key),
+                source: wgpu::ShaderSource::Wgsl(pass.source.as_ref().into()),
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&pass.key),
+                bind_group_layouts: &[
+                    Some(inputs),
+                    Some(&self.uniform_layout),
+                    Some(&self.lut_layout),
+                    Some(&self.reveal_layout),
+                ],
+                immediate_size: 0,
+            });
+        let pipeline_of = |entry: &str| {
+            self.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(&pass.key),
+                    layout: Some(&layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some(entry),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: self.work,
+                            // A pass replaces: mixing by intensity is the
+                            // shader's own last line.
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview_mask: None,
+                    cache: None,
+                })
+        };
+        let pipeline = pipeline_of("fs_main");
+        let stages = pass
+            .stages
+            .iter()
+            .map(|stage| pipeline_of(&stage.entry))
+            .collect();
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            log::error!(
+                "pass {}: the driver refused its pipeline: {error}",
+                pass.key
+            );
+            return refused();
+        }
+        let frame = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("concat pass frame"),
+            // size(vec2), time, intensity, clip_time, padded to Frame's own
+            // 16-byte alignment (OpenGL ES's, see concat-effects' Frame):
+            // 20 bytes rounds to 32.
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let params = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("concat pass params"),
+            size: pass.params.len().max(ShaderPass::MIN_PARAMS) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("concat pass uniforms"),
+            layout: &self.uniform_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: frame.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        });
+        ForgedShader {
+            key: pass.key.clone(),
+            compiled: Some(CompiledShader {
+                pipeline,
+                frame,
+                params,
+                bind_group,
+                stages,
+            }),
+        }
+    }
+}
+
 /// A 2D float texture a pass samples, at `binding` of its group.
 fn picture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
@@ -694,21 +1117,31 @@ struct PooledTexture {
 /// the monitor has shown finds its frames on the device.
 ///
 /// Chosen by what the textures cost the machine. On a card of its own they
-/// live in the card's memory, which nothing else in the app wants: 512 MB,
-/// 64 frames at 1080p. On integrated graphics - Intel, AMD's APUs, Apple's
-/// chips - and on a virtual GPU they come out of system memory beside the
-/// frame cache, so half that; on the software adapter they are system
-/// memory outright, so a quarter.
-pub fn pool_budget_for(device: wgpu::DeviceType) -> u64 {
+/// live in the card's memory: 512 MB, 64 frames at 1080p, but never more
+/// than a fifth of what the driver gives this process of the card
+/// (`card_budget`), since the window, the effects and the video decoders
+/// live there too - a flat 512 MB was a third of a 2 GB card, which ran
+/// out (#873). On integrated graphics - Intel, AMD's APUs, Apple's chips -
+/// and on a virtual GPU they come out of system memory beside the frame
+/// cache, so half that; on the software adapter they are system memory
+/// outright, so a quarter.
+pub fn pool_budget_for(device: wgpu::DeviceType, card_budget: Option<u64>) -> u64 {
     const MB: u64 = 1024 * 1024;
     match device {
-        wgpu::DeviceType::DiscreteGpu => 512 * MB,
+        wgpu::DeviceType::DiscreteGpu => {
+            card_budget.map_or(512 * MB, |budget| (budget / 5).clamp(POOL_FLOOR, 512 * MB))
+        }
         wgpu::DeviceType::Cpu => 128 * MB,
         wgpu::DeviceType::IntegratedGpu
         | wgpu::DeviceType::VirtualGpu
         | wgpu::DeviceType::Other => 256 * MB,
     }
 }
+
+/// The least the layer pool is let shrink to, by the card's size or by the
+/// card running out (see `pressure_seen`): two 1080p frames at half float
+/// and change, enough for a composite of a few layers to draw.
+const POOL_FLOOR: u64 = 48 * 1024 * 1024;
 
 /// The LUTs and the reveal maps kept on the device, at most: a look is a
 /// megabyte at 65 a side, and each one a person tries stayed on the device
@@ -775,6 +1208,16 @@ fn work_format(adapter: &wgpu::Adapter) -> wgpu::TextureFormat {
     } else {
         WORK_FALLBACK
     }
+}
+
+/// One rung of the adapters a compositor is opened on: a set of APIs, and
+/// whether it is the software adapter among them or the hardware.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rung {
+    /// The APIs asked.
+    pub backends: wgpu::Backends,
+    /// The software adapter (WARP, lavapipe) rather than a GPU.
+    pub software: bool,
 }
 
 /// A compositor that draws on the GPU. See the module docs.
@@ -874,8 +1317,13 @@ pub struct WgpuCompositor {
     pool: HashMap<(u32, u32), Vec<PooledTexture>>,
     /// What the pool's textures hold, in bytes; see [`pool_budget_for`].
     pool_bytes: u64,
-    /// What `pool_bytes` may reach; see [`pool_budget_for`].
+    /// What `pool_bytes` may reach; see [`pool_budget_for`]. Halved each
+    /// time a device of the process runs out of memory, down to
+    /// [`POOL_FLOOR`].
     pool_budget: u64,
+    /// [`crate::memory::pressure`] as last read: a change since says a
+    /// device has run out of memory and the pool must hold less.
+    pressure_seen: u64,
     /// How many textures the pool holds; see [`POOL_TEXTURES`].
     pool_textures: usize,
     /// Composites drawn so far; see [`PooledTexture::drawn`].
@@ -893,10 +1341,28 @@ pub struct WgpuCompositor {
     stages: Option<(u32, u32, [wgpu::Texture; 2])>,
     /// A one-pixel opaque white picture: the mask of a layer without one.
     white: std::sync::Arc<Frame>,
-    /// Set when a readback fails - a lost or reset device. The compositor
-    /// then answers every composite from the CPU reference instead: slower,
-    /// always correct, and never a panic in the middle of an export.
+    /// The mask pass's module: the shared mask arithmetic and the pass.
+    mask_stack_source: std::sync::Arc<str>,
+    /// Set once the device is given up: when it says it is gone - its lost
+    /// callback, Direct3D 12's removed reason - or after [`STRIKES`] frames
+    /// in a row failed on it. The compositor then answers every composite
+    /// black and `lost` says so, and the caller draws on the next device.
     dead: bool,
+    /// Frames in a row that failed on a device that said it was still
+    /// there; see [`WgpuCompositor::failed_frame`].
+    strikes: u32,
+    /// Set by the device's lost callback, from whatever thread wgpu calls
+    /// it on, and read as `dead` is: a device Direct3D removed outright
+    /// (#673) was otherwise only noticed by a readback, and a picture drawn
+    /// into a texture for the window never reads back - the preview went
+    /// on drawing on a device that was gone, black frame after black frame.
+    /// Shared with siblings, which are on the same device.
+    gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// What wgpu said when it called the lost callback, shared as `gone` is.
+    lost_reason: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// The line [`WgpuCompositor::say_why`] wrote, once this compositor
+    /// found its device gone: said once, never per frame.
+    post_mortem: Option<String>,
     /// The format everything is drawn in: [`WORK`], or [`WORK_FALLBACK`] on
     /// a device that cannot draw into it.
     work: wgpu::TextureFormat,
@@ -907,6 +1373,24 @@ pub struct WgpuCompositor {
     /// frame comes: what tells this compositor's frames from another's.
     #[cfg(target_os = "android")]
     raw_device: Option<u64>,
+    /// Set once the device's memory has been said at its first refusal
+    /// (see [`crate::memory::ran_out`]); shared with siblings, which are on
+    /// the same device.
+    memory_said: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Frames [`Compositor::submit`] started, oldest first, on their way
+    /// back; see [`Compositor::collect`].
+    in_flight: std::collections::VecDeque<Readback>,
+    /// Staging buffers collected frames came back in, kept for the next.
+    spare: Vec<wgpu::Buffer>,
+    /// What frames `submit` starts come back as where they can be; see
+    /// [`Compositor::planar`].
+    planar: Option<concat_core::frame::YuvLayout>,
+    /// The YUV passes, compiled the first time an export asks for them,
+    /// by entry point, tone mapping and range.
+    yuv_pipelines: HashMap<(&'static str, bool, bool), wgpu::RenderPipeline>,
+    /// The planes a YUV frame is drawn into before it is copied out, for
+    /// one size and layout: luma, then the chroma.
+    planes: Option<(u32, u32, concat_core::frame::Chroma, Vec<wgpu::Texture>)>,
 }
 
 /// An Android MediaCodec input surface configured on the compositor's
@@ -1143,9 +1627,24 @@ impl WgpuCompositor {
     }
 
     /// [`WgpuCompositor::new`]'s order of asking: the platform's own API,
-    /// then every API wgpu was built with. `software_only` leaves the
+    /// then, except on Windows, every API wgpu was built with. `software_only` leaves the
     /// hardware adapters out.
     fn own_api_first(software_only: bool) -> Option<Self> {
+        Self::rungs_for(software_only)
+            .into_iter()
+            .find_map(Self::on_rung)
+    }
+
+    /// The adapters [`WgpuCompositor::new`] asks for, in its order: each a
+    /// set of APIs and whether it is the software adapter among them. The
+    /// preview's ladder ([`crate::Ladder`]) steps down them one by one.
+    pub fn rungs() -> Vec<Rung> {
+        Self::rungs_for(false)
+    }
+
+    /// [`WgpuCompositor::rungs`], the software adapters alone where
+    /// `software_only` says so.
+    fn rungs_for(software_only: bool) -> Vec<Rung> {
         // CONCAT_GPU=software - set by hand, or by a safe start after a
         // launch the GPU's driver killed - keeps the compositor off the GPU
         // too, so an export or a card does not meet that driver either.
@@ -1153,10 +1652,14 @@ impl WgpuCompositor {
         // Vulkan (#507): a phone has no software adapter, and reading it as
         // "software alone" left the monitor and every export with nothing
         // to draw on for the rest of the build. There it asks for GL first.
+        // Nor on a Mac, which has no software adapter either: there a safe
+        // start draws the window on Skia's own rasteriser, and the
+        // compositor stays on Metal, the one device a Mac has (#600).
         let safe = std::env::var("CONCAT_GPU")
             .is_ok_and(|value| value.trim().eq_ignore_ascii_case("software"));
         let android = cfg!(target_os = "android");
-        let software_only = software_only || (safe && !android);
+        let apple = cfg!(target_vendor = "apple");
+        let software_only = software_only || (safe && !android && !apple);
         let own = if android && safe {
             wgpu::Backends::GL
         } else if cfg!(target_vendor = "apple") {
@@ -1166,35 +1669,37 @@ impl WgpuCompositor {
         } else {
             wgpu::Backends::VULKAN
         };
-        [own, wgpu::Backends::all()]
-            .into_iter()
-            .find_map(|backends| Self::on_backends(backends, software_only))
-    }
-
-    /// A compositor on the best adapter among `backends`, hardware before
-    /// software - or software alone - or `None` when none of them opens a
-    /// device.
-    fn on_backends(backends: wgpu::Backends, software_only: bool) -> Option<Self> {
-        let mut descriptor = wgpu::InstanceDescriptor {
-            backends,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        };
-        // FXC, never wgpu's default `Auto`: Concat ships no dxcompiler.dll,
-        // so `Auto` loads whichever one Windows finds on PATH - Obsidian's or
-        // another Electron app's - and a build that does not match wgpu, or
-        // needs instructions the CPU lacks, kills the process at the first
-        // shader (0xc000001d). FXC is in System32 and is what every machine
-        // without a stray DXC already compiles with (#418). WGPU_DX12_COMPILER
-        // still picks another, for trying DXC on a real GPU (#297).
-        descriptor.backend_options.dx12.shader_compiler =
-            wgpu::Dx12Compiler::from_env().unwrap_or(wgpu::Dx12Compiler::Fxc);
-        let instance = wgpu::Instance::new(descriptor);
         let choices: &[bool] = if software_only {
             &[true]
         } else {
             &[false, true]
         };
-        choices.iter().copied().find_map(|software| {
+        // Then every API wgpu was built with - but not on Windows, where
+        // that adds OpenGL alone, and OpenGL there is a driver's least-run
+        // path: an MCP preview whose DX12 adapters both failed stepped onto
+        // NVIDIA's GL driver and died in it with the whole process (#875).
+        // Below DX12's two the CPU draws instead, slower, and says so.
+        let apis: &[wgpu::Backends] = if cfg!(windows) {
+            &[own]
+        } else {
+            &[own, wgpu::Backends::all()]
+        };
+        apis.iter()
+            .copied()
+            .flat_map(|backends| {
+                choices
+                    .iter()
+                    .map(move |&software| Rung { backends, software })
+            })
+            .collect()
+    }
+
+    /// A compositor on the best adapter `rung` names, or `None` when it
+    /// opens no device there.
+    pub fn on_rung(rung: Rung) -> Option<Self> {
+        let Rung { backends, software } = rung;
+        let instance = instance_for(rung);
+        {
             let adapter =
                 match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
@@ -1211,6 +1716,17 @@ impl WgpuCompositor {
                     }
                 };
             let info = adapter.get_info();
+            // A GPU's rung that finds only Windows' software renderer - a
+            // machine with no driver Concat can use - leaves it to the
+            // software rung, which compiles its shaders the way that
+            // renderer survives (see `rung_flags`).
+            if cfg!(windows) && !software && info.device_type == wgpu::DeviceType::Cpu {
+                log::info!(
+                    "compositor: {} is a software renderer; the software rung opens it",
+                    info.name
+                );
+                return None;
+            }
             let descriptor = wgpu::DeviceDescriptor {
                 label: Some("concat compositor"),
                 required_limits: limits_for(&adapter.limits()),
@@ -1238,9 +1754,40 @@ impl WgpuCompositor {
                             info.device_type,
                             info.backend
                         );
+                        // Refused for memory - the device's own first
+                        // buffers, as on #746's card - the figures are
+                        // said, since they are all a report of it has.
+                        if crate::memory::says_out_of_memory(&error.to_string()) {
+                            crate::memory::ran_out(
+                                &std::sync::atomic::AtomicBool::new(false),
+                                "the compositor's device",
+                                || crate::memory::Memory::of_adapter(&adapter),
+                            );
+                        }
                         return None;
                     }
                 };
+            // What the card's memory is as the device opens, a line a heap:
+            // what a later report of "out of memory" needs to tell a full
+            // card from a gate that refused with room to spare (#802).
+            crate::memory::Memory::of_adapter(&adapter)
+                .say(log::Level::Info, "as the compositor's device opened");
+            // Direct3D 12 hands back the device it already has for an
+            // adapter, and one it removed is still that device while
+            // anything in the process holds it: such a device dies at its
+            // first frame. Asked here, it is never drawn on (#824).
+            if let Some(reason) = removed(&device) {
+                log::error!(
+                    "compositor: {} ({:?}, {:?}) handed back a device Direct3D 12 had already \
+                     removed ({reason}): something in this process still holds the dead one, \
+                     and no new device opens on that adapter until it lets go; this one is not \
+                     drawn on",
+                    info.name,
+                    info.device_type,
+                    info.backend
+                );
+                return None;
+            }
             let work = work_format(&adapter);
             if work != WORK {
                 log::warn!(
@@ -1250,12 +1797,36 @@ impl WgpuCompositor {
                 );
             }
             // The reason, when it dies, in the log: see the window's device.
+            // What wgpu says is kept for `say_why`, which adds what the
+            // device's own API says and what was being drawn.
             let name = info.name;
             let lost = name.clone();
+            let gone = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let marked = std::sync::Arc::clone(&gone);
+            let lost_reason = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let kept = std::sync::Arc::clone(&lost_reason);
+            // The device's first refusal for memory says the figures behind
+            // it (see `memory::ran_out`), from whichever of the handlers
+            // below or a frame's own scopes sees it first. The adapter the
+            // handlers read them through goes with the device, which holds
+            // it anyway, so nothing is kept alive past it.
+            let memory_said = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let said = std::sync::Arc::clone(&memory_said);
+            let on = adapter.clone();
             device.set_device_lost_callback(move |reason, message| {
+                marked.store(true, std::sync::atomic::Ordering::Relaxed);
                 log::error!(
-                    "the compositor's GPU device on {lost} was lost ({reason:?}): {message}"
+                    "gpu: the compositor's device on {lost} was lost · {reason:?}: {message}"
                 );
+                if let Ok(mut kept) = kept.lock() {
+                    *kept = Some(format!("{reason:?}: {message}"));
+                }
+                // The device-loss gate's own way of ending a device.
+                if crate::memory::says_out_of_memory(&message) {
+                    crate::memory::ran_out(&said, "the compositor's device", || {
+                        crate::memory::Memory::of_adapter(&on)
+                    });
+                }
             });
             // An error no scope caught - a texture past the device's limit,
             // a buffer the driver refused - is wgpu's to handle, and its
@@ -1267,14 +1838,23 @@ impl WgpuCompositor {
             // frame (see `Compositor::render`).
             let uncaught = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
             let counted = std::sync::Arc::clone(&uncaught);
+            let said = std::sync::Arc::clone(&memory_said);
             device.on_uncaptured_error(std::sync::Arc::new(move |error: wgpu::Error| {
                 counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 log::error!("the compositor's GPU device on {name} reported an error: {error}");
+                if matches!(error, wgpu::Error::OutOfMemory { .. }) {
+                    crate::memory::ran_out(&said, "the compositor's device", || {
+                        crate::memory::Memory::of_adapter(&adapter)
+                    });
+                }
             }));
             let mut compositor = Self::drawing_in(device, queue, work);
             compositor.uncaught = uncaught;
+            compositor.gone = gone;
+            compositor.lost_reason = lost_reason;
+            compositor.memory_said = memory_said;
             Some(compositor)
-        })
+        }
     }
 
     /// The adapter this compositor's device was opened on - its name, its
@@ -1292,6 +1872,140 @@ impl WgpuCompositor {
         self.device.adapter_info().device_type == wgpu::DeviceType::Cpu
     }
 
+    /// Whether this compositor's device is unusable: a readback failed, or
+    /// the device said it was lost.
+    fn dead(&self) -> bool {
+        self.dead || self.gone.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A frame failed on this device: whether that costs the device is
+    /// asked of the device. Only the device can say it is gone - its lost
+    /// callback (`gone`), or Direct3D 12's removed reason - and a timeout,
+    /// a map nobody answered, a refused call or memory run short is a
+    /// frame that failed, drawn again on the same device. Guessing a loss
+    /// from those gave up a working RTX 3060 mid-export for Windows'
+    /// software renderer, five times slower, though Direct3D 12 said both
+    /// times the device was not removed (#868). A device that fails
+    /// [`STRIKES`] frames in a row is given up all the same: alive or
+    /// not, it is not drawing.
+    fn failed_frame(&mut self) {
+        self.strikes += 1;
+        let gone =
+            self.gone.load(std::sync::atomic::Ordering::Relaxed) || removed(&self.device).is_some();
+        if gone || self.strikes >= STRIKES {
+            self.dead = true;
+            return;
+        }
+        log::warn!(
+            "gpu: a frame failed on {}, which says it is still there; drawing it again on \
+             the same device ({} of {STRIKES})",
+            self.device.adapter_info().name,
+            self.strikes
+        );
+    }
+
+    /// A frame came back whole: the device's strikes start again.
+    fn drew_frame(&mut self) {
+        self.strikes = 0;
+    }
+
+    /// The oldest frame in flight failed. On a device that is given up it
+    /// comes back black, and `lost` says so; on one that is not, nothing
+    /// comes back and every frame still in flight is let go, so the caller
+    /// draws them all again, in order, on this device.
+    fn failed_in_flight(&mut self, black: crate::Drawn) -> Option<crate::Drawn> {
+        self.failed_frame();
+        if self.dead() {
+            return Some(black);
+        }
+        self.in_flight.clear();
+        None
+    }
+
+    /// Says once, in the log, that this compositor has given up its device
+    /// and why: the adapter and its driver, what the device's own API says
+    /// happened where it can say (Direct3D 12's removed reason), what wgpu
+    /// said, and `drawing`, the frame in hand. "Unknown" was all a lost
+    /// device ever said (#709); every report now names its own cause.
+    fn say_why(&mut self, drawing: impl FnOnce() -> String) {
+        if self.post_mortem.is_some() {
+            return;
+        }
+        let info = self.device.adapter_info();
+        let driver = [info.driver.trim(), info.driver_info.trim()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let driver = if driver.is_empty() {
+            "driver unknown".to_owned()
+        } else {
+            format!("driver {driver}")
+        };
+        // A software adapter's device that Direct3D 12 removed is gone for
+        // every compositor on it, not only this one: said where they all
+        // look (`gone`), so the previews let go of it at once rather than
+        // hand the export a sibling of the dead device, and none of them
+        // holds it while the next is asked for (#824).
+        if self.on_software_adapter() && removed(&self.device).is_some() {
+            self.gone.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        let api = removal_of(&self.device)
+            .unwrap_or_else(|| format!("{:?} gives no reason of its own", info.backend));
+        let wgpu = self
+            .lost_reason
+            .lock()
+            .ok()
+            .and_then(|reason| reason.clone())
+            .unwrap_or_else(|| "a frame failed on it".to_owned());
+        let line = format!(
+            "{} ({:?}, {:?}) · {driver} · {api} · wgpu: {wgpu} · it was drawing {}",
+            info.name,
+            info.device_type,
+            info.backend,
+            drawing()
+        );
+        log::error!("gpu: the compositor gave up its device: {line}");
+        self.post_mortem = Some(line);
+    }
+
+    /// The line [`WgpuCompositor::say_why`] wrote, once this compositor has
+    /// given up its device; `None` while it draws.
+    pub fn post_mortem(&self) -> Option<&str> {
+        self.post_mortem.as_deref()
+    }
+
+    /// Loses this compositor's device as a driver would, for the tests that
+    /// hold recovery to account without a real loss: wgpu destroys the
+    /// device, and it is marked lost as its lost callback marks it.
+    #[doc(hidden)]
+    pub fn lose_device(&self) {
+        self.device.destroy();
+        if let Ok(mut reason) = self.lost_reason.lock() {
+            *reason = Some("destroyed by a test".to_owned());
+        }
+        self.gone.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Has this compositor treat its device as lost once `gone` is set: for
+    /// a device someone else opened, whose lost callback is theirs - the
+    /// window's, which sets it.
+    pub fn watching(mut self, gone: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.gone = gone;
+        self
+    }
+
+    /// This compositor on a device whose uncaptured-error handler, the
+    /// caller's, adds one to `uncaught` for every error no scope caught:
+    /// a composite drawn under one is then known to be wrong (see
+    /// [`Compositor::render`]), as on a device this opened itself, whose
+    /// handler counts into it. A device the window opened handed its
+    /// compositor a count nothing ever added to.
+    pub fn counting(mut self, uncaught: std::sync::Arc<std::sync::atomic::AtomicU64>) -> Self {
+        self.uncaught = uncaught;
+        self
+    }
+
     /// A second compositor on this one's device, with pipelines, pools and
     /// caches of its own: work on another thread - the effect cards -
     /// shares the GPU's time with this one and nothing else, so it never
@@ -1299,7 +2013,18 @@ impl WgpuCompositor {
     pub fn sibling(&self) -> Self {
         let mut sibling = Self::drawing_in(self.device.clone(), self.queue.clone(), self.work);
         sibling.uncaught = std::sync::Arc::clone(&self.uncaught);
+        sibling.gone = std::sync::Arc::clone(&self.gone);
+        sibling.lost_reason = std::sync::Arc::clone(&self.lost_reason);
+        sibling.memory_said = std::sync::Arc::clone(&self.memory_said);
         sibling
+    }
+
+    /// Says this device's memory the first time it runs out; see
+    /// [`crate::memory::ran_out`].
+    fn ran_out_of_memory(&self) {
+        crate::memory::ran_out(&self.memory_said, "the compositor's device", || {
+            crate::memory::Memory::of_device(&self.device)
+        });
     }
 
     /// The widest or tallest frame this compositor can draw: the document's
@@ -1320,7 +2045,10 @@ impl WgpuCompositor {
     /// [`WORK_FALLBACK`] where the device cannot draw into that.
     fn drawing_in(device: wgpu::Device, queue: wgpu::Queue, work: wgpu::TextureFormat) -> Self {
         // Read before the device moves into the compositor below.
-        let budget = pool_budget_for(device.adapter_info().device_type);
+        let card = crate::memory::Memory::of_device(&device)
+            .card()
+            .and_then(|heap| heap.budget);
+        let budget = pool_budget_for(device.adapter_info().device_type, card);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("concat compositor"),
             source: wgpu::ShaderSource::Wgsl(format!("{MASK_WGSL}{SHADER}").into()),
@@ -1762,6 +2490,7 @@ impl WgpuCompositor {
             pool: HashMap::new(),
             pool_bytes: 0,
             pool_budget: budget,
+            pressure_seen: crate::memory::pressure(),
             pool_textures: 0,
             composites: 0,
             uploads: 0,
@@ -1777,18 +2506,29 @@ impl WgpuCompositor {
                 white.fill([255, 255, 255, 255]);
                 std::sync::Arc::new(white)
             },
+            mask_stack_source: format!("{MASK_WGSL}{MASK_STACK_WGSL}").into(),
             dead: false,
+            strikes: 0,
+            gone: std::sync::Arc::default(),
+            lost_reason: std::sync::Arc::default(),
+            post_mortem: None,
             work,
             uncaught: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(target_os = "android")]
             raw_device: None,
+            memory_said: std::sync::Arc::default(),
+            in_flight: std::collections::VecDeque::new(),
+            spare: Vec::new(),
+            planar: None,
+            yuv_pipelines: HashMap::new(),
+            planes: None,
         }
     }
 
     /// Whether the device has been lost. A dead compositor answers
     /// [`Compositor::composite`] from the CPU and refuses textures.
     pub fn is_dead(&self) -> bool {
-        self.dead
+        self.dead()
     }
 
     /// Waits until the device has done everything asked of it so far: how
@@ -1808,6 +2548,41 @@ impl WgpuCompositor {
                 timeout: Some(DEVICE_WAIT),
             })
             .map(drop)
+    }
+
+    /// A buffer map's answer, waited for; None when none will come.
+    ///
+    /// The answer is handed over by whichever thread's poll of the device
+    /// serves it, and that need not be this one's: a second compositor on
+    /// the device - an export beside the monitor, the effect cards - can
+    /// take the answer up in its own poll and hand it over a moment after
+    /// this thread's poll has come back with nothing left to do. Looking
+    /// once and finding nothing there was read as a dead device, and the
+    /// monitor drew on the processor, without effects, until Concat was
+    /// started again. So the answer is waited for, the device polled
+    /// between looks in case it is this thread that has to serve it, for
+    /// as long as any wait on the device is given.
+    fn answered(
+        &self,
+        mapped: &std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    ) -> Option<Result<(), wgpu::BufferAsyncError>> {
+        use std::sync::mpsc::RecvTimeoutError;
+        let began = std::time::Instant::now();
+        loop {
+            match mapped.recv_timeout(std::time::Duration::from_millis(1)) {
+                Ok(answer) => return Some(answer),
+                // The map was let go unanswered: its device is gone.
+                Err(RecvTimeoutError::Disconnected) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.gone.load(std::sync::atomic::Ordering::Relaxed)
+                        || began.elapsed() >= DEVICE_WAIT
+                    {
+                        return None;
+                    }
+                    let _ = self.device.poll(wgpu::PollType::Poll);
+                }
+            }
+        }
     }
 
     /// What a pooled texture costs a pixel, in the working format.
@@ -2010,7 +2785,16 @@ impl WgpuCompositor {
                 (layer.flip_h, layer.flip_v),
             )
         };
-        let mask = self.mask_of(if matte_before_effects { None } else { layer.mask.as_deref() });
+        // Forge: a matte already cut before the effects leaves nothing to
+        // mask here; otherwise Concat's stacked masks where the layer has any.
+        let mask = if matte_before_effects {
+            self.mask_of(None)
+        } else {
+            match layer.stack_uniform(&geometry) {
+                Some(stack) => self.mask_pass(layer.mask.as_deref(), &stack, &geometry),
+                None => self.mask_of(layer.mask.as_deref()),
+            }
+        };
         let ground = layer
             .blend
             .grounded()
@@ -2032,6 +2816,91 @@ impl WgpuCompositor {
             plan.width,
             plan.height,
         ));
+    }
+
+    /// The layer's masks drawn into a matte by one pass - at the size the
+    /// picture is shown, no larger than it is fitted, so an edge is sharp
+    /// on the output and no pixel is shaded twice - multiplied with the
+    /// cutout's matte when it has one. A driver that refuses the pass
+    /// leaves the matte alone, and the masks are not drawn.
+    fn mask_pass(
+        &mut self,
+        matte: Option<&Frame>,
+        stack: &StackUniform,
+        geometry: &Geometry,
+    ) -> (u32, u32, usize) {
+        let pass = ShaderPass {
+            package: "concat.mask-stack".to_owned(),
+            key: MASK_STACK_KEY.to_owned(),
+            source: self.mask_stack_source.clone(),
+            params: MaskStack::params_bytes(stack),
+            values: Default::default(),
+            intensity: 1.0,
+            lut: None,
+            reveal_map: None,
+            stages: Vec::new(),
+        };
+        self.shader(&pass);
+        if !self.shaders.contains_key(MASK_STACK_KEY) {
+            return self.mask_of(matte);
+        }
+        let (fitted_w, fitted_h) = geometry.fitted;
+        let (scale_x, scale_y) = geometry.scale;
+        let side = |fitted: u32, scale: f32| {
+            ((fitted as f32 * scale).round() as u32).clamp(1, fitted.max(1))
+        };
+        let (width, height) = (side(fitted_w, scale_x), side(fitted_h, scale_y));
+        let (source_size, source) = match matte {
+            Some(matte) => ((matte.width(), matte.height()), self.upload(matte)),
+            None => {
+                let white = std::sync::Arc::clone(&self.white);
+                ((1, 1), self.upload(&white))
+            }
+        };
+        let target = self.claim(width, height);
+        let lut_id = self.lut_group(None);
+        let reveal_id = self.reveal_group(None);
+        let shader = &self.shaders[MASK_STACK_KEY];
+        let frame_block: [f32; 8] = [width as f32, height as f32, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let frame_bytes: Vec<u8> = frame_block.iter().flat_map(|v| v.to_le_bytes()).collect();
+        self.queue.write_buffer(&shader.frame, 0, &frame_bytes);
+        let mut params = pass.params;
+        params.resize(shader.params.size() as usize, 0);
+        self.queue.write_buffer(&shader.params, 0, &params);
+        let view = self.pool[&(width, height)][target]
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("concat mask pass"),
+            });
+        {
+            let mut render = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("concat mask pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            render.set_pipeline(&shader.pipeline);
+            render.set_bind_group(0, &self.pool[&source_size][source].bind_group, &[]);
+            render.set_bind_group(1, &shader.bind_group, &[]);
+            render.set_bind_group(2, &self.luts[&lut_id], &[]);
+            render.set_bind_group(3, &self.reveals[&reveal_id], &[]);
+            render.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        (width, height, target)
     }
 
     /// The mask a draw binds: the layer's, uploaded, or the one white
@@ -2181,7 +3050,8 @@ impl WgpuCompositor {
     /// is dead; the caller then falls back to [`Compositor::render`] on a
     /// CPU compositor.
     pub fn render_texture(&mut self, plan: &FramePlan) -> Option<wgpu::Texture> {
-        if self.dead {
+        if self.dead() {
+            self.say_why(|| plan.summary());
             return None;
         }
         let (draws, vertices) = self.prepare(plan);
@@ -2216,7 +3086,7 @@ impl WgpuCompositor {
         side: u32,
         timeout: std::time::Duration,
     ) -> Result<(), String> {
-        if self.dead {
+        if self.dead() {
             return Err("the GPU device is dead".to_owned());
         }
         let side = side.max(1);
@@ -2279,7 +3149,7 @@ impl WgpuCompositor {
     ) -> Option<[f32; 4]> {
         // The probe writes and reads half floats: on the eight-bit fallback
         // it has nothing to say, and the caller treats it as untested.
-        if self.dead || self.work != WORK {
+        if self.dead() || self.work != WORK {
             return None;
         }
         let side = side.max(1);
@@ -2302,7 +3172,7 @@ impl WgpuCompositor {
         side: u32,
         seconds: f32,
     ) -> Option<[f32; 4]> {
-        if self.dead || self.work != WORK {
+        if self.dead() || self.work != WORK {
             return None;
         }
         let side = side.max(1);
@@ -2418,7 +3288,7 @@ impl WgpuCompositor {
             self.dead = true;
             return None;
         }
-        if !matches!(mapped_rx.try_recv(), Ok(Ok(()))) {
+        if !matches!(self.answered(&mapped_rx), Some(Ok(()))) {
             return None;
         }
         let data = slice.get_mapped_range().ok()?;
@@ -2602,6 +3472,25 @@ impl WgpuCompositor {
             REVEAL_CACHE,
             self.composites,
         );
+        // A device of this process ran out of memory since the last
+        // composite: the card is fuller than the budget allowed for -
+        // other programs took theirs, or the decoders and the window hold
+        // more than was thought - so the pool holds half as much from now
+        // on, and lets the rest go below. Every draw refused for memory
+        // until then was a frame lost, and in #873 the device next.
+        let pressure = crate::memory::pressure();
+        if pressure != self.pressure_seen {
+            self.pressure_seen = pressure;
+            let halved = (self.pool_budget / 2).max(POOL_FLOOR);
+            if halved < self.pool_budget {
+                log::warn!(
+                    "compositor: the card ran out of memory; its layer textures held to {} from {}",
+                    concat_log::bytes(halved),
+                    concat_log::bytes(self.pool_budget)
+                );
+                self.pool_budget = halved;
+            }
+        }
         // Back under budget, least recently drawn first, never a texture
         // this composite claimed: a pool grows past the budget only when
         // one composite needs that much.
@@ -3081,115 +3970,56 @@ impl WgpuCompositor {
         if self.shaders.contains_key(&pass.key) || self.refused.contains(&pass.key) {
             return;
         }
-        // A package drawn in one pass binds its layer as the pool made it;
-        // one drawn in several binds its passes' pictures beside it.
-        let inputs = if pass.stages.is_empty() {
-            self.bind_layout.clone()
-        } else {
-            self.pictures_layout(pass.stages.len())
-        };
-        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let module = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(&pass.key),
-                source: wgpu::ShaderSource::Wgsl(pass.source.as_ref().into()),
-            });
-        let layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&pass.key),
-                bind_group_layouts: &[
-                    Some(&inputs),
-                    Some(&self.uniform_layout),
-                    Some(&self.lut_layout),
-                    Some(&self.reveal_layout),
-                ],
-                immediate_size: 0,
-            });
-        let pipeline_of = |entry: &str| {
-            self.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(&pass.key),
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState {
-                        module: &module,
-                        entry_point: Some("vs_main"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &module,
-                        entry_point: Some(entry),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: self.work,
-                            // A pass replaces: mixing by intensity is the
-                            // shader's own last line.
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview_mask: None,
-                    cache: None,
-                })
-        };
-        let pipeline = pipeline_of("fs_main");
-        let stages = pass
-            .stages
+        let forge = self.forge(std::slice::from_ref(pass));
+        self.adopt(forge.compile(pass));
+    }
+
+    /// What compiling `passes` takes, apart from this compositor: its
+    /// device and the layouts their pipelines are built against, so they
+    /// can be compiled on another thread while this one draws, and handed
+    /// back with [`WgpuCompositor::adopt`]. A package compiles in 86 ms
+    /// on an M5 on average, and Chroma Key in 580: compiled at its first
+    /// drawing, every effect's first frame - a look previewed from the
+    /// Library under the pointer - waited that long.
+    pub fn forge(&mut self, passes: &[ShaderPass]) -> ShaderForge {
+        let pictures = passes
             .iter()
-            .map(|stage| pipeline_of(&stage.entry))
+            .map(|pass| pass.stages.len())
+            .filter(|count| *count > 0)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|count| (count, self.pictures_layout(count)))
             .collect();
-        if let Some(error) = pollster::block_on(scope.pop()) {
-            log::error!(
-                "pass {}: the driver refused its pipeline: {error}",
-                pass.key
-            );
-            self.refused.insert(pass.key.clone());
+        ShaderForge {
+            device: self.device.clone(),
+            work: self.work,
+            bind_layout: self.bind_layout.clone(),
+            uniform_layout: self.uniform_layout.clone(),
+            lut_layout: self.lut_layout.clone(),
+            reveal_layout: self.reveal_layout.clone(),
+            pictures,
+        }
+    }
+
+    /// Keeps a pass [`ShaderForge::compile`] compiled, or that the driver
+    /// refused it, unless this compositor has its own already.
+    pub fn adopt(&mut self, forged: ForgedShader) {
+        if self.shaders.contains_key(&forged.key) || self.refused.contains(&forged.key) {
             return;
         }
-        let frame = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("concat pass frame"),
-            // size(vec2), time, intensity, clip_time, padded to Frame's own
-            // 16-byte alignment (OpenGL ES's, see concat-effects' Frame):
-            // 20 bytes rounds to 32.
-            size: 32,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let params = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("concat pass params"),
-            size: pass.params.len().max(ShaderPass::MIN_PARAMS) as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("concat pass uniforms"),
-            layout: &self.uniform_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: frame.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: params.as_entire_binding(),
-                },
-            ],
-        });
-        self.shaders.insert(
-            pass.key.clone(),
-            CompiledShader {
-                pipeline,
-                frame,
-                params,
-                bind_group,
-                stages,
-            },
-        );
+        match forged.compiled {
+            Some(compiled) => {
+                self.shaders.insert(forged.key, compiled);
+            }
+            None => {
+                self.refused.insert(forged.key);
+            }
+        }
+    }
+
+    /// Whether this compositor holds `key`'s pipeline already.
+    pub fn has_shader(&self, key: &str) -> bool {
+        self.shaders.contains_key(key) || self.refused.contains(key)
     }
 
     /// Group 0 of a package whose passes draw `pictures` pictures: the
@@ -3412,7 +4242,7 @@ impl WgpuCompositor {
         to: &FramePlan,
         pass: &TransitionPass,
     ) -> Option<wgpu::Texture> {
-        if self.dead {
+        if self.dead() {
             return None;
         }
         let (width, height, time) = (from.width, from.height, from.seconds());
@@ -3942,55 +4772,358 @@ impl WgpuCompositor {
             );
             return None;
         }
-        match mapped_rx.try_recv() {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
+        match self.answered(&mapped_rx) {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
                 log::error!("GPU readback: the frame's buffer would not map: {error}");
                 return None;
             }
-            Err(_) => {
+            None => {
                 log::error!("GPU readback: the device finished without answering the map");
                 return None;
             }
         }
 
-        if deep {
-            // Sixteen-bit integers, opaque already: the rows as they are.
-            let row_bytes = width as usize * 8;
-            let mut pixels = vec![0u8; row_bytes * height as usize];
-            {
-                let data = slice.get_mapped_range().ok()?;
-                for row in 0..height as usize {
-                    let from = &data[row * padded_row..row * padded_row + row_bytes];
-                    pixels[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(from);
-                }
-            }
-            target.staging.unmap();
-            return Frame::from_rgba64(width, height, pixels, self.output);
-        }
-        let mut frame = Frame::transparent(width, height);
-        {
-            // A range that will not map is a failed map, as above.
-            let data = slice.get_mapped_range().ok()?;
-            let row_bytes = width as usize * 4;
-            let pixels = frame.pixels_mut();
-            for row in 0..height as usize {
-                let from = &data[row * padded_row..row * padded_row + row_bytes];
-                pixels[row * row_bytes..(row + 1) * row_bytes].copy_from_slice(from);
-            }
-            // The output goes to a screen or an encoder, which have nothing
-            // to show through, and blending may have left alpha short of
-            // one - unless the canvas is see-through, when the alpha is
-            // the point (#456).
-            if !self.see_through {
-                for pixel in pixels.chunks_exact_mut(4) {
-                    pixel[3] = 255;
-                }
-            }
-        }
+        let shape = Shape::rgba(
+            width,
+            height,
+            padded_row,
+            deep,
+            self.see_through,
+            self.output,
+        );
+        let drawn = shape.drawn_from(&target.staging);
         target.staging.unmap();
-        Some(frame)
+        match drawn {
+            Some(crate::Drawn::Rgba(frame)) => Some(frame),
+            _ => None,
+        }
     }
+
+    /// Starts drawing `plan` and reading it back, without waiting for
+    /// either: see [`Compositor::submit`]. The frame lands in a staging
+    /// buffer of its own, so the next one can be drawn and copied while
+    /// this one is still on its way back.
+    fn submit_plan(&mut self, plan: &FramePlan) -> bool {
+        if self.dead() {
+            self.say_why(|| plan.summary());
+            return false;
+        }
+        // The same scopes as `render`'s, over the same calls: what the
+        // device says went wrong with this frame is this frame's.
+        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let (draws, vertices) = self.prepare(plan);
+        self.write_vertices(&vertices);
+        let (width, height) = (plan.width, plan.height);
+        self.target(width, height);
+        let deep = self.delivering_hdr();
+        // The encoder's YUV where it was asked for and the frame can be:
+        // eight bits, opaque, even on both sides.
+        let yuv = self.planar.filter(|_| {
+            !deep && !self.see_through && width.is_multiple_of(2) && height.is_multiple_of(2)
+        });
+        let shape = match yuv {
+            Some(layout) => Shape::yuv(width, height, layout),
+            None => {
+                let padded_row = self.current_target().padded_row;
+                Shape::rgba(
+                    width,
+                    height,
+                    padded_row,
+                    deep,
+                    self.see_through,
+                    self.output,
+                )
+            }
+        };
+        let size = shape.bytes() as u64;
+        let staging = match self.spare.iter().position(|buffer| buffer.size() == size) {
+            Some(index) => self.spare.swap_remove(index),
+            None => self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("concat readback"),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }),
+        };
+        let clear = clear_of(plan.canvas);
+        let submission = match yuv {
+            Some(layout) => {
+                self.draw_planes(width, height, &draws, clear, &staging, &shape, layout)
+            }
+            None => {
+                let padded_row = shape.planes[0].padded_row;
+                self.draw_into(width, height, &draws, clear, &staging, padded_row)
+            }
+        };
+        let (mapped_tx, mapped) = std::sync::mpsc::channel();
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = mapped_tx.send(result);
+            });
+        let refused = pollster::block_on(validation.pop());
+        let exhausted = pollster::block_on(memory.pop());
+        if exhausted.is_some() {
+            self.ran_out_of_memory();
+        }
+        let mut failed = false;
+        for error in [exhausted, refused].into_iter().flatten() {
+            log::error!(
+                "GPU composite at {:.3}s failed: {error}",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
+            log::error!(
+                "GPU composite at {:.3}s was drawn while the device reported an error",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        self.in_flight.push_back(Readback {
+            shape,
+            staging,
+            submission,
+            mapped,
+            failed,
+        });
+        true
+    }
+
+    /// The oldest frame [`WgpuCompositor::submit_plan`] started, waited for
+    /// alone: see [`Compositor::collect`].
+    fn collect_oldest(&mut self) -> Option<crate::Drawn> {
+        let readback = self.in_flight.pop_front()?;
+        let Readback {
+            shape,
+            staging,
+            submission,
+            mapped,
+            failed,
+        } = readback;
+        let black = || crate::Drawn::Rgba(Frame::black(shape.width, shape.height));
+        if self.dead() {
+            return Some(black());
+        }
+        if failed {
+            return self.failed_in_flight(black());
+        }
+        let waited = self.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(DEVICE_WAIT),
+        });
+        if let Err(error) = waited {
+            log::error!(
+                "GPU readback: the device did not finish the frame within {DEVICE_WAIT:?}: {error}"
+            );
+            return self.failed_in_flight(black());
+        }
+        match self.answered(&mapped) {
+            Some(Ok(())) => {}
+            Some(Err(error)) => {
+                log::error!("GPU readback: the frame's buffer would not map: {error}");
+                return self.failed_in_flight(black());
+            }
+            None => {
+                log::error!("GPU readback: the device finished without answering the map");
+                return self.failed_in_flight(black());
+            }
+        }
+        let frame = shape.drawn_from(&staging);
+        staging.unmap();
+        // Kept for the next frame of this size: one a frame in flight and
+        // one beside them is all an export at one size ever asks for.
+        if self.spare.len() < READBACKS {
+            self.spare.push(staging);
+        }
+        match frame {
+            Some(frame) => {
+                self.drew_frame();
+                Some(frame)
+            }
+            None => self.failed_in_flight(black()),
+        }
+    }
+}
+
+/// How many frames [`Compositor::submit`] keeps on their way back at most,
+/// and how many spare staging buffers are kept for them.
+const READBACKS: usize = 3;
+
+/// Frames in a row that may fail on a device that says it is still there
+/// before it is given up anyway; see [`WgpuCompositor::failed_frame`].
+const STRIKES: u32 = 3;
+
+/// One plane of a read-back frame: where its rows start in the staging
+/// buffer, how far apart they are there, and how much of each is picture.
+struct Plane {
+    offset: usize,
+    padded_row: usize,
+    row_bytes: usize,
+    rows: usize,
+}
+
+/// What a read-back frame is: its size, its planes in the staging buffer,
+/// and how its pixels are to be taken.
+struct Shape {
+    width: u32,
+    height: u32,
+    planes: Vec<Plane>,
+    kind: Kind,
+}
+
+/// What a read-back frame's bytes are.
+enum Kind {
+    /// RGBA, as the resolve drew it.
+    Rgba {
+        /// Sixteen-bit integers for an HDR file, else eight bits.
+        deep: bool,
+        /// The canvas lets something show through, so the alpha is kept.
+        see_through: bool,
+        /// What the frame's light is in.
+        output: concat_core::frame::Signal,
+    },
+    /// The encoder's YUV, a plane a texture.
+    Yuv(concat_core::frame::YuvLayout),
+}
+
+/// `bytes` rounded up to a texture-to-buffer copy's row alignment.
+fn padded(bytes: usize) -> usize {
+    bytes.div_ceil(ROW_ALIGN) * ROW_ALIGN
+}
+
+impl Shape {
+    /// An RGBA frame, one plane of `padded_row` rows.
+    fn rgba(
+        width: u32,
+        height: u32,
+        padded_row: usize,
+        deep: bool,
+        see_through: bool,
+        output: concat_core::frame::Signal,
+    ) -> Shape {
+        Shape {
+            width,
+            height,
+            planes: vec![Plane {
+                offset: 0,
+                padded_row,
+                row_bytes: width as usize * if deep { 8 } else { 4 },
+                rows: height as usize,
+            }],
+            kind: Kind::Rgba {
+                deep,
+                see_through,
+                output,
+            },
+        }
+    }
+
+    /// A 4:2:0 frame in `layout`: the luma, then the chroma as one plane
+    /// or two, each copied out of its own texture.
+    fn yuv(width: u32, height: u32, layout: concat_core::frame::YuvLayout) -> Shape {
+        let (w, h) = (width as usize, height as usize);
+        let mut rows = vec![(w, h)];
+        match layout.chroma {
+            concat_core::frame::Chroma::Nv12 => rows.push((w, h / 2)),
+            concat_core::frame::Chroma::I420 => rows.extend([(w / 2, h / 2), (w / 2, h / 2)]),
+        }
+        let mut offset = 0;
+        let planes = rows
+            .into_iter()
+            .map(|(row_bytes, rows)| {
+                let plane = Plane {
+                    offset,
+                    padded_row: padded(row_bytes),
+                    row_bytes,
+                    rows,
+                };
+                offset += plane.padded_row * rows;
+                plane
+            })
+            .collect();
+        Shape {
+            width,
+            height,
+            planes,
+            kind: Kind::Yuv(layout),
+        }
+    }
+
+    /// The staging buffer's size.
+    fn bytes(&self) -> usize {
+        self.planes
+            .iter()
+            .map(|plane| plane.padded_row * plane.rows)
+            .sum()
+    }
+
+    /// The frame in `staging`, which is mapped. `None` when its range will
+    /// not map, which is a failed map.
+    fn drawn_from(&self, staging: &wgpu::Buffer) -> Option<crate::Drawn> {
+        let data = staging.slice(..).get_mapped_range().ok()?;
+        // Written once, never zeroed first: at 4K the zeroing alone was a
+        // fifth of the copy.
+        let mut pixels = Vec::with_capacity(
+            self.planes
+                .iter()
+                .map(|plane| plane.row_bytes * plane.rows)
+                .sum(),
+        );
+        for plane in &self.planes {
+            let rows = &data[plane.offset..plane.offset + plane.padded_row * plane.rows];
+            if plane.padded_row == plane.row_bytes {
+                // Rows a multiple of 256 bytes already: one copy.
+                pixels.extend_from_slice(rows);
+            } else {
+                for row in rows.chunks_exact(plane.padded_row) {
+                    pixels.extend_from_slice(&row[..plane.row_bytes]);
+                }
+            }
+        }
+        drop(data);
+        let (width, height) = (self.width, self.height);
+        match self.kind {
+            Kind::Yuv(layout) => concat_core::frame::Yuv420::new(width, height, layout, pixels)
+                .map(crate::Drawn::Yuv),
+            // Sixteen-bit integers, opaque already: the rows as they are.
+            Kind::Rgba {
+                deep: true, output, ..
+            } => Frame::from_rgba64(width, height, pixels, output).map(crate::Drawn::Rgba),
+            Kind::Rgba { see_through, .. } => {
+                // The output goes to a screen or an encoder, which have
+                // nothing to show through, and blending may have left alpha
+                // short of one - unless the canvas is see-through, when the
+                // alpha is the point (#456). A word at a time, which the
+                // compiler widens.
+                if !see_through {
+                    let opaque = u32::from_le_bytes([0, 0, 0, 255]);
+                    for pixel in pixels.chunks_exact_mut(4) {
+                        let word =
+                            u32::from_le_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]) | opaque;
+                        pixel.copy_from_slice(&word.to_le_bytes());
+                    }
+                }
+                Frame::from_rgba(width, height, pixels).map(crate::Drawn::Rgba)
+            }
+        }
+    }
+}
+
+/// A frame [`Compositor::submit`] started: copied into a staging buffer of
+/// its own, which is being mapped.
+struct Readback {
+    shape: Shape,
+    staging: wgpu::Buffer,
+    /// The submit that draws and copies it: what is waited for, alone.
+    submission: wgpu::SubmissionIndex,
+    mapped: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    /// The device reported an error while it was drawn.
+    failed: bool,
 }
 
 /// A plan's canvas colour as the working space holds it: each eight-bit
@@ -4008,58 +5141,89 @@ fn clear_of([r, g, b, a]: [u8; 4]) -> wgpu::Color {
     }
 }
 
+/// What the device's own API says became of `device`, where it can say:
+/// Direct3D 12's removed reason. `None` from every other API: Vulkan says
+/// only that the device is lost, Metal and OpenGL say less.
+fn removal_of(device: &wgpu::Device) -> Option<String> {
+    Some(match removed_code(device)? {
+        None => "Direct3D 12 says the device was not removed".to_owned(),
+        Some(code) => removal_words(code),
+    })
+}
+
+/// Whether Direct3D 12 has removed `device` - asked of one just opened,
+/// whether it was dead already - and what it says of it if so; `None` for a live device, and on every
+/// other API. Direct3D 12 keeps one device an adapter in a process and
+/// hands that one back however many are asked for, so while anything
+/// still holds a removed device a "new" one is that dead one again, and
+/// dies at its first frame (#824). One question to the device, so cheap
+/// enough to ask after every open.
+pub fn removed(device: &wgpu::Device) -> Option<String> {
+    removed_code(device)?.map(removal_words)
+}
+
+/// Direct3D 12's removed reason for `device`: `Some(None)` while it is
+/// not removed, `Some(Some(code))` once it is, `None` on another API.
+fn removed_code(device: &wgpu::Device) -> Option<Option<u32>> {
+    #[cfg(windows)]
+    {
+        // SAFETY: the raw device is only asked a question, which Direct3D
+        // 12 answers on any thread; nothing is created or destroyed on it,
+        // and the guard is dropped before this returns.
+        let hal = unsafe { device.as_hal::<wgpu::hal::api::Dx12>() }?;
+        let removed = unsafe { hal.raw_device().GetDeviceRemovedReason() };
+        Some(removed.err().map(|error| error.code().0 as u32))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = device;
+        None
+    }
+}
+
+/// A removed reason as the log says it: its name and its code.
+fn removal_words(code: u32) -> String {
+    format!(
+        "Direct3D 12 says {} ({code:#010X})",
+        removal_name(code).unwrap_or("an unlisted reason")
+    )
+}
+
+/// The name of a reason Direct3D 12 gives for removing a device, as
+/// Microsoft's documentation writes it.
+fn removal_name(code: u32) -> Option<&'static str> {
+    Some(match code {
+        0x887A_0005 => "DXGI_ERROR_DEVICE_REMOVED",
+        0x887A_0006 => "DXGI_ERROR_DEVICE_HUNG: the device took too long or stopped answering",
+        0x887A_0007 => "DXGI_ERROR_DEVICE_RESET: a badly formed command reset it",
+        0x887A_0020 => "DXGI_ERROR_DRIVER_INTERNAL_ERROR: the driver failed",
+        0x887A_0001 => "DXGI_ERROR_INVALID_CALL: a call it could not take",
+        0x8007_000E => "E_OUTOFMEMORY: it ran out of memory",
+        _ => return None,
+    })
+}
+
 impl Compositor for WgpuCompositor {
     fn render(&mut self, plan: &FramePlan) -> Frame {
         // A dead device never comes back for this instance. What it hands
         // back is black, never a mid-export panic, and `lost` says so: the
-        // export stops with an error rather than write a file of black.
-        if self.dead {
-            return Frame::black(plan.width, plan.height);
-        }
-        // Whatever the device says went wrong with this frame is caught
-        // here: memory it ran out of - an 8 GB card shared with the
-        // window, the decoder and the encoder (#297) - or a call it
-        // refused. Uncaught, it was logged and the frame went to the
-        // encoder wrong (audit 2026-10-11, finding 8). A frame drawn under
-        // one is a failed frame, as a failed readback is: the compositor is
-        // dead, and the export draws it again on a fresh device. The
-        // passes' own scopes inside still catch what they catch first, and
-        // what a scope misses still reaches the handler, which counts it.
-        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
-        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let (draws, vertices) = self.prepare(plan);
-        self.write_vertices(&vertices);
-        let frame = self.render_and_read(plan.width, plan.height, &draws, clear_of(plan.canvas));
-        let refused = pollster::block_on(validation.pop());
-        let exhausted = pollster::block_on(memory.pop());
-        let errors = [exhausted, refused].into_iter().flatten();
-        let mut failed = frame.is_none();
-        for error in errors {
-            log::error!(
-                "GPU composite at {:.3}s failed: {error}",
-                plan.time.as_f64()
-            );
-            failed = true;
-        }
-        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
-            log::error!(
-                "GPU composite at {:.3}s was drawn while the device reported an error",
-                plan.time.as_f64()
-            );
-            failed = true;
-        }
-        match frame {
-            Some(frame) if !failed => frame,
-            _ => {
-                self.dead = true;
-                Frame::black(plan.width, plan.height)
+        // export stops with an error rather than write a file of black. A
+        // frame that fails on a device that is still there is drawn again
+        // on it, until it draws or the device is given up
+        // (`failed_frame`), so the loop ends.
+        loop {
+            if self.dead() {
+                self.say_why(|| plan.summary());
+                return Frame::black(plan.width, plan.height);
+            }
+            if let Some(frame) = self.render_once(plan) {
+                return frame;
             }
         }
     }
 
     fn render_into_view(&mut self, plan: &FramePlan, target: &wgpu::TextureView) -> bool {
-        if self.dead || (self.deliver_hdr && !self.surface_10bit) {
+        if self.dead() || (self.deliver_hdr && !self.surface_10bit) {
             return false;
         }
         let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
@@ -4088,8 +5252,11 @@ impl Compositor for WgpuCompositor {
             log::error!("GPU surface composite at {:.3}s was drawn while the device reported an error", plan.time.as_f64());
             failed = true;
         }
+        // counted as the frames are: a device that keeps failing is given up
         if failed {
-            self.dead = true;
+            self.failed_frame();
+        } else {
+            self.drew_frame();
         }
         !failed
     }
@@ -4102,7 +5269,7 @@ impl Compositor for WgpuCompositor {
         overlays: &FramePlan,
         target: &wgpu::TextureView,
     ) -> bool {
-        if self.dead
+        if self.dead()
             || (self.deliver_hdr && !self.surface_10bit)
             || from.width != to.width
             || from.height != to.height
@@ -4162,8 +5329,11 @@ impl Compositor for WgpuCompositor {
             log::error!("GPU transition surface composite ran while the device reported an error");
             failed = true;
         }
+        // counted as the frames are: a device that keeps failing is given up
         if failed {
-            self.dead = true;
+            self.failed_frame();
+        } else {
+            self.drew_frame();
         }
         !failed
     }
@@ -4173,8 +5343,22 @@ impl Compositor for WgpuCompositor {
         true
     }
 
+    fn submit(&mut self, plan: &FramePlan) -> bool {
+        // Never more on their way back than there are buffers for: the
+        // oldest is the caller's to collect first.
+        self.in_flight.len() < READBACKS && self.submit_plan(plan)
+    }
+
+    fn collect(&mut self) -> Option<crate::Drawn> {
+        self.collect_oldest()
+    }
+
+    fn planar(&mut self, layout: Option<concat_core::frame::YuvLayout>) {
+        self.planar = layout;
+    }
+
     fn lost(&self) -> bool {
-        self.dead
+        self.dead()
     }
 
     fn deliver_hdr(&mut self, on: bool) {
@@ -4190,7 +5374,84 @@ impl Compositor for WgpuCompositor {
         to: &Frame,
         pass: &TransitionPass,
     ) -> Option<Frame> {
-        if self.dead {
+        // As `render`: drawn again on a device that is still there, until
+        // it draws or the device is given up.
+        loop {
+            if let Some(frame) = self.combine_once(width, height, time, from, to, pass) {
+                return Some(frame);
+            }
+            if self.dead() {
+                return None;
+            }
+        }
+    }
+}
+
+impl WgpuCompositor {
+    /// One drawing of `plan`: the frame, or `None` when it failed, the
+    /// failure counted against the device (`failed_frame`).
+    fn render_once(&mut self, plan: &FramePlan) -> Option<Frame> {
+        // Whatever the device says went wrong with this frame is caught
+        // here: memory it ran out of - an 8 GB card shared with the
+        // window, the decoder and the encoder (#297) - or a call it
+        // refused. Uncaught, it was logged and the frame went to the
+        // encoder wrong (audit 2026-10-11, finding 8). A frame drawn under
+        // one is a failed frame, as a failed readback is, and is drawn again
+        // (`failed_frame`). The
+        // passes' own scopes inside still catch what they catch first, and
+        // what a scope misses still reaches the handler, which counts it.
+        let uncaught = self.uncaught.load(std::sync::atomic::Ordering::Relaxed);
+        let memory = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let (draws, vertices) = self.prepare(plan);
+        self.write_vertices(&vertices);
+        let frame = self.render_and_read(plan.width, plan.height, &draws, clear_of(plan.canvas));
+        let refused = pollster::block_on(validation.pop());
+        let exhausted = pollster::block_on(memory.pop());
+        if exhausted.is_some() {
+            self.ran_out_of_memory();
+        }
+        let errors = [exhausted, refused].into_iter().flatten();
+        let mut failed = frame.is_none();
+        for error in errors {
+            log::error!(
+                "GPU composite at {:.3}s failed: {error}",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        if self.uncaught.load(std::sync::atomic::Ordering::Relaxed) != uncaught {
+            log::error!(
+                "GPU composite at {:.3}s was drawn while the device reported an error",
+                plan.time.as_f64()
+            );
+            failed = true;
+        }
+        match frame {
+            Some(frame) if !failed => {
+                self.drew_frame();
+                Some(frame)
+            }
+            _ => {
+                self.failed_frame();
+                None
+            }
+        }
+    }
+
+    /// One drawing of a transition; see [`Compositor::combine`].
+    #[allow(clippy::too_many_arguments)]
+    fn combine_once(
+        &mut self,
+        width: u32,
+        height: u32,
+        time: f32,
+        from: &Frame,
+        to: &Frame,
+        pass: &TransitionPass,
+    ) -> Option<Frame> {
+        if self.dead() {
+            self.say_why(|| format!("the transition {} at {width}x{height}", pass.key));
             return None;
         }
         // The two pictures, uploaded into the working space as any frame
@@ -4245,14 +5506,18 @@ impl Compositor for WgpuCompositor {
         }
         self.queue.submit([encoder.finish()]);
         let frame = self.read_back();
-        if frame.is_none() {
-            self.dead = true;
+        match frame {
+            Some(_) => self.drew_frame(),
+            None => {
+                self.failed_frame();
+                if self.dead() {
+                    self.say_why(|| format!("the transition {} at {width}x{height}", pass.key));
+                }
+            }
         }
         frame
     }
-}
 
-impl WgpuCompositor {
     /// Draws into the readback target and copies it out: one submit, one
     /// wait. `None` when the device did not deliver the pixels.
     fn render_and_read(
@@ -4262,26 +5527,43 @@ impl WgpuCompositor {
         draws: &[Draw],
         clear: wgpu::Color,
     ) -> Option<Frame> {
-        let (canvas, canvas_texture, canvas_view) = self.canvas(width, height);
         self.target(width, height);
         let target = self.current_target();
-        let view = target
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let (staging, padded_row) = (target.staging.clone(), target.padded_row);
+        self.draw_into(width, height, draws, clear, &staging, padded_row);
+        self.read_back()
+    }
+
+    /// Draws `draws` over `clear` into the readback target, which
+    /// [`WgpuCompositor::target`] has ensured for this size, and copies it
+    /// into `staging`: one submit, whose index is handed back.
+    fn draw_into(
+        &mut self,
+        width: u32,
+        height: u32,
+        draws: &[Draw],
+        clear: wgpu::Color,
+        staging: &wgpu::Buffer,
+        padded_row: usize,
+    ) -> wgpu::SubmissionIndex {
+        let (canvas, canvas_texture, canvas_view) = self.canvas(width, height);
+        let target = self.current_target();
+        let texture = target.texture.clone();
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.encode(&canvas_view, &canvas_texture, draws, clear);
         self.resolve(&mut encoder, (width, height), canvas, &view);
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &target.texture,
+                texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {
-                buffer: &target.staging,
+                buffer: staging,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(target.padded_row as u32),
+                    bytes_per_row: Some(padded_row as u32),
                     rows_per_image: Some(height),
                 },
             },
@@ -4291,9 +5573,170 @@ impl WgpuCompositor {
                 depth_or_array_layers: 1,
             },
         );
-        self.queue.submit([encoder.finish()]);
+        let submission = self.queue.submit([encoder.finish()]);
         self.retire();
-        self.read_back()
+        submission
+    }
+
+    /// Draws `draws` over `clear` into a canvas, converts it into the
+    /// encoder's YUV a plane at a time, and copies the planes into
+    /// `staging` as `shape` lays them out: one submit, whose index is
+    /// handed back.
+    fn draw_planes(
+        &mut self,
+        width: u32,
+        height: u32,
+        draws: &[Draw],
+        clear: wgpu::Color,
+        staging: &wgpu::Buffer,
+        shape: &Shape,
+        layout: concat_core::frame::YuvLayout,
+    ) -> wgpu::SubmissionIndex {
+        use concat_core::frame::Chroma;
+        let tone_mapped = self.output != concat_core::frame::Signal::Sdr;
+        let entries: &[&'static str] = match layout.chroma {
+            Chroma::Nv12 => &["fs_luma", "fs_chroma"],
+            Chroma::I420 => &["fs_luma", "fs_cb", "fs_cr"],
+        };
+        let pipelines: Vec<wgpu::RenderPipeline> = entries
+            .iter()
+            .map(|entry| self.yuv_pipeline(entry, tone_mapped, layout.full_range))
+            .collect();
+        let planes = self.planes_for(width, height, layout.chroma);
+        let (canvas, canvas_texture, canvas_view) = self.canvas(width, height);
+        let mut encoder = self.encode(&canvas_view, &canvas_texture, draws, clear);
+        let from = &self.pool[&(width, height)][canvas].bind_group;
+        for ((pipeline, texture), plane) in pipelines.iter().zip(&planes).zip(&shape.planes) {
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Self::copy(&mut encoder, pipeline, from, &view);
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: staging,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: plane.offset as u64,
+                        bytes_per_row: Some(plane.padded_row as u32),
+                        rows_per_image: Some(plane.rows as u32),
+                    },
+                },
+                texture.size(),
+            );
+        }
+        let submission = self.queue.submit([encoder.finish()]);
+        self.retire();
+        submission
+    }
+
+    /// The YUV pass `entry` for a timeline tone-mapped or not and a range,
+    /// compiled on first use: an export asks for two or three, and nothing
+    /// else asks at all, so no start pays for them.
+    fn yuv_pipeline(
+        &mut self,
+        entry: &'static str,
+        tone_mapped: bool,
+        full_range: bool,
+    ) -> wgpu::RenderPipeline {
+        if let Some(pipeline) = self.yuv_pipelines.get(&(entry, tone_mapped, full_range)) {
+            return pipeline.clone();
+        }
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("concat yuv"),
+                source: wgpu::ShaderSource::Wgsl(yuv_shader(tone_mapped, full_range).into()),
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("concat yuv"),
+                bind_group_layouts: &[Some(&self.bind_layout)],
+                immediate_size: 0,
+            });
+        let format = if entry == "fs_chroma" {
+            wgpu::TextureFormat::Rg8Unorm
+        } else {
+            wgpu::TextureFormat::R8Unorm
+        };
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_full"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            });
+        self.yuv_pipelines
+            .insert((entry, tone_mapped, full_range), pipeline.clone());
+        pipeline
+    }
+
+    /// The textures a YUV frame of this size and layout is drawn into:
+    /// luma, then the chroma as one plane (NV12) or two (I420). Kept for
+    /// the next frame; queue order keeps one frame's copies out ahead of
+    /// the next one's passes.
+    fn planes_for(
+        &mut self,
+        width: u32,
+        height: u32,
+        chroma: concat_core::frame::Chroma,
+    ) -> Vec<wgpu::Texture> {
+        use concat_core::frame::Chroma;
+        if let Some((w, h, c, textures)) = &self.planes
+            && (*w, *h, *c) == (width, height, chroma)
+        {
+            return textures.clone();
+        }
+        let texture = |w: u32, h: u32, format: wgpu::TextureFormat| {
+            self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("concat yuv plane"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
+        let (half_w, half_h) = (width / 2, height / 2);
+        let mut textures = vec![texture(width, height, wgpu::TextureFormat::R8Unorm)];
+        match chroma {
+            Chroma::Nv12 => textures.push(texture(half_w, half_h, wgpu::TextureFormat::Rg8Unorm)),
+            Chroma::I420 => textures.extend([
+                texture(half_w, half_h, wgpu::TextureFormat::R8Unorm),
+                texture(half_w, half_h, wgpu::TextureFormat::R8Unorm),
+            ]),
+        }
+        self.planes = Some((width, height, chroma, textures.clone()));
+        textures
     }
 }
 

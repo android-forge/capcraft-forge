@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! What the engine sees in a picture.
 //!
@@ -45,6 +45,7 @@
 //! are undone.
 
 pub mod apply;
+pub mod int8;
 #[cfg(feature = "infer")]
 pub mod brush;
 pub mod compact;
@@ -53,6 +54,7 @@ pub mod detect;
 pub mod enhance;
 #[cfg(feature = "infer")]
 pub mod erase;
+pub mod faces;
 pub mod fine;
 pub mod mask;
 pub mod models;
@@ -79,7 +81,7 @@ pub use mask::Mask;
 pub use models::ModelId;
 #[cfg(feature = "infer")]
 pub use segment::Segmenter;
-pub use store::{MaskStore, mask_dir, region_dir};
+pub use store::{MaskStore, mask_dir, region_dir, skin_dir};
 
 /// Masks are found this many times a second of source. Ten is where a
 /// person's outline stops visibly lagging their movement, and where a

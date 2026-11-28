@@ -102,6 +102,8 @@ pub(crate) fn heard(
                         model_id: model_id.to_owned(),
                         words,
                         translate: false,
+                        // whisper hears which language it is
+                        language: None,
                     },
                 ))
             })

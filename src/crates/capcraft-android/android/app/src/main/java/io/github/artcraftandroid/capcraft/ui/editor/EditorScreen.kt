@@ -1,5 +1,9 @@
 package io.github.artcraftandroid.capcraft.ui.editor
 
+import io.github.artcraftandroid.capcraft.ui.editor.panels.collage
+
+import androidx.compose.foundation.layout.Arrangement
+
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
@@ -122,8 +126,8 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
         scope.launch {
             vm.stop()
             saveCover(vm)
-            vm.close()
-            close()
+            // a project that could not be saved keeps the editor open, saying why
+            if (vm.close()) close()
         }
     }
 
@@ -159,8 +163,40 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
     var belowPreview by remember { mutableStateOf(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(Palette.EditorTop)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        // a collage opens on a screen of its own: the picture, and the collage's tabs under it
+        LaunchedEffect(vm.timeline != null) {
+            if (vm.timeline != null && vm.session?.collage() != null && then != "edit") vm.collageScreen = true
+        }
+        if (vm.collageScreen) Column(Modifier.fillMaxSize().statusBarsPadding()) {
             TopBar(vm = vm, onClose = ::leave, onExport = ::export)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (!vm.fullscreen) Preview(vm, Modifier.fillMaxSize())
+                // pinch and drag a picture in its space
+                io.github.artcraftandroid.capcraft.ui.editor.panels.CollageAdjust(vm, Modifier.fillMaxSize())
+            }
+            Column(Modifier.fillMaxWidth().background(Palette.Timeline).navigationBarsPadding().padding(top = 10.dp, bottom = 6.dp)) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.CollageTools(vm)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // undo and redo here too: the play bar that has them is the timeline's
+                    androidx.compose.material3.IconButton({ vm.step(back = true) }) {
+                        androidx.compose.material3.Icon(io.github.artcraftandroid.capcraft.ui.LucideIcons.Undo2, contentDescription = "Undo", tint = Palette.Text)
+                    }
+                    androidx.compose.material3.IconButton({ vm.step(back = false) }) {
+                        androidx.compose.material3.Icon(io.github.artcraftandroid.capcraft.ui.LucideIcons.Redo2, contentDescription = "Redo", tint = Palette.Text)
+                    }
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    // music, text or animation: the whole editor, a tap away
+                    Text(
+                        "Edit in timeline ›",
+                        style = Type.Small.copy(color = Palette.Accent),
+                        modifier = Modifier.clickable { vm.collageScreen = false }.padding(8.dp),
+                    )
+                }
+            }
+        } else Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            TopBar(vm = vm, onClose = ::leave, onExport = ::export)
+            // where the tools went, said once after they moved into drawers
+            LaunchedEffect(Unit) { vm.toolsMovedTip() }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 // the preview and the timeline share what the bars leave, about 60:40
                 val free = maxHeight - EditorMetrics.PlayBarHeight
@@ -219,6 +255,24 @@ private fun TopBar(vm: EditorViewModel, onClose: () -> Unit, onExport: () -> Uni
         // finding a tool by its name, beside the close button as the reference has it
         Box(Modifier.size(44.dp, 50.dp).clickable { vm.stop(); vm.toolSearch = true }, contentAlignment = Alignment.Center) {
             Glyph(LucideIcons.Search, Palette.DockText, size = 24.dp, description = "Find a tool")
+        }
+        // the editor's settings, which are not editing tools: how sharp the preview is drawn
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            Box(Modifier.size(40.dp, 50.dp).clickable { menu = true }, contentAlignment = Alignment.Center) {
+                Glyph(LucideIcons.EllipsisVertical, Palette.DockText, size = 22.dp, description = "More")
+            }
+            androidx.compose.material3.DropdownMenu(menu, onDismissRequest = { menu = false }, containerColor = androidx.compose.ui.graphics.Color(0xFF2E2E2E)) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("Preview quality", style = Type.Small.copy(color = Palette.Text, fontSize = 14.sp)) },
+                    leadingIcon = { Glyph(LucideIcons.Gauge, Palette.DockText, size = 18.dp) },
+                    onClick = {
+                        menu = false
+                        vm.select(null)
+                        vm.panel = Panel.PreviewQuality
+                    },
+                )
+            }
         }
         Spacer(Modifier.weight(1f))
         val t = vm.timeline
@@ -307,6 +361,7 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.EraseSurface(vm, Modifier.fillMaxSize())
             } else if (!vm.fullscreen) {
                 PreviewOverlay(vm, Modifier.fillMaxSize())
+                io.github.artcraftandroid.capcraft.ui.editor.panels.ReelWordsBox(vm)
             }
             if (vm.scopes && vm.panel == Panel.Adjust && !vm.fullscreen) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.ScopesOverlay(image, Modifier.align(Alignment.TopEnd))
@@ -349,7 +404,7 @@ private fun PreparingBadge(vm: EditorViewModel, modifier: Modifier) {
     ) {
         CircularProgressIndicator(color = Palette.Accent, modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp)
         Spacer(Modifier.width(7.dp))
-        Text("Preparing clips · ${s.ready} of ${s.total} ready", style = Type.Small.copy(fontSize = 11.sp, color = Palette.Text))
+        Text("Preparing clips · ${s.ready} of ${s.total} ready", style = Type.Small.copy(fontSize = 12.sp, color = Palette.Text))
     }
 }
 

@@ -19,11 +19,16 @@
 //! Nothing here knows about a window. Long work reports through callbacks
 //! and cancels through flags, and the caller decides which thread it runs on.
 
+pub mod awake;
 pub mod brush;
+pub mod capcut;
 pub mod cards;
 pub mod consolidate;
+#[cfg(test)]
+mod consolidate_tests;
 pub mod crash;
 pub mod cutout;
+pub mod faces;
 pub mod dirs;
 pub mod enhance;
 pub mod export;
@@ -37,6 +42,8 @@ pub mod models;
 pub mod net;
 pub mod playback;
 pub mod preview;
+#[cfg(test)]
+mod project_save_tests;
 pub mod projects;
 pub mod proxy;
 pub mod record;
@@ -53,6 +60,7 @@ pub mod voices;
 
 pub use brush::{Brushes, RegionRequest};
 pub use cutout::{AnalyseRequest, Cutouts};
+pub use faces::{FaceRequest, Faces};
 pub use dirs::AppDirs;
 pub use enhance::{EnhanceRequest, Enhancers};
 pub use jobs::{Job, SingleFlight};
@@ -77,4 +85,19 @@ pub fn scheduler() -> &'static std::sync::Arc<concat_media::Prefetcher> {
             std::sync::Arc::new(concat_media::ReaderPool::sized_for(memory::total())),
         ))
     })
+}
+
+/// Moves a saved link to a retired package onto its stand-in, as the
+/// catalogue says; true when it changed. The catalogue works on the
+/// engine's copy of a link, so the link is read across and its id, knobs
+/// and switch written back.
+pub(crate) fn upgrade_link(catalogue: &concat_effects::Catalogue, link: &mut concat_project::model::AppliedFilter) -> bool {
+    let mut engine = concat_export::chains::engine_filter(link);
+    let changed = catalogue.upgrade(&mut engine);
+    if changed {
+        link.id = engine.id;
+        link.params = engine.params;
+        link.enabled = engine.enabled;
+    }
+    changed
 }

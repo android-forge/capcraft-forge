@@ -14,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -712,12 +714,6 @@ fun AtmospherePanel(vm: EditorViewModel) {
             else -> {
                 val categories = remember(list) { list.map { it.category }.distinct() }
                 Tabs(categories, category) { category = it }
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Choice("All", category == -1) { category = -1 }
-                    Choice("★ Favorites", category == -2) { category = -2 }
-                    Choice("Recent", category == -3) { category = -3 }
-                    Choice("Compare", comparing) { comparing = !comparing; compareUris = emptyList() }
-                }
                 if (comparing) {
                     val selected = compareUris.mapNotNull { key -> list.firstOrNull { it.uri.toString() == key } }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -730,6 +726,8 @@ fun AtmospherePanel(vm: EditorViewModel) {
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
                     style = Type.Small.copy(color = Palette.TextSecondary),
                 )
+                // the settings scroll on their own, so none is squeezed under the next
+                Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState())) {
                 if (Trying.id != null && vm.clip(Trying.id!!) != null) {
                     // one setting at a time: how strong, how big, which way turned, and where on each axis
                     var setting by remember { mutableStateOf("Strength") }
@@ -859,6 +857,7 @@ fun AtmospherePanel(vm: EditorViewModel) {
                             Trying.file = null
                         }
                     }
+                }
                 }
                 val byUri = list.associateBy { it.uri.toString() }
                 val ordered = when (category) {

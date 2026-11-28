@@ -132,6 +132,25 @@ fun PreviewOverlay(vm: EditorViewModel, modifier: Modifier) {
                     val selected = vm.selected
                     val w = size.width.toFloat()
                     val h = size.height.toFloat()
+                    // a reel effect that can be placed: dragged where the finger goes
+                    if (io.github.artcraftandroid.capcraft.ui.editor.panels.reelSelected(vm) != null) {
+                        val placed = io.github.artcraftandroid.capcraft.ui.editor.panels.reelHandle(vm) != null
+                        var moved = false
+                        var at = down.position
+                        while (true) {
+                            val change = awaitPointerEvent().changes.first()
+                            if (!change.pressed) break
+                            at = change.position
+                            if (!moved && (at - down.position).getDistance() < touchSlop) continue
+                            moved = true
+                            if (!placed) continue
+                            io.github.artcraftandroid.capcraft.ui.editor.panels.moveReel(vm, (at.x / w).coerceIn(0f, 1f), (at.y / h).coerceIn(0f, 1f))
+                            change.consume()
+                        }
+                        // a tap opens its words over the picture
+                        if (moved) vm.endGesture() else io.github.artcraftandroid.capcraft.ui.editor.panels.ReelWords.open = true
+                        return@awaitEachGesture
+                    }
                     // the corner buttons of a framed selection come first
                     val framedBox = boxes.firstOrNull { it.clipId == selected }
                         ?.takeIf { vm.selectedRow != io.github.artcraftandroid.capcraft.core.RowKind.MAIN }
@@ -268,6 +287,13 @@ fun PreviewOverlay(vm: EditorViewModel, modifier: Modifier) {
         val (upright, level) = guides
         if (upright) drawLine(Palette.Accent, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.dp.toPx())
         if (level) drawLine(Palette.Accent, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
+        // the handle of a reel effect that can be placed
+        io.github.artcraftandroid.capcraft.ui.editor.panels.reelHandle(vm)?.let { (x, y) ->
+            val c = Offset(x * size.width, y * size.height)
+            drawCircle(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f), 18.dp.toPx(), c)
+            drawCircle(Palette.Accent, 18.dp.toPx(), c, style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
+            drawCircle(Palette.Accent, 4.dp.toPx(), c)
+        }
         val shown = live ?: boxes.firstOrNull { it.clipId == selected } ?: return@Canvas
         if (shown.clipId != selected) return@Canvas
         val pts = corners(shown, size.width, size.height)

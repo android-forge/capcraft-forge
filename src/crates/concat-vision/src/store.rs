@@ -47,6 +47,16 @@ pub fn mask_dir(project: &Path, media_path: &str, subject: Subject) -> PathBuf {
     ))
 }
 
+/// The directory a media file's skin masks live in under `project`: what
+/// the skin model found, which Retouch smooths, kept apart from every
+/// cutout's so neither reads the other's answer.
+pub fn skin_dir(project: &Path, media_path: &str) -> PathBuf {
+    project
+        .join("cache")
+        .join("masks")
+        .join(format!("{:016x}-skin", fnv1a(media_path.as_bytes())))
+}
+
 /// The file naming the model that made a directory's masks.
 fn model_file(dir: &Path) -> PathBuf {
     dir.join("model")

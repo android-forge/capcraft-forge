@@ -1,7 +1,9 @@
 format = 2
 
 # CapCraft's retouch: skin smoothed and brightened, the rest of the picture
-# left as it is. Written for CapCraft for Android (AGPL-3.0-or-later).
+# left as it is. Skin is where the skin model found it (MediaPipe's
+# multiclass selfie segmentation, handed over as the pass's map), or by its
+# colour where a clip has not been analysed. Written for CapCraft for Android (AGPL-3.0-or-later).
 
 [effect]
 id = "capcraft.retouch"
@@ -11,7 +13,7 @@ kind = "effect"
 category = "Cutout"
 order = 65
 intensity = "soften"
-description = "Smooths and brightens skin, telling it from the rest of the picture by its colour."
+description = "Smooths and brightens skin: the face's and the body's, as the skin model finds them, or by its colour until it has."
 
 [[param]]
 key = "soften"
