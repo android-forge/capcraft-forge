@@ -178,22 +178,33 @@ internal fun MobileSession.layCollage(view: TimelineView, ids: List<String>, lay
  * Lays [c]'s pictures into its layout's cells, less the gaps, each cut to its cell and its corners
  * rounded by a mask; the gaps show the background, set to [c]'s colour. One step; the view after.
  */
-internal fun MobileSession.layCollage(view0: TimelineView, c: Collage, mediaDir: java.io.File? = null): TimelineView {
+internal fun MobileSession.layCollage(view0: TimelineView, c: Collage, mediaDir: java.io.File? = null, gesture: String? = null): TimelineView {
     val ids = c.ids
     val layout = c.layout.coerceIn(0, (collageLayouts(ids.size).size - 1).coerceAtLeast(0))
     val (fw, fh) = view0.width.toInt() to view0.height.toInt()
-    // a frame of our own draws its background; the grid shows its gap colour
+    val view = view0
     val styled = c.style.isNotEmpty() && mediaDir != null
-    val view = if (styled) {
-        setBackground(JSONObject().put("kind", "image").put("path", styleBackground(c.style, ids.size, fw, fh, mediaDir!!)).toString())
-    } else {
-        setBackground(JSONObject().put("kind", "color").put("color", c.color).toString())
-    }
     val cells = collageCells(c, fw, fh, styled) ?: return view0
+    val batch = JSONArray()
+    // The background, in the same step as the pictures, and only when the collage changes it: a
+    // frame of our own draws its own (for this count and size); the grid's gap colour is set when
+    // it is picked, so a background chosen in the editor stays through a re-lay.
+    val before = collage()
+    val ground: JSONObject? = when {
+        styled -> {
+            val path = styleBackground(c.style, ids.size, fw, fh, mediaDir!!)
+            JSONObject().put("kind", "image").put("path", path).takeIf { !background().contains(path) }
+        }
+        before == null || before.style != c.style || before.color != c.color -> JSONObject().put("kind", "color").put("color", c.color)
+        else -> null
+    }
+    if (ground != null) {
+        batch.put(JSONObject().put("op", "setTimelineExtra").put("key", "capcraftBackground").put("value", ground))
+        batch.put(JSONObject().put("op", "setTimelineExtra").put("key", "capcraftBackgrounds").put("value", JSONObject.NULL))
+    }
     val frameW = view.width.toDouble()
     val frameH = view.height.toDouble()
     val clips = view.rows.flatMap { it.clips }
-    val batch = JSONArray()
     ids.zip(cells).forEach { (id, cell) ->
         val clip = clips.firstOrNull { it.id == id } ?: return@forEach
         val mw = clip.mediaWidth.toDouble().takeIf { it > 0 } ?: frameW
@@ -253,8 +264,11 @@ internal fun MobileSession.layCollage(view0: TimelineView, c: Collage, mediaDir:
                     .put("adjust", JSONObject(c.adjust.mapValues { (_, v) -> JSONArray(listOf(v.first.toDouble(), v.second.toDouble(), v.third.toDouble())) })),
             ),
     )
-    return apply(JSONObject().put("op", "batch").put("commands", batch).toString(), null)
+    return apply(JSONObject().put("op", "batch").put("commands", batch).toString(), gesture)
 }
+
+/** A name for one collage change: every edit made under it is one undo step. */
+internal fun collageGesture(): String = "collage-${System.nanoTime()}"
 
 /**
  * The collage's own tools, in three tabs. Layout: how many pictures (a + picks one more, a - takes the
@@ -277,7 +291,8 @@ fun CollageTools(vm: EditorViewModel) {
     var tab by remember { mutableStateOf(0) }
     var swapFrom by remember { mutableStateOf<Int?>(null) }
     val layouts = collageLayouts(kept.ids.size)
-    fun lay(next: Collage) = vm.edit { layCollage(view(), next, java.io.File(vm.path, "media")) }
+    val media = java.io.File(vm.path, "media")
+    fun lay(next: Collage) = vm.edit { layCollage(view(), next, media, collageGesture()).also { endGesture() } }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Layout", "Frames", "Borders", "Size").forEachIndexed { i, name -> Pill(name, tab == i) { tab = i } }
@@ -289,7 +304,12 @@ fun CollageTools(vm: EditorViewModel) {
                     Pill("−", false) {
                         if (kept.ids.size > 2) {
                             val last = kept.ids.last()
-                            vm.edit { delete(listOf(last)); layCollage(view(), kept.copy(ids = kept.ids.dropLast(1), layout = 0), java.io.File(vm.path, "media")) }
+                            vm.edit {
+                                // the picture off and the rest re-laid, one step
+                                val g = collageGesture()
+                                val gone = apply(JSONObject().put("op", "removeClips").put("clipIds", JSONArray(listOf(last))).put("ripple", false).toString(), g)
+                                layCollage(gone, kept.copy(ids = kept.ids.dropLast(1), layout = 0, adjust = kept.adjust - last), media, g).also { endGesture() }
+                            }
                         } else vm.message = "A collage keeps at least two pictures"
                     }
                     Text("${kept.ids.size}", style = Type.BodyStrong.copy(color = Palette.Text), modifier = Modifier.padding(horizontal = 12.dp))
@@ -299,9 +319,14 @@ fun CollageTools(vm: EditorViewModel) {
                             val uri = uris.firstOrNull() ?: return@open
                             val app = vm.getApplication<android.app.Application>()
                             vm.edit {
-                                val media = import(Media.importUri(app, vm.path, uri).absolutePath)
-                                val added = addOverlay(media.id, 0L)
-                                layCollage(added, kept.copy(ids = kept.ids + added.createdId, layout = 0), java.io.File(vm.path, "media"))
+                                val picked = import(Media.importUri(app, vm.path, uri).absolutePath)
+                                // a lane of its own at the top, the picture on it and every picture re-laid, one step
+                                val g = collageGesture()
+                                val lane = apply(JSONObject().put("op", "insertTrack").put("index", 10_000).toString(), g)
+                                val added = apply(
+                                    JSONObject().put("op", "addClip").put("mediaId", picked.id).put("trackId", lane.createdId).put("start", 0.0).put("ripple", false).toString(), g,
+                                )
+                                layCollage(added, kept.copy(ids = kept.ids + added.createdId, layout = 0), media, g).also { endGesture() }
                             }
                         }
                     }
@@ -353,8 +378,9 @@ fun CollageTools(vm: EditorViewModel) {
                     val on = t != null && t.width.toInt() * size.second == t.height.toInt() * size.first
                     Pill(name, on) {
                         vm.edit {
-                            setCanvas(size.first.toUInt(), size.second.toUInt())
-                            layCollage(view(), kept, java.io.File(vm.path, "media"))
+                            // the new frame and the pictures re-laid on it, one step
+                            val g = collageGesture()
+                            layCollage(setCanvasWithin(size.first.toUInt(), size.second.toUInt(), g), kept, media, g).also { endGesture() }
                         }
                     }
                 }
@@ -469,6 +495,8 @@ fun CollageAdjust(vm: EditorViewModel, modifier: Modifier) {
                 val shownH = if (mediaAspect > aspect) 1f else mediaAspect / aspect
                 var moved = false
                 var sent = 0L
+                // the whole pinch is one undo step
+                val g = collageGesture()
                 while (true) {
                     val event = awaitPointerEvent()
                     if (event.changes.none { it.pressed }) break
@@ -484,12 +512,12 @@ fun CollageAdjust(vm: EditorViewModel, modifier: Modifier) {
                     if (now - sent > 60) {
                         sent = now
                         val next = c0.copy(adjust = c0.adjust + (id to Triple(zoom, ox, oy)))
-                        vm.edit { layCollage(view(), next, media) }
+                        vm.edit { layCollage(view(), next, media, g) }
                     }
                 }
                 if (moved) {
                     val next = c0.copy(adjust = c0.adjust + (id to Triple(zoom, ox, oy)))
-                    vm.edit { layCollage(view(), next, media) }
+                    vm.edit { layCollage(view(), next, media, g).also { endGesture() } }
                 } else {
                     // a second tap soon after the first puts the picture back as it was laid
                     val now = System.currentTimeMillis()

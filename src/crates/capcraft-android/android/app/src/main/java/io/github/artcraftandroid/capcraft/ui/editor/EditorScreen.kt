@@ -126,8 +126,8 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
         scope.launch {
             vm.stop()
             saveCover(vm)
-            vm.close()
-            close()
+            // a project that could not be saved keeps the editor open, saying why
+            if (vm.close()) close()
         }
     }
 
@@ -176,7 +176,11 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
             }
             Column(Modifier.fillMaxWidth().background(Palette.Timeline).navigationBarsPadding().padding(top = 10.dp, bottom = 6.dp)) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.CollageTools(vm)
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // undo and redo here too: the play bar that has them is the timeline's
+                    Text("Undo", style = Type.Small.copy(color = Palette.Text), modifier = Modifier.clickable { vm.step(back = true) }.padding(8.dp))
+                    Text("Redo", style = Type.Small.copy(color = Palette.Text), modifier = Modifier.clickable { vm.step(back = false) }.padding(8.dp))
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                     // music, text or animation: the whole editor, a tap away
                     Text(
                         "Edit in timeline ›",

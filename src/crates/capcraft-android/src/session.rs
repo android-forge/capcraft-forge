@@ -1217,6 +1217,22 @@ impl MobileSession {
     }
 
     /// Sets the frame size (the canvas ratio), keeping the frame rate.
+    /// [`MobileSession::set_canvas`] as part of gesture `gesture`: with the
+    /// edits made under the same name it is one undo step (a collage's new
+    /// frame and its pictures re-laid on it).
+    pub fn set_canvas_within(&self, width: u32, height: u32, gesture: String) -> Result<TimelineView, MobileError> {
+        let (timeline_id, mut video): (String, VideoSettings) = {
+            let state = self.lock();
+            let project = state.session.project();
+            (project.active_timeline_id.clone(), project.active().video)
+        };
+        video.width = even(width);
+        video.height = even(height);
+        let mut state = self.lock();
+        let created = Self::apply_all(&mut state, vec![Command::SetTimelineVideo { timeline_id, video }], Some(&gesture))?;
+        Ok(Self::changed(&mut state, created))
+    }
+
     pub fn set_canvas(&self, width: u32, height: u32) -> Result<TimelineView, MobileError> {
         let (timeline_id, mut video): (String, VideoSettings) = {
             let state = self.lock();
