@@ -356,3 +356,31 @@ mod settings_tests {
         assert!(spot.iter().any(|s| s.key == "push" && s.kind == super::Kind::Number));
     }
 }
+
+#[cfg(test)]
+mod draw_tests {
+    use super::*;
+
+    /// Every effect draws at a phone's preview size across its whole run, as
+    /// made and with every setting it reads left blank, without a panic: a
+    /// panic in an export would leave the effects' lock poisoned and every
+    /// later frame without them.
+    #[test]
+    fn every_effect_draws_with_defaults_and_with_blank_settings() {
+        let (w, h) = (360, 640);
+        // a person in the middle, a face a third of the way down
+        let mask: Vec<f32> = (0..w * h).map(|i| if (i % w) > w / 4 && (i % w) < w * 3 / 4 && i / w > h / 5 { 1.0 } else { 0.0 }).collect();
+        let face = Face { x: 0.5, y: 0.33, w: 0.2 };
+        for e in effects() {
+            let blank: BTreeMap<String, String> = settings(e.name).into_iter().map(|s| (s.key, String::new())).collect();
+            for options in [BTreeMap::new(), blank] {
+                let mut runs = vec![Run::new(e.name, 0.0, 3.0, options.clone()).expect("listed effects are found")];
+                for t in [0.0, 0.4, 1.2, 2.1, 2.95] {
+                    let mut rgba = vec![128u8; w * h * 4];
+                    let drew = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw(&mut rgba, w, h, Some(&mask), Some(face), &mut runs, t)));
+                    assert!(drew.is_ok(), "{} panicked at {t}s with {options:?}", e.name);
+                }
+            }
+        }
+    }
+}

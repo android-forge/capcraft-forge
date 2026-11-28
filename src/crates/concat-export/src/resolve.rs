@@ -163,6 +163,10 @@ pub(crate) struct FxJob {
     still: bool,
     images: Vec<String>,
     cards: std::sync::OnceLock<Arc<Vec<tiny_skia::Pixmap>>>,
+    /// The person mask last stretched to the frame, with the mask and the
+    /// frame size it was made for: a still's mask never changes, and a
+    /// video's lasts three frames at 30 fps, so it is made once for them.
+    mapped: std::sync::Mutex<Option<(Arc<concat_vision::Mask>, usize, usize, Arc<Vec<f32>>)>>,
 }
 
 impl FxJob {
@@ -206,6 +210,7 @@ impl FxJob {
             still: clip.kind == ClipKind::Image,
             images,
             cards: std::sync::OnceLock::new(),
+            mapped: std::sync::Mutex::new(None),
         })
     }
 
@@ -267,6 +272,13 @@ impl FxJob {
         }
         let seconds = source_time.as_f64();
         let mask = self.person.mask_at(seconds).map(|mask| {
+            let mut kept = self.mapped.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some((from, kw, kh, m)) = kept.as_ref()
+                && Arc::ptr_eq(from, &mask)
+                && (*kw, *kh) == (w, h)
+            {
+                return Arc::clone(m);
+            }
             let mut m = vec![0f32; w * h];
             for y in 0..h {
                 for x in 0..w {
@@ -274,6 +286,8 @@ impl FxJob {
                     m[y * w + x] = mask.sample(u, v);
                 }
             }
+            let m = Arc::new(m);
+            *kept = Some((mask, w, h, Arc::clone(&m)));
             m
         });
         let face = self.faces.at(seconds).and_then(|f| {
@@ -282,7 +296,7 @@ impl FxJob {
             Some(capcraft_reelfx::Face { x, y, w: f.w / (1.0 - left - right).max(1e-3) })
         });
         let mut rgba = frame.pixels().to_vec();
-        if !capcraft_reelfx::draw(&mut rgba, w, h, mask.as_deref(), face, &mut runs, t) {
+        if !capcraft_reelfx::draw(&mut rgba, w, h, mask.as_deref().map(Vec::as_slice), face, &mut runs, t) {
             return None;
         }
         Frame::from_rgba(frame.width(), frame.height(), rgba)

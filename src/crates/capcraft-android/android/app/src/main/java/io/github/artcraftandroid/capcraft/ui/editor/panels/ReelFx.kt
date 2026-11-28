@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -251,7 +252,8 @@ fun ReelFxPanel(vm: EditorViewModel) {
                         { v -> change("reelfx-end") { it.put("end", v.toDouble().coerceAtLeast(it.optDouble("start") + 0.2)) } }, { vm.endGesture() }, title = "End")
                 }
                 val opts = e.optJSONObject("options")
-                fun set(key: String, v: String) = change {
+                // typing is one undo step per field, ended when the field is left; a tap is a step of its own
+                fun set(key: String, v: String, gesture: String? = null) = change(gesture) {
                     val o = it.optJSONObject("options") ?: JSONObject()
                     if (v.isBlank()) o.remove(key) else o.put(key, v)
                     it.put("options", o)
@@ -292,8 +294,8 @@ fun ReelFxPanel(vm: EditorViewModel) {
                                 { v -> change("reelfx-$key") { val o = it.optJSONObject("options") ?: JSONObject(); o.put(key, if (whole) "%.0f".format(v) else "%.3f".format(v)); it.put("options", o) } },
                                 { vm.endGesture() }, title = label)
                         }
-                        '|' in default || hint?.hint?.contains("joined with |") == true -> Lines(label, now.ifEmpty { default }) { set(key, it) }
-                        else -> Field(label, now.ifEmpty { default }, hint?.hint.orEmpty()) { v -> set(key, v) }
+                        '|' in default || hint?.hint?.contains("joined with |") == true -> Lines(label, now.ifEmpty { default }, { vm.endGesture() }) { set(key, it, "reelfx-$key") }
+                        else -> Field(label, now.ifEmpty { default }, hint?.hint.orEmpty(), { vm.endGesture() }) { v -> set(key, v, "reelfx-$key") }
                     }
                 }
                 // a sound at the effect's start, the ones that suit it first
@@ -367,7 +369,7 @@ private fun Swatches(title: String, now: String, onPick: (String) -> Unit) {
 
 /** Several lines, each its own box, with add and remove; held joined by `|`. Lines with `::` get a small second box. */
 @Composable
-private fun Lines(title: String, value: String, onDone: (String) -> Unit) {
+private fun Lines(title: String, value: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
     val items = value.split('|')
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(title, style = Type.Small.copy(color = Palette.TextSecondary))
@@ -375,11 +377,11 @@ private fun Lines(title: String, value: String, onDone: (String) -> Unit) {
             fun put(v: String) = onDone(items.toMutableList().also { it[i] = v }.joinToString("|"))
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if ("::" in item) {
-                    Box(Modifier.weight(0.62f)) { Box_(item.substringBefore("::")) { put(it + "::" + item.substringAfter("::")) } }
+                    Box(Modifier.weight(0.62f)) { Box_(item.substringBefore("::"), onLeave) { put(it + "::" + item.substringAfter("::")) } }
                     Spacer(Modifier.width(6.dp))
-                    Box(Modifier.weight(0.38f)) { Box_(item.substringAfter("::")) { put(item.substringBefore("::") + "::" + it) } }
+                    Box(Modifier.weight(0.38f)) { Box_(item.substringAfter("::"), onLeave) { put(item.substringBefore("::") + "::" + it) } }
                 } else {
-                    Box(Modifier.weight(1f)) { Box_(item) { put(it) } }
+                    Box(Modifier.weight(1f)) { Box_(item, onLeave) { put(it) } }
                 }
                 if (items.size > 1) {
                     Text("✕", style = Type.Body.copy(color = Palette.TextSecondary), modifier = Modifier.clickable { onDone(items.filterIndexed { j, _ -> j != i }.joinToString("|")) }.padding(horizontal = 10.dp, vertical = 6.dp))
@@ -394,7 +396,7 @@ private fun Lines(title: String, value: String, onDone: (String) -> Unit) {
 
 /** A bare one-line text box. */
 @Composable
-private fun Box_(value: String, onDone: (String) -> Unit) {
+private fun Box_(value: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
     var text by remember(value) { mutableStateOf(value) }
     BasicTextField(
         text,
@@ -402,7 +404,8 @@ private fun Box_(value: String, onDone: (String) -> Unit) {
         singleLine = true,
         textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
         cursorBrush = SolidColor(Palette.Accent),
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp)
+            .onFocusChanged { if (!it.isFocused) onLeave() },
     )
 }
 
@@ -417,7 +420,7 @@ private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
 
 /** A one-line text box that hands its words over when they change. */
 @Composable
-private fun Field(title: String, value: String, hint: String, onDone: (String) -> Unit) {
+private fun Field(title: String, value: String, hint: String, onLeave: () -> Unit, onDone: (String) -> Unit) {
     var text by remember(value) { mutableStateOf(value) }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.width(70.dp))
@@ -428,7 +431,8 @@ private fun Field(title: String, value: String, hint: String, onDone: (String) -
             maxLines = 4,
             textStyle = Type.Body.copy(color = Palette.Text, fontSize = 14.sp),
             cursorBrush = SolidColor(Palette.Accent),
-            modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2E2E30)).padding(horizontal = 10.dp, vertical = 8.dp)
+                .onFocusChanged { if (!it.isFocused) onLeave() },
             decorationBox = { inner ->
                 Box {
                     if (text.isEmpty()) Text(hint, style = Type.Body.copy(color = Palette.TextSecondary, fontSize = 14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
