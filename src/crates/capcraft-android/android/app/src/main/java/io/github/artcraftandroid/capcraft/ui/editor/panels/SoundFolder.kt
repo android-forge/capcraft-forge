@@ -334,7 +334,7 @@ private fun FolderSoundRow(s: FolderSound, on: Boolean, showCategory: Boolean, o
             if (showCategory) Text(s.category, style = Type.Tiny.copy(color = Palette.TextSecondary), maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))
-        seconds?.let { Text("%02d:%02d".format(it / 60, it % 60), style = Type.Small.copy(fontSize = 11.sp, color = Palette.TextSecondary)) }
+        seconds?.let { Text("%02d:%02d".format(it / 60, it % 60), style = Type.Small.copy(fontSize = 12.sp, color = Palette.TextSecondary)) }
         Spacer(Modifier.width(14.dp))
         Box(
             Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF3A3A3A)).clickable(onClick = onAdd),

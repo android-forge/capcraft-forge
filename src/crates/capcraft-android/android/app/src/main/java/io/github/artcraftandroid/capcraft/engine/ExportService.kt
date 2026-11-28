@@ -23,13 +23,21 @@ class ExportService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = running(this, 0f)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(ID, notification)
+        // Android 15 on allows a day's data sync six hours: past that the start is refused, and the
+        // export goes on in the open app instead of crashing it
+        val started = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(ID, notification)
+            }
         }
+        if (started.isFailure) stopSelf()
         return START_NOT_STICKY
     }
+
+    /** The day's six hours ran out mid-export: stop at once, as Android requires, or it ends the app. */
+    override fun onTimeout(startId: Int, fgsType: Int) = stopSelf()
 
     companion object {
         private const val ID = 41

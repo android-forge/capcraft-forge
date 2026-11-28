@@ -918,7 +918,7 @@ private fun Thumb(file: OverlayFile, on: Boolean, busy: Boolean, favorite: Boole
         Text(
             file.name,
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000)).padding(horizontal = 4.dp, vertical = 3.dp),
-            style = Type.Small.copy(color = Color.White, fontSize = 9.sp),
+            style = Type.Small.copy(color = Color.White, fontSize = 12.sp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

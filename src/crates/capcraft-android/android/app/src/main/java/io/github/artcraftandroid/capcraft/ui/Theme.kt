@@ -61,8 +61,8 @@ object Type {
     val Body = TextStyle(color = Palette.Text, fontSize = 14.sp)
     val BodyStrong = TextStyle(color = Palette.Text, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     val Small = TextStyle(color = Palette.TextSecondary, fontSize = 12.sp)
-    val Tiny = TextStyle(color = Palette.TextSecondary, fontSize = 10.sp)
-    val DockLabel = TextStyle(color = Palette.Text, fontSize = 10.sp)
+    val Tiny = TextStyle(color = Palette.TextSecondary, fontSize = 12.sp)
+    val DockLabel = TextStyle(color = Palette.Text, fontSize = 12.sp)
 }
 
 @Composable

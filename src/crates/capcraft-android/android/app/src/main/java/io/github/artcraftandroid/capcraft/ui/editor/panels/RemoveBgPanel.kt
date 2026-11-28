@@ -355,7 +355,7 @@ fun ChromaSurface(vm: EditorViewModel, modifier: Modifier) {
     val latestFrame by rememberUpdatedState(frame)
     val latestShape by rememberUpdatedState(shape)
     val measurer = rememberTextMeasurer()
-    val hint = TextStyle(color = Color.White, fontSize = 11.sp)
+    val hint = TextStyle(color = Color.White, fontSize = 12.sp)
 
     /** The clip's colour under [p] (preview pixels in a [w] by [h] preview), or null off the clip. */
     fun colourAt(p: Offset, w: Float, h: Float): Int? {

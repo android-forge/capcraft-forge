@@ -453,7 +453,7 @@ fun TextPanel(vm: EditorViewModel, clipId: String?, startTab: Int = 3) {
                                             verticalArrangement = Arrangement.Center,
                                         ) {
                                             Glyph(LucideIcons.Plus, Palette.Text, size = 16.dp)
-                                            Text("Import", style = Type.Small.copy(color = Palette.Text, fontSize = 11.sp))
+                                            Text("Import", style = Type.Small.copy(color = Palette.Text, fontSize = 12.sp))
                                         }
                                         return@forEach
                                     }
@@ -1625,7 +1625,7 @@ private fun ArcWord(word: String) {
             val rad = Math.toRadians(turn.toDouble())
             Text(
                 ch.toString(),
-                style = Type.Small.copy(fontSize = 11.sp, color = Palette.Text, fontWeight = FontWeight.SemiBold),
+                style = Type.Small.copy(fontSize = 12.sp, color = Palette.Text, fontWeight = FontWeight.SemiBold),
                 modifier = Modifier
                     .align(Alignment.Center)
                     .offset(x = (40 * kotlin.math.sin(rad)).toFloat().dp, y = (40 * (1 - kotlin.math.cos(rad)) - 4).toFloat().dp)

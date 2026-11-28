@@ -529,7 +529,7 @@ fun SoundFxPanel(vm: EditorViewModel) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    Text("00:%02d".format(kotlin.math.ceil(fx.seconds).toInt()), style = Type.Small.copy(fontSize = 11.sp, color = Palette.TextSecondary))
+                    Text("00:%02d".format(kotlin.math.ceil(fx.seconds).toInt()), style = Type.Small.copy(fontSize = 12.sp, color = Palette.TextSecondary))
                     Spacer(Modifier.width(14.dp))
                     Box(
                         Modifier.size(34.dp).clip(CircleShape).background(Color(0xFF3A3A3A)).clickable { add(fx) },

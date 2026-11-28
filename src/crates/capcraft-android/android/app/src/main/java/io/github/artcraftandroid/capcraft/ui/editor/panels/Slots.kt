@@ -191,7 +191,7 @@ fun SlotsPanel(vm: EditorViewModel) {
                     ) {
                         picture?.let { Image(it, contentDescription = "Place ${i + 1}", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
                         Text(
-                            "${i + 1}", style = Type.Tiny.copy(color = Color.White, fontSize = 10.sp),
+                            "${i + 1}", style = Type.Tiny.copy(color = Color.White, fontSize = 12.sp),
                             modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(CircleShape).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                         if (slot.moves) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(18.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
