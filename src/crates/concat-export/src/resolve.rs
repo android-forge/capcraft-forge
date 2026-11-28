@@ -280,12 +280,14 @@ impl FxJob {
                 return Arc::clone(m);
             }
             let mut m = vec![0f32; w * h];
-            for y in 0..h {
-                for x in 0..w {
-                    let (u, v) = self.mapping.source_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-                    m[y * w + x] = mask.sample(u, v);
+            let mapping = &self.mapping;
+            capcraft_reelfx::ctx::par_rows(&mut m, w, h, |y0, band| {
+                for (k, v) in band.iter_mut().enumerate() {
+                    let (x, y) = (k % w, y0 + k / w);
+                    let (u, s) = mapping.source_of((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                    *v = mask.sample(u, s);
                 }
-            }
+            });
             let m = Arc::new(m);
             *kept = Some((mask, w, h, Arc::clone(&m)));
             m

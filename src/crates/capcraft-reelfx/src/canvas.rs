@@ -717,30 +717,6 @@ pub fn shadowed(im: &Pixmap, blur_px: f32, dy: f32, alpha: u8) -> Pixmap {
     out
 }
 
-/// Straight RGB bytes of `pm`, alpha dropped (its colour under no alpha).
-pub fn straight(pm: &Pixmap) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pm.width() as usize * pm.height() as usize * 3);
-    for px in pm.data().chunks_exact(4) {
-        let a = u32::from(px[3]).max(1);
-        for c in &px[..3] {
-            out.push(((u32::from(*c) * 255 + a / 2) / a).min(255) as u8);
-        }
-    }
-    out
-}
-
-/// A pixmap of straight RGB bytes, opaque.
-pub fn from_rgb(w: u32, h: u32, rgb: &[u8]) -> Pixmap {
-    let mut pm = Pixmap::new(w.max(1), h.max(1)).expect("a pixmap");
-    for (px, c) in pm.data_mut().chunks_exact_mut(4).zip(rgb.chunks_exact(3)) {
-        px[0] = c[0];
-        px[1] = c[1];
-        px[2] = c[2];
-        px[3] = 255;
-    }
-    pm
-}
-
 /// The heart `fx.py` draws, `size` pixels square.
 pub fn heart(size: f32, color: Rgb) -> Pixmap {
     let s = size.max(2.0);

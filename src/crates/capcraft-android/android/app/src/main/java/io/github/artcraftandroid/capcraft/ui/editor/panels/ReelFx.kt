@@ -310,15 +310,8 @@ fun ReelFxPanel(vm: EditorViewModel) {
                         Chip("Your images", false) {
                             MediaPick.open(MediaKinds.IMAGE, multiple = true) { uris ->
                                 scope.launch(Threads.commands) {
-                                    // copies kept in the app's own storage, read by the engine
-                                    val dir = java.io.File(context.filesDir, "reelfx").apply { mkdirs() }
-                                    val paths = uris.mapNotNull { uri ->
-                                        runCatching {
-                                            val f = java.io.File(dir, "${uri.toString().hashCode().toUInt()}.img")
-                                            context.contentResolver.openInputStream(uri)?.use { input -> f.outputStream().use { input.copyTo(it) } }
-                                            f.absolutePath
-                                        }.getOrNull()
-                                    }
+                                    // copies kept in the project's own media, as any import is: they go with the project
+                                    val paths = uris.mapNotNull { uri -> runCatching { io.github.artcraftandroid.capcraft.engine.Media.importUri(context, vm.path, uri).absolutePath }.getOrNull() }
                                     withContext(Dispatchers.Main) {
                                         change { it.put("options", (it.optJSONObject("options") ?: JSONObject()).put("images", paths.joinToString("|"))) }
                                     }
