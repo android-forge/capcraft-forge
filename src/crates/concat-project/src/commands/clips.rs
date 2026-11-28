@@ -237,7 +237,9 @@ pub(super) fn apply(
                 ClipKind::Layer
             };
             let mut clip = Clip::blank(id.clone(), track_id, kind, name, start, duration);
-            if sound {
+            // no package is a layer for Forge's reel effects, set after
+            if effect_id.is_empty() {
+            } else if sound {
                 clip.filters = vec![AppliedFilter::new(effect_id)];
             } else {
                 clip.video_effects = vec![AppliedFilter::new(effect_id)];
@@ -455,6 +457,14 @@ pub(super) fn apply(
                 tail.fade_in = 0.0;
                 tail.rewindow_keys(whole, offset, whole);
                 speed::refit_curve(&mut tail, whole, offset, whole);
+                // Forge's reel effects: each half keeps the stretch it shows,
+                // timed from its own start
+                tail.reel_fx = tail
+                    .reel_fx
+                    .iter()
+                    .filter(|e| e.end > offset)
+                    .map(|e| crate::model::ReelEffect { start: (e.start - offset).max(0.0), end: e.end - offset, ..e.clone() })
+                    .collect();
                 created = Some(tail.id.clone());
                 let head = timeline.clip_at_mut(index);
                 head.duration = offset;
@@ -462,6 +472,10 @@ pub(super) fn apply(
                 head.fade_out = 0.0;
                 head.rewindow_keys(whole, 0.0, offset);
                 speed::refit_curve(head, whole, 0.0, offset);
+                head.reel_fx.retain(|e| e.start < offset);
+                for e in &mut head.reel_fx {
+                    e.end = e.end.min(offset);
+                }
                 timeline.clips.insert(index + 1, Arc::new(tail));
             }
             // A split always mints the tail, so "minted anything" and

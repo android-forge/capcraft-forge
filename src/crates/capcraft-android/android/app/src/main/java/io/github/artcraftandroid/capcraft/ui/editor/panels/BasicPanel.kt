@@ -82,7 +82,7 @@ fun BasicPanel(vm: EditorViewModel) {
         }
     }
 
-    PanelFrame("Basic", vm, height = 210.dp, left = {
+    PanelFrame("Position", vm, height = 210.dp, left = {
         Row(Modifier.clickable(onClick = ::reset).padding(vertical = 8.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Glyph(LucideIcons.RotateCcw, Palette.DockText, size = 18.dp)
             Spacer(Modifier.width(6.dp))

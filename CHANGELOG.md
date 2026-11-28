@@ -30,6 +30,44 @@ was kept:
 - Looks Concat renamed (Polaroid, Rain, Milk and eleven others) still open under their old names in older projects.
 - Concat v0.2.13 is not merged yet: it replaces the project model with a new document crate, which Forge's Android code
   has to be ported to first.
+- Reel FX settings by kind: sliders for numbers, colour dots, a line-by-line editor for lists, chips for looks, shapes
+  and every app font; tap a selected effect on the preview to edit its words there, and drag Swipe's line, The Tap,
+  Wave Trim, Pause & Point's label, Reject Stamp and Messages into place. A new effect shows itself as soon as it is
+  added, and a Sound row adds one of the built-in sounds at its start. Reel Frame has the full icon column with counts;
+  Countdown Flip has looks; Scribble has shapes; Spotlight has light presets; Fan Build, Tape Label and Glass Widgets
+  are redrawn; Match Cut takes your own pictures; Carousel Spin's near panels pass in front of you.
+- Atmosphere: the filter row is gone and the settings scroll, so the light sliders no longer overlap.
+- Reel FX on the timeline: Effects > Reel FX lays each effect on the effects row as an item of its own, drawn on the
+  pictures beneath it - move it, trim or extend it, and key its opacity to fade it in and out. Each effect shows only
+  the settings it reads (Swipe's after look and Backdrop Word's font as choices), not a generic words box.
+- Film looks (in Filters, under Film): 13 film stocks and grades - Vision3 500T and 250D, Eterna 500, Ektachrome 100,
+  Delta 3200, CineStill 800T, Kodak Gold, teal and orange, bleach bypass, night bloom, documentary, day for night and
+  cross process - each with an amount, after 0xzgbot's color-grading-film-emulation skill (MIT).
+- Reel FX (in Look): 51 talking-head effects - orbit, spotlight, backdrop word, glass widgets, LED sign, checklist,
+  tier list, match cut and the rest - ported from Vibha Ramprakash's claude-video-effects (MIT). Each is placed on a
+  stretch of the clip, follows the face (OpenCV's YuNet, built in) and can sit behind the person (Remove BG's person
+  model); the face and the person are found on the phone the first time, with the progress in the panel. Effects with
+  pictures use the clip's own frames, or images you pick. Preview and export draw the same frames; a split keeps each
+  half's effects.
+The editor's tools reorganised (the first three steps of `docs/proposals/app-cleanup-and-tools.md`). Nothing was removed.
+- A picture's bar is Split, Speed, Volume, Duplicate and Delete, always in the same places, then five drawers: **Edit**,
+  **Look**, **Smart** (the models and heavy processing), **Motion** and **Sound**. That's 10 tools where there were
+  about 37 in one row. The drawer last used stays open for the next picture picked.
+- Text, stickers, captions and sounds have short bars of their own with a **More** drawer (a sound's are **Smart** and
+  **Clean**).
+- The top level is Edit, Audio, Text, Captions, Effects, Overlay, Color, Background, Ratio and Project. Stickers and
+  Graphics are only under Text, Auto captions and lyrics only under Captions, Filters and Adjust are one Color, and
+  Transcript, Filler words, Auto highlight and Replace media are under Project. Preview quality moved to a ⋮ menu in
+  the top bar.
+- Renamed for what they do: Splice is Blend, Maintrack and Overlay are Move to main and Move to overlay, Graphs is
+  Keyframes, Basic is Position, Advanced is Exact values, Video quality is Enhance (Photo quality on photos), the Audio
+  group's Extract is From a video, and in Adjust, Graphs is Curves and Hue is Tint.
+- Adjust's knobs are grouped Light, Color, Detail and Curves, with a tab for each group that jumps to it and shows a
+  dot when anything in the group is changed.
+- Search finds tools inside the drawers, and by their old names too. A one-time tip says the tools have moved.
+- The search sheet's "Reduce video noise" suggestion, which turned on the sound's noise reducer, now says "Reduce
+  background noise".
+- The effect browser no longer offers Vignette and Film grain, which are Adjust's knobs.
 
 ## 0.0.8 (24 November 2026)
 

@@ -1,0 +1,28 @@
+format = 2
+
+# One of Forge's film looks, after the stocks and looks named in 0xzgbot's
+# color_grading_film_emulation skill (MIT, hermes-media-skill-pack). The skill
+# describes them in words; the numbers here are Forge's. AGPL-3.0-or-later.
+
+[effect]
+id = "capcraft.film-teal-orange"
+name = "Teal & Orange"
+version = 1
+kind = "filter"
+category = "Film"
+order = 206
+intensity = "amount"
+description = "The blockbuster grade: shadows to teal, skin to warm amber, the rest a little drained, a moderate S-curve."
+
+[[param]]
+key = "amount"
+label = "Amount"
+min = 0
+max = 100
+default = 80
+step = 1
+unit = "%"
+
+[wgsl]
+entry = "effect.wgsl"
+space = "display"

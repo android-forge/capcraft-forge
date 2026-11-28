@@ -145,6 +145,7 @@ fun PanelHost(vm: EditorViewModel) {
                 Panel.IsolateVoice -> IsolateVoicePanel(vm)
                 Panel.AutoReframe -> AutoReframePanel(vm)
                 Panel.Retouch -> RetouchPanel(vm)
+                Panel.ReelFx -> ReelFxPanel(vm)
                 Panel.Graphs -> GraphsPanel(vm)
                 Panel.Layer -> LayerPanel(vm)
                 Panel.EffectObject -> EffectObjectPanel(vm)

@@ -192,6 +192,10 @@ pub struct ClipPatch {
     )]
     #[cfg_attr(feature = "schema", schemars(with = "Option<Background>"))]
     pub background: Option<Option<Background>>,
+    /// The clip's reel effects, whole: absent leaves them alone, an empty
+    /// list takes them all off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reel_fx: Option<Vec<crate::model::ReelEffect>>,
 }
 
 /// `Option<Option<T>>` over JSON: absent → None, null → Some(None).

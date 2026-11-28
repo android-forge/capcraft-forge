@@ -146,7 +146,8 @@ fun ConfirmDialog(
 fun Toast(message: String?, bottom: androidx.compose.ui.unit.Dp = 120.dp, onGone: () -> Unit) {
     if (message == null) return
     LaunchedEffect(message) {
-        delay(2200)
+        // long enough to read: a short notice goes in a moment, a sentence or two stays a while
+        delay(if (message.length > 60) 5500L else 2200L)
         onGone()
     }
     Box(Modifier.fillMaxSize().padding(bottom = bottom), contentAlignment = Alignment.BottomCenter) {

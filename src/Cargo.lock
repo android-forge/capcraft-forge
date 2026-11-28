@@ -449,6 +449,7 @@ name = "capcraft-android"
 version = "0.2.12"
 dependencies = [
  "android_logger",
+ "capcraft-reelfx",
  "concat-core",
  "concat-effects",
  "concat-export",
@@ -477,6 +478,15 @@ name = "capcraft-android-bindgen"
 version = "0.2.12"
 dependencies = [
  "uniffi",
+]
+
+[[package]]
+name = "capcraft-reelfx"
+version = "0.2.8"
+dependencies = [
+ "concat-text",
+ "tiny-skia 0.12.0",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -703,6 +713,7 @@ dependencies = [
 name = "concat-export"
 version = "0.2.12"
 dependencies = [
+ "capcraft-reelfx",
  "concat-core",
  "concat-effects",
  "concat-log",
@@ -712,6 +723,7 @@ dependencies = [
  "concat-vision",
  "log",
  "serde",
+ "tiny-skia 0.12.0",
  "wgpu",
 ]
 

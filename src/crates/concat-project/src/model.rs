@@ -2109,6 +2109,31 @@ impl LineHead {
     ];
 }
 
+/// One of Forge's reel effects on a clip: which, when, and how it is set.
+///
+/// `start` and `end` are seconds from the clip's start on the timeline, so
+/// the effect moves with the clip. `options` are the effect's own settings,
+/// all text, as `capcraft-reelfx` reads them ("text", "color", "zoom" ...).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReelEffect {
+    /// The effect's name, as `capcraft_reelfx::EFFECTS` lists it.
+    pub fx: String,
+    /// When it begins, in seconds from the clip's start.
+    pub start: f64,
+    /// When it ends, in seconds from the clip's start.
+    pub end: f64,
+    /// Its settings, by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub options: BTreeMap<String, String>,
+    /// How hard it is drawn, as `(seconds from the clip's start, 0..=1)`
+    /// points to join; empty is full strength. Never saved: worked out by
+    /// [`Timeline::reel_fx_on`] from the layer an effect comes from.
+    #[serde(skip)]
+    pub strength: Vec<(f64, f64)>,
+}
+
 /// How a shape clip is painted. Sizes are fractions of the frame's height,
 /// as a title's are, so a shape composed against 1080p is the same shape at
 /// 4K. A style arriving in a command needs only the fields it changes.
@@ -2926,6 +2951,11 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "wire::maybe")]
     pub background: Option<Background>,
+    /// Forge's reel effects on this clip, in the order they are drawn: each
+    /// a named effect over a stretch of the clip, drawn by `capcraft-reelfx`
+    /// on the clip's own picture with the person and the face it tracks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reel_fx: Vec<ReelEffect>,
     /// Fields this build does not know, kept so a document written by a
     /// newer or a different build round-trips through this one intact.
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
@@ -3027,6 +3057,7 @@ impl Clip {
             text: None,
             shape: None,
             background: None,
+            reel_fx: Vec::new(),
             extra: Map::new(),
         }
     }
@@ -3913,6 +3944,59 @@ impl Timeline {
         self.tracks.iter().find(|track| track.id == track_id)
     }
 
+    /// The reel effects drawn on `clip`: its own, then those of each reel
+    /// layer over it on a higher, shown lane, in the clip's seconds, each
+    /// layer's opacity - keyed or not - and fades its strength.
+    pub fn reel_fx_on(&self, clip: &Clip) -> Vec<ReelEffect> {
+        let mut out = clip.reel_fx.clone();
+        if !matches!(clip.kind, ClipKind::Video | ClipKind::Image) {
+            return out;
+        }
+        let lane = |id: &str| self.tracks.iter().position(|track| track.id == id);
+        let Some(below) = lane(&clip.track_id) else {
+            return out;
+        };
+        let (from, to) = (clip.start, clip.start + clip.duration);
+        for layer in &self.clips {
+            if layer.kind != ClipKind::Layer || layer.reel_fx.is_empty() {
+                continue;
+            }
+            let Some(above) = lane(&layer.track_id) else { continue };
+            let shown = self.tracks[above].visible;
+            let (a, b) = (layer.start, layer.start + layer.duration);
+            if above <= below || !shown || b <= from || a >= to || layer.duration <= 0.0 {
+                continue;
+            }
+            // the layer's opacity, keyed or not, eased by its fades
+            let level = |t: f64| -> f64 {
+                let into = t - a;
+                let mut k = layer.value_at(KeyProperty::Opacity, (into / layer.duration).clamp(0.0, 1.0)).clamp(0.0, 1.0);
+                if layer.fade_in > 0.0 {
+                    k *= (into / layer.fade_in).clamp(0.0, 1.0);
+                }
+                if layer.fade_out > 0.0 {
+                    k *= ((b - t) / layer.fade_out).clamp(0.0, 1.0);
+                }
+                k
+            };
+            let full = !layer.is_keyed(KeyProperty::Opacity) && layer.opacity >= 1.0 && layer.fade_in <= 0.0 && layer.fade_out <= 0.0;
+            for e in &layer.reel_fx {
+                // the whole item, however it is trimmed, kept in its own time
+                // so one across a cut runs on
+                let (s, f) = (a - from, b - from);
+                let strength = if full {
+                    Vec::new()
+                } else {
+                    let (lo, hi) = (s.max(0.0), f.min(clip.duration));
+                    let n = (((hi - lo) / 0.05).ceil() as usize).clamp(1, 4000);
+                    (0..=n).map(|i| lo + (hi - lo) * i as f64 / n as f64).map(|t| (t, level(from + t))).collect()
+                };
+                out.push(ReelEffect { start: s, end: f, strength, ..e.clone() });
+            }
+        }
+        out
+    }
+
     /// The lane whose pictures have a background: the lowest lane holding a
     /// video or a still - the main picture of the cut, a phone editor's
     /// main track. Lowest rather than simply the first lane, so a cut whose
@@ -4000,5 +4084,29 @@ mod shape_tests {
             Some(LineHead::Arrow)
         );
         assert!(ShapeStyle::preset("nonsense").is_none());
+    }
+}
+
+#[cfg(test)]
+mod reel_layer_tests {
+    use super::*;
+
+    #[test]
+    fn a_reel_layer_draws_on_the_picture_beneath_it() {
+        let mut t = Timeline::default();
+        let lane = |id: &str| Track { id: id.into(), visible: true, muted: false, extra: Map::new() };
+        t.tracks = vec![lane("t0"), lane("t1")];
+        let picture = Clip::blank("v", "t0", ClipKind::Video, "v", 2.0, 10.0);
+        let mut layer = Clip::blank("l", "t1", ClipKind::Layer, "l", 4.0, 2.0);
+        layer.fade_in = 1.0;
+        layer.reel_fx = vec![ReelEffect { fx: "spotlight".into(), start: 0.0, end: 0.5, options: BTreeMap::new(), strength: Vec::new() }];
+        t.clips = vec![Arc::new(picture.clone()), Arc::new(layer)];
+        let fx = t.reel_fx_on(&picture);
+        assert_eq!(fx.len(), 1);
+        // the whole item, in the picture's seconds
+        assert!((fx[0].start - 2.0).abs() < 1e-9 && (fx[0].end - 4.0).abs() < 1e-9);
+        // eased in over its fade: none at its start, full after a second
+        let at = |x: f64| fx[0].strength.iter().min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs())).unwrap().1;
+        assert!(at(2.0) < 0.01 && (at(2.5) - 0.5).abs() < 0.05 && at(3.5) > 0.99);
     }
 }

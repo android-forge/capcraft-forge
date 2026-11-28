@@ -23,6 +23,7 @@ concat-effects = { path = "crates/concat-effects" }
 concat-text = { path = "crates/concat-text" }
 concat-vision = { path = "crates/concat-vision" }
 concat-log = { path = "crates/concat-log" }
+capcraft-reelfx = { path = "crates/capcraft-reelfx" }
 
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"

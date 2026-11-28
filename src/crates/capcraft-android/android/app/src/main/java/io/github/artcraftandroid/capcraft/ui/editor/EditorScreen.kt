@@ -161,6 +161,8 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
     Box(Modifier.fillMaxSize().background(Palette.EditorTop)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             TopBar(vm = vm, onClose = ::leave, onExport = ::export)
+            // where the tools went, said once after they moved into drawers
+            LaunchedEffect(Unit) { vm.toolsMovedTip() }
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 // the preview and the timeline share what the bars leave, about 60:40
                 val free = maxHeight - EditorMetrics.PlayBarHeight
@@ -219,6 +221,24 @@ private fun TopBar(vm: EditorViewModel, onClose: () -> Unit, onExport: () -> Uni
         // finding a tool by its name, beside the close button as the reference has it
         Box(Modifier.size(44.dp, 50.dp).clickable { vm.stop(); vm.toolSearch = true }, contentAlignment = Alignment.Center) {
             Glyph(LucideIcons.Search, Palette.DockText, size = 24.dp, description = "Find a tool")
+        }
+        // the editor's settings, which are not editing tools: how sharp the preview is drawn
+        var menu by remember { mutableStateOf(false) }
+        Box {
+            Box(Modifier.size(40.dp, 50.dp).clickable { menu = true }, contentAlignment = Alignment.Center) {
+                Glyph(LucideIcons.EllipsisVertical, Palette.DockText, size = 22.dp, description = "More")
+            }
+            androidx.compose.material3.DropdownMenu(menu, onDismissRequest = { menu = false }, containerColor = androidx.compose.ui.graphics.Color(0xFF2E2E2E)) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("Preview quality", style = Type.Small.copy(color = Palette.Text, fontSize = 14.sp)) },
+                    leadingIcon = { Glyph(LucideIcons.Gauge, Palette.DockText, size = 18.dp) },
+                    onClick = {
+                        menu = false
+                        vm.select(null)
+                        vm.panel = Panel.PreviewQuality
+                    },
+                )
+            }
         }
         Spacer(Modifier.weight(1f))
         val t = vm.timeline
@@ -307,6 +327,7 @@ fun Preview(vm: EditorViewModel, modifier: Modifier) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.EraseSurface(vm, Modifier.fillMaxSize())
             } else if (!vm.fullscreen) {
                 PreviewOverlay(vm, Modifier.fillMaxSize())
+                io.github.artcraftandroid.capcraft.ui.editor.panels.ReelWordsBox(vm)
             }
             if (vm.scopes && vm.panel == Panel.Adjust && !vm.fullscreen) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.ScopesOverlay(image, Modifier.align(Alignment.TopEnd))

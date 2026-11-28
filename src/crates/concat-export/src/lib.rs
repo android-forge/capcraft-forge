@@ -305,6 +305,17 @@ pub struct ExportClip {
     /// - or empty when the flattener had no project folder to name it by.
     #[serde(default)]
     pub mask_dir: String,
+    /// Forge's reel effects on the clip, in seconds of the clip; see
+    /// `capcraft_reelfx`. Drawn on the clip's own frames with the person
+    /// mask in `person_dir` and the face track in `face_file`.
+    #[serde(default)]
+    pub reel_fx: Vec<concat_project::model::ReelEffect>,
+    /// Where the clip's media has its person masks, for the reel effects.
+    #[serde(default)]
+    pub person_dir: String,
+    /// Where the clip's media has its face track, for the reel effects.
+    #[serde(default)]
+    pub face_file: String,
     /// The camera's shake taken out, as the document holds it. Rendered
     /// only with `motion_dir`: a clip whose movement is not measured yet
     /// shows as shot.
@@ -436,6 +447,9 @@ impl ExportClip {
             motion: None,
             masks: Vec::new(),
             mask_dir: String::new(),
+            reel_fx: Vec::new(),
+            person_dir: String::new(),
+            face_file: String::new(),
             stabilize: None,
             motion_dir: String::new(),
             voice: None,
@@ -1962,6 +1976,7 @@ fn render_picture(
         chains,
         reveal_maps,
         cutouts,
+        fx,
         stabilized,
         highlight: _,
         backdrops,
@@ -2063,7 +2078,7 @@ fn render_picture(
             // Deep - an HDR clip in its own signal, converted on the GPU -
             // unless a cutout has to cut it in eight bits; the decoder keeps
             // eight bits for a chain itself.
-            let deep = !cutouts.contains_key(&layer.clip);
+            let deep = !cutouts.contains_key(&layer.clip) && !fx.contains_key(&layer.clip);
             let mut options = DecodeOptions::default()
                 .starting_at(layer.source_time)
                 .scaled_to(decode_width, decode_height)
@@ -2130,8 +2145,8 @@ fn render_picture(
                             None,
                             ranges.get(&layer.clip).copied(),
                             // Deep where the frame goes to the GPU as it is: a
-                            // cutout cuts eight bits.
-                            !cutouts.contains_key(&layer.clip),
+                            // cutout cuts eight bits, and reel effects draw on them.
+                            !cutouts.contains_key(&layer.clip) && !fx.contains_key(&layer.clip),
                         )
                         .map_err(|error| error.to_string())?;
                     spent.seeking += seeking.elapsed();
@@ -2139,6 +2154,10 @@ fn render_picture(
                     let frame = cutouts
                         .get(&layer.clip)
                         .and_then(|job| job.cut(&frame, layer.source_time))
+                        .map_or(frame, std::sync::Arc::new);
+                    let frame = fx
+                        .get(&layer.clip)
+                        .and_then(|job| job.apply(&frame, time, layer.source_time))
                         .map_or(frame, std::sync::Arc::new);
                     layers.push(filled(
                         layer,
@@ -2175,7 +2194,7 @@ fn render_picture(
                             None,
                             None,
                             ranges.get(&layer.clip).copied(),
-                            !cutouts.contains_key(&layer.clip),
+                            !cutouts.contains_key(&layer.clip) && !fx.contains_key(&layer.clip),
                         )
                         .map(Some)
                         .map_err(|error| error.to_string())?;
@@ -2192,6 +2211,10 @@ fn render_picture(
                         Some(cut) => std::sync::Arc::new(cut),
                         None => frame,
                     };
+                    let frame = fx
+                        .get(&layer.clip)
+                        .and_then(|job| job.apply(&frame, time, layer.source_time))
+                        .unwrap_or(frame);
                     layers.push(filled(
                         layer,
                         frame,
@@ -3547,8 +3570,12 @@ fn frame_request(
     (width, height): (u32, u32),
     still: bool,
     reading: concat_media::Reading,
+    time: Rational,
 ) -> concat_media::FrameRequest {
-    let needs_cpu_pixels = plan.built.highlight == Some(layer.clip)
+    // a reel effect draws on eight-bit pixels in memory, while it is on
+    let fx_on = plan.built.fx.get(&layer.clip).is_some_and(|job| job.covers(time));
+    let needs_cpu_pixels = fx_on
+        || plan.built.highlight == Some(layer.clip)
         || (plan.built.cutouts.contains_key(&layer.clip)
             && plan.built.stabilized.contains_key(&layer.clip));
     concat_media::FrameRequest::new(&layer.media, layer.source_time, width, height)
@@ -3593,6 +3620,7 @@ pub fn preview_sources_of(
         chains,
         reveal_maps,
         cutouts,
+        fx,
         stabilized,
         highlight,
         backdrops,
@@ -3615,6 +3643,7 @@ pub fn preview_sources_of(
             (decode_width, decode_height),
             stills.contains(&layer.clip),
             reading,
+            time,
         );
         let found = if nearest {
             pool.frame_nearest(&request).map(|found| {
@@ -3647,6 +3676,10 @@ pub fn preview_sources_of(
                 } else {
                     frame
                 };
+                let frame = fx
+                    .get(&layer.clip)
+                    .and_then(|job| job.apply(&frame, time, layer.source_time))
+                    .map_or(frame, std::sync::Arc::new);
                 let mut planned = filled(
                     layer,
                     frame,
@@ -3858,7 +3891,7 @@ pub fn preview_moments(
                             .get(&layer.clip)
                             .copied()
                             .unwrap_or((plan.width, plan.height));
-                        frame_request(plan, layer, size, stills.contains(&layer.clip), reading)
+                        frame_request(plan, layer, size, stills.contains(&layer.clip), reading, quantise(time, rate))
                     })
                     .collect(),
             }

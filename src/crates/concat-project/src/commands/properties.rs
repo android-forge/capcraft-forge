@@ -95,6 +95,15 @@ pub(super) fn apply(
             if let Some(background) = patch.background {
                 applied |= assign(&mut clip.background, background.map(Background::tidy));
             }
+            if let Some(effects) = patch.reel_fx
+                && (clip.kind.is_visual() || clip.kind == ClipKind::Layer)
+            {
+                let effects = effects
+                    .into_iter()
+                    .filter(|effect| effect.end > effect.start && effect.start.is_finite())
+                    .collect();
+                applied |= assign(&mut clip.reel_fx, effects);
+            }
             Ok(Outcome {
                 created_id: None,
                 applied,

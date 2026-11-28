@@ -66,6 +66,8 @@ data class Tool(
     val enabled: Boolean = true,
     /** A thin line between groups of tools rather than a tool. */
     val divider: Boolean = false,
+    /** Other names the search finds it by: the ones it had before the tools moved (Splice, Graphs...). */
+    val aliases: List<String> = emptyList(),
     val action: () -> Unit,
 )
 
@@ -167,7 +169,7 @@ fun Dock(vm: EditorViewModel) {
     val sub = vm.clipLevel
     val tools = when {
         choosing -> multiTools(vm)
-        selected != null && row != null && sub != null -> clipSubTools(vm, selected, sub)
+        selected != null && row != null && sub != null -> clipSubTools(vm, selected, row, sub, pickers)
         selected != null && row != null -> clipTools(vm, selected, row, pickers)
         level is DockLevel.Group -> groupTools(vm, level.id, pickers)
         else -> rootTools(vm)
@@ -190,7 +192,7 @@ fun Dock(vm: EditorViewModel) {
                         .clickable {
                             when {
                                 choosing -> vm.chosen = null
-                                selected != null && sub != null -> vm.clipLevel = null
+                                selected != null && sub != null -> vm.clipLevel = PARENT_LEVEL[sub]
                                 selected != null -> vm.select(null)
                                 else -> vm.dock = vm.dock.dropLast(1)
                             }
@@ -214,8 +216,8 @@ fun Dock(vm: EditorViewModel) {
                 modifier = Modifier.weight(1f).fillMaxHeight(),
             ) { _ ->
                 val few = selected != null && tools.size <= 6 && tools.none { it.divider }
-                if (sub != null || few || (selected == null && level is DockLevel.Group && tools.size <= 4)) {
-                    // a second level, a group of a few tools or a clip's short bar spreads them across it
+                if ((sub != null && tools.size <= 5) || few || (selected == null && level is DockLevel.Group && tools.size <= 4)) {
+                    // a short drawer, a group of a few tools or a clip's short bar spreads them across it
                     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                         // up to four keep their names on one line, as the reference's do
                         tools.forEach { tool -> ToolItem(tool, width = if (tools.size <= 4) 88.dp else 60.dp) }
@@ -259,6 +261,11 @@ private fun ToolItem(tool: Tool, width: androidx.compose.ui.unit.Dp = 60.dp) {
     }
 }
 
+/**
+ * The top level, with nothing selected: what is added to the video, then the whole project's
+ * settings and tools. Stickers and Graphics are under Text, Auto captions and lyrics under Captions,
+ * Filters and Adjust are one Color, and Preview quality is in the top bar's menu.
+ */
 private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
     // a collage's layouts first, as its own editor starts with them
     if (vm.timeline != null && vm.session?.collage() != null) {
@@ -270,37 +277,26 @@ private fun rootTools(vm: EditorViewModel): List<Tool> = listOfNotNull(
         vm.mainClipAtPlayhead()?.let { vm.select(it.id) } ?: run { vm.message = "Add a clip first" }
     },
     Tool("audio", "Audio", LucideIcons.Music2) { vm.dock = vm.dock + DockLevel.Group("audio") },
-    Tool("text", "Text", LucideIcons.Type) { vm.dock = vm.dock + DockLevel.Group("text") },
-    Tool("effects", "Effects", LucideIcons.Star) { vm.dock = vm.dock + DockLevel.Group("effects") },
-    Tool("overlay", "Overlay", LucideIcons.Image) { vm.dock = vm.dock + DockLevel.Group("overlay") },
+    Tool("text", "Text", LucideIcons.Type, aliases = listOf("Stickers", "Graphics")) { vm.dock = vm.dock + DockLevel.Group("text") },
     // the auto captions sheet opens straight over the group, as the reference does
     Tool("captions", "Captions", LucideIcons.Captions) {
         vm.dock = vm.dock + DockLevel.Group("captions")
         vm.panel = Panel.Captions
     },
-    // both open their sheet over a group of the two, as the reference does
-    Tool("filters", "Filters", LucideIcons.Blend) {
-        vm.dock = vm.dock + DockLevel.Group("filters")
-        vm.panel = Panel.Packages("filter", Panel.Target.Layer)
-    },
-    Tool("adjust", "Adjust", LucideIcons.Settings2) {
-        vm.dock = vm.dock + DockLevel.Group("filters")
-        vm.panel = Panel.Adjust
-    },
-    Tool("stickers", "Stickers", LucideIcons.Sticker) { vm.panel = Panel.Stickers },
-    Tool("graphics", "Graphics", LucideIcons.Shapes) { vm.panel = Panel.Graphics() },
-    Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
-    Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
-    Tool("slots", "Replace media", LucideIcons.Replace) { vm.panel = Panel.Slots },
-    Tool("ratio", "Aspect ratio", LucideIcons.Square) { vm.panel = Panel.Ratio },
-    Tool("autohighlight", "Auto highlight", LucideIcons.Sparkles) { vm.panel = Panel.AutoHighlight },
-    Tool("preview", "Preview quality", LucideIcons.Gauge) { vm.panel = Panel.PreviewQuality },
+    Tool("effects", "Effects", LucideIcons.Star) { vm.dock = vm.dock + DockLevel.Group("effects") },
+    Tool("overlay", "Overlay", LucideIcons.Image) { vm.dock = vm.dock + DockLevel.Group("overlay") },
+    // looks and corrections laid over the whole video, as layers of their own
+    Tool("color", "Color", LucideIcons.Blend, aliases = listOf("Filters", "Adjust")) { vm.dock = vm.dock + DockLevel.Group("filters") },
     Tool("background", "Background", MaterialIcons.Texture) { vm.dock = vm.dock + DockLevel.Group("background") },
+    Tool("ratio", "Ratio", LucideIcons.Ratio, aliases = listOf("Aspect ratio")) { vm.panel = Panel.Ratio },
+    // the tools that work on the whole project rather than on what is at the playhead
+    Tool("project", "Project", LucideIcons.Clapperboard) { vm.dock = vm.dock + DockLevel.Group("project") },
 )
 
 private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<Tool> = when (id) {
     "audio" -> listOf(
-        Tool("extracted", "Extract", LucideIcons.AudioLines) { pickers.video { vm.addFile(it, asAudio = true) } },
+        // a video's sound as a track of its own; a clip's own sound is Extract audio in its Sound drawer
+        Tool("extracted", "From a video", LucideIcons.AudioLines, aliases = listOf("Extract")) { pickers.video { vm.addFile(it, asAudio = true) } },
         Tool("sounds", "Sounds", LucideIcons.Music2) { vm.panel = Panel.Sounds },
         Tool("soundfx", "Sound FX", LucideIcons.Sparkles) { vm.panel = Panel.SoundFx },
         Tool("voiceover", "Record", LucideIcons.Mic) { vm.panel = Panel.Voiceover },
@@ -308,16 +304,12 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
         Tool("texttoaudio", "Text to audio", LucideIcons.AudioLines) { vm.panel = Panel.Speech(null) },
     )
     "text" -> listOf(
-        Tool("addtext", "Add text", LucideIcons.Type) { vm.panel = Panel.Text(null) },
-        Tool("autocaptions", "Auto Captions", LucideIcons.Captions) { vm.panel = Panel.Captions },
+        // a new title starts on the text panel's templates
+        Tool("addtext", "Add text", LucideIcons.Type, aliases = listOf("Text template")) { vm.panel = Panel.Text(null) },
         Tool("stickers", "Stickers", LucideIcons.Sticker) { vm.panel = Panel.Stickers },
         Tool("graphics", "Graphics", LucideIcons.Shapes) { vm.panel = Panel.Graphics() },
         Tool("draw", "Draw", LucideIcons.Paintbrush) { vm.panel = Panel.Draw },
-        divider("d-textmore"),
-        // a new title starts on the text panel's templates
-        Tool("texttemplate", "Text template", LucideIcons.LayoutTemplate) { vm.panel = Panel.Text(null) },
         Tool("texttoaudio", "Text to audio", LucideIcons.AudioLines) { vm.panel = Panel.Speech(null) },
-        Tool("autolyrics", "Auto lyrics", LucideIcons.Music) { vm.panel = Panel.Lyrics },
     )
     "overlay" -> listOf(
         Tool("addoverlay", "Add overlay", LucideIcons.SquarePlus) { pickers.single { vm.addFile(it, asAudio = false) } },
@@ -330,6 +322,8 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
         Tool("videoeffects", "Video effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Layer) },
         Tool("bodyeffects", "Body effects", LucideIcons.UserRound) { vm.panel = Panel.BodyEffects },
         Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere },
+        // laid on the effects row as items of their own
+        Tool("reelfx", "Reel FX", LucideIcons.Clapperboard, aliases = listOf("Effects pack", "Spotlight", "Orbit")) { vm.panel = Panel.ReelFx },
     )
     "background" -> listOf(
         Tool("bgcolor", "Color", LucideIcons.Palette) { vm.panel = Panel.Background(0) },
@@ -338,7 +332,7 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
     )
     "captions" -> listOf(
         Tool("entercaptions", "Enter captions", LucideIcons.TextCursorInput) { vm.panel = Panel.EnterCaptions },
-        Tool("autocaptions", "Auto Captions", LucideIcons.Captions) { vm.panel = Panel.Captions },
+        Tool("autocaptions", "Auto captions", LucideIcons.Captions) { vm.panel = Panel.Captions },
         Tool("highlight", "Highlight", LucideIcons.Paintbrush) { vm.panel = Panel.Highlight },
         Tool("captionemojis", "Emojis", LucideIcons.Smile) { io.github.artcraftandroid.capcraft.ui.editor.panels.toggleCaptionEmojis(vm) },
         Tool("captiontemplates", "Caption templates", LucideIcons.LayoutTemplate) { vm.panel = Panel.CaptionTemplates },
@@ -346,45 +340,224 @@ private fun groupTools(vm: EditorViewModel, id: String, pickers: Pickers): List<
         Tool("importcaptions", "Import captions", LucideIcons.FolderOpen) { pickers.captions { vm.importCaptions(it) } },
         Tool("exportcaptions", "Export captions", LucideIcons.Download) { vm.exportCaptions { name -> pickers.saveCaptions(name) { vm.saveCaptions(it) } } },
     )
+    "project" -> listOf(
+        Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
+        Tool("fillers", "Filler words", LucideIcons.Scissors) { vm.panel = Panel.Fillers },
+        Tool("autohighlight", "Auto highlight", LucideIcons.Sparkles) { vm.panel = Panel.AutoHighlight },
+        Tool("slots", "Replace media", LucideIcons.Replace) { vm.panel = Panel.Slots },
+    )
     else -> emptyList()
 }
 
-/** The second level a clip tool opens: Speed's two kinds, Transform's three tools (Advanced the rulers), Remove BG's three, Effects' two. */
-private fun clipSubTools(vm: EditorViewModel, clip: ClipView, level: String): List<Tool> = when (level) {
-    // effects on the clip itself: the picture's, or those that treat the person apart
-    "effects" -> listOf(
-        Tool("videoeffects", "Video effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Clip) },
-        Tool("bodyeffects", "Body effects", LucideIcons.UserRound) { vm.panel = Panel.BodyEffects },
-    )
-    "speed" -> listOf(
-        Tool("normal", "Normal", LucideIcons.TrendingUp) { vm.panel = Panel.Speed(curve = false) },
-        Tool("curve", "Curve", LucideIcons.ChartSpline) { vm.panel = Panel.Speed(curve = true) },
-    )
-    "transform" -> listOf(
-        Tool("rotate", "Rotate", LucideIcons.RotateCw) { vm.rotate(clip) },
-        Tool("mirror", "Mirror", LucideIcons.FlipVertical2) { vm.mirror(clip) },
-        Tool("advanced", "Advanced", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
-    )
-    // the model takes the background off, or a colour is keyed out; a new background then shows behind
-    "removebg" -> listOf(
-        Tool("autoremove", "Auto removal", LucideIcons.UserRoundX) { vm.panel = Panel.RemoveBg },
-        Tool("customremove", "Custom removal", LucideIcons.Paintbrush) { vm.panel = Panel.CustomCutout },
-        // branches, wires and other fine things, by colour rather than by a model
-        Tool("finecut", "Fine cutout", LucideIcons.Leaf, enabled = clip.kind == "image") { vm.panel = Panel.FineCutout },
-        Tool("chroma", "Chroma key", LucideIcons.Pipette) { vm.panel = Panel.Chroma },
-        Tool("changebg", "Change BG", LucideIcons.ImagePlus, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
-            vm.panel = Panel.Background(0)
-        },
-        // the background kept and the person taken away instead, or back again
-        Tool("invertcut", "Invert", LucideIcons.Contrast, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
-            vm.invertCutout(clip)
-        },
-    )
+/** The drawers a picture's bar opens; the last one used stays open for the next picture picked. */
+internal val PICTURE_DRAWERS = setOf("edit", "look", "smart", "motion", "sound")
+
+/** Where Back goes from a level a drawer opened: Remove BG's tools back to Smart, Effects' to Look. */
+private val PARENT_LEVEL = mapOf("removebg" to "smart", "effects" to "look")
+
+/** The tools a selected clip's drawer, or a tool's own second level, holds. */
+private fun clipSubTools(vm: EditorViewModel, clip: ClipView, row: RowKind, level: String, pickers: Pickers): List<Tool> {
+    val video = clip.kind == "video"
+    val picture = video || clip.kind == "image"
+    val main = row == RowKind.MAIN
+    val inside = vm.playhead > clip.startUs + 30_000 && vm.playhead < clip.startUs + clip.durationUs - 30_000
+    // the curve between keyframes needs two of them
+    val keyframes = Tool("graphs", "Keyframes", LucideIcons.Spline, enabled = clip.keysUs.distinct().size >= 2, aliases = listOf("Graphs")) { vm.panel = Panel.Graphs }
+    val position = Tool("basic", "Position", LucideIcons.SlidersHorizontal, aliases = listOf("Basic")) { vm.panel = Panel.Basic }
+    val behind = Tool("behind", if (io.github.artcraftandroid.capcraft.ui.editor.panels.isBehindPeople(vm, clip)) "In front" else "Behind person", LucideIcons.UserRound) {
+        io.github.artcraftandroid.capcraft.ui.editor.panels.toggleBehindPeople(vm, clip)
+    }
+    val layer = Tool("layer", "Layer", LucideIcons.Layers) { vm.panel = Panel.Layer }
+    val timing = Tool("timing", "Timing", LucideIcons.Timer) { vm.panel = Panel.Timing }
+    val tracking = Tool("tracking", "Tracking", LucideIcons.Crosshair) { vm.panel = Panel.Tracking }
+    return when (level) {
+        // effects on the clip itself: the picture's, or those that treat the person apart
+        "effects" -> listOf(
+            Tool("videoeffects", "Video effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Clip) },
+            Tool("bodyeffects", "Body effects", LucideIcons.UserRound) { vm.panel = Panel.BodyEffects },
+        )
+        "speed" -> listOf(
+            Tool("normal", "Normal", LucideIcons.TrendingUp) { vm.panel = Panel.Speed(curve = false) },
+            Tool("curve", "Curve", LucideIcons.ChartSpline) { vm.panel = Panel.Speed(curve = true) },
+        )
+        // the model takes the background off, or a colour is keyed out; a new background then shows behind
+        "removebg" -> listOf(
+            Tool("autoremove", "Auto removal", LucideIcons.UserRoundX) { vm.panel = Panel.RemoveBg },
+            Tool("customremove", "Custom removal", LucideIcons.Paintbrush) { vm.panel = Panel.CustomCutout },
+            // branches, wires and other fine things, by colour rather than by a model
+            Tool("finecut", "Fine cutout", LucideIcons.Leaf, enabled = clip.kind == "image") { vm.panel = Panel.FineCutout },
+            Tool("chroma", "Chroma key", LucideIcons.Pipette) { vm.panel = Panel.Chroma },
+            Tool("changebg", "Change BG", LucideIcons.ImagePlus, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
+                vm.panel = Panel.Background(0)
+            },
+            // the background kept and the person taken away instead, or back again
+            Tool("invertcut", "Invert", LucideIcons.Contrast, enabled = io.github.artcraftandroid.capcraft.ui.editor.panels.cutoutOn(vm, clip)) {
+                vm.invertCutout(clip)
+            },
+        )
+        // ── a picture's five drawers ──
+        "edit" -> if (!picture) emptyList() else buildList {
+            add(Tool("crop", "Crop", LucideIcons.Crop) { vm.panel = Panel.Crop })
+            add(Tool("rotate", "Rotate", LucideIcons.RotateCw) { vm.rotate(clip) })
+            add(Tool("mirror", "Mirror", LucideIcons.FlipVertical2, aliases = listOf("Flip")) { vm.mirror(clip) })
+            add(Tool("advanced", "Exact values", LucideIcons.SlidersHorizontal, aliases = listOf("Advanced", "Transform")) { vm.panel = Panel.Basic })
+            if (video) {
+                add(Tool("reverse", "Reverse", LucideIcons.RotateCcw) { vm.reverse(clip) })
+                add(Tool("freeze", "Freeze", LucideIcons.GalleryHorizontal, enabled = inside) { vm.freeze(clip) })
+                add(Tool("scenes", "Split scenes", LucideIcons.SquareSplitHorizontal) { vm.splitScenes(clip) })
+            }
+            add(Tool("replace", "Replace", LucideIcons.Repeat) { pickers.single { vm.replace(clip, it) } })
+            // a live photo's picture moves: its video takes its place
+            if (!video) add(Tool("live", "Live photo", LucideIcons.ImagePlay) { vm.playLive(clip) })
+            if (main) {
+                add(Tool("tooverlay", "Move to overlay", LucideIcons.Shuffle, aliases = listOf("Overlay")) { vm.switchToOverlay(clip) })
+                val free = vm.unlinked(clip)
+                add(Tool("unlink", if (free) "Link" else "Unlink", if (free) LucideIcons.Link2 else LucideIcons.Unlink2) { vm.toggleUnlinked(clip) })
+            } else {
+                add(Tool("tomain", "Move to main", LucideIcons.Shuffle, aliases = listOf("Maintrack")) { vm.switchToMain(clip) })
+                add(layer)
+                // another overlay, from the clip it would go over
+                add(Tool("addoverlay", "Add overlay", LucideIcons.SquarePlus) {
+                    vm.select(null)
+                    pickers.single { vm.addFile(it, asAudio = false) }
+                })
+            }
+        }
+        "look" -> if (!picture) emptyList() else buildList {
+            add(Tool("adjust", "Adjust", LucideIcons.Settings2) { vm.panel = Panel.Adjust })
+            add(Tool("filters", "Filters", LucideIcons.Blend) { vm.panel = Panel.Packages("filter", Panel.Target.Clip) })
+            add(Tool("effects", "Effects", LucideIcons.Star) { vm.clipLevel = "effects" })
+            add(Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation })
+            // 51 talking-head effects around the person and the face
+            add(Tool("reelfx", "Reel FX", LucideIcons.Clapperboard, aliases = listOf("Effects pack", "Spotlight", "Orbit")) { vm.panel = Panel.ReelFx })
+            add(Tool("mask", "Mask", LucideIcons.CircleDashed) { vm.panel = Panel.Mask })
+            add(Tool("opacity", "Opacity", LucideIcons.Droplet) { vm.panel = Panel.Opacity })
+            // how an overlay mixes with what is under it
+            if (!main) add(Tool("blend", "Blend", LucideIcons.Layers2, aliases = listOf("Splice")) { vm.panel = Panel.Blend })
+        }
+        // the models and the heavy processing
+        "smart" -> if (!picture) emptyList() else buildList {
+            add(Tool("removebg", "Remove BG", LucideIcons.UserRoundX) { vm.clipLevel = "removebg" })
+            add(Tool("retouch", "Retouch", LucideIcons.Smile) { vm.panel = Panel.Retouch })
+            // a clearer copy, for photos and footage alike
+            add(Tool("enhancequality", if (video) "Enhance" else "Photo quality", MaterialIcons.Hd, aliases = listOf("Video quality")) { vm.panel = Panel.Quality })
+            // the picture lit again, on the main track as the reference offers it
+            if (main) add(Tool("relight", "Relight", LucideIcons.Lightbulb) { vm.panel = Panel.Relight })
+            // the light people want, the rest left alone
+            if (main) add(Tool("lightpeople", "Light people", LucideIcons.SunMedium) { vm.panel = Panel.LightPeople })
+            add(Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere })
+            // people and things taken out of a photo
+            if (!video) add(Tool("eraseobjects", "Remove objects", LucideIcons.Eraser) { vm.panel = Panel.EraseObjects })
+            if (video) add(Tool("motionblur", "Motion blur", LucideIcons.Wind) { vm.panel = Panel.MotionBlur })
+            add(Tool("autoreframe", "Auto reframe", LucideIcons.Ratio) { vm.panel = Panel.AutoReframe })
+        }
+        "motion" -> if (!picture) emptyList() else buildList {
+            add(keyframes)
+            if (video) {
+                add(Tool("stabilize", "Stabilize", LucideIcons.Vibrate) { vm.panel = Panel.Stabilize })
+                add(Tool("cameratracking", "Camera tracking", LucideIcons.Crosshair) { vm.panel = Panel.CameraTracking })
+            }
+            // a picture over the video can follow what is under it, and has its own time
+            if (!main) {
+                add(tracking)
+                add(timing)
+            }
+        }
+        "sound" -> if (!video) emptyList() else buildList {
+            // once its sound is out on a track of its own, the clip offers only to take it back
+            if (vm.extracted(clip)) {
+                add(Tool("recover", "Recover audio", LucideIcons.Undo2) { vm.recoverAudio(clip) })
+            } else {
+                add(Tool("extract", "Extract audio", LucideIcons.AudioLines, enabled = clip.audible) { vm.extractAudio(clip) })
+                add(Tool("isolate", "Isolate voice", LucideIcons.Speech, enabled = clip.audible) { vm.panel = Panel.IsolateVoice })
+                add(Tool("noise", "Reduce noise", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.denoise", "Noise reduction") })
+                add(Tool("enhance", "Enhance voice", LucideIcons.MicVocal, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.enhance-voice", "Voice enhancement") })
+                add(Tool("voice", "Audio effects", LucideIcons.Headphones, enabled = clip.audible) { vm.panel = Panel.Packages("audio", Panel.Target.Clip) })
+                add(Tool("duck", "Auto duck", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.autoDuck(clip) })
+            }
+            add(Tool("beats", "Beats", LucideIcons.Flag, enabled = clip.audible) { vm.panel = Panel.Beats })
+            add(Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript })
+        }
+        // ── the other clips' one drawer ──
+        "more" -> when {
+            clip.kind == "image" && row == RowKind.TEXT -> listOfNotNull(
+                position,
+                tracking,
+                Tool("mirror", "Mirror", LucideIcons.FlipVertical2) { vm.mirror(clip) },
+                behind,
+                // another sticker in its place
+                Tool("stickers", "Stickers", LucideIcons.Sticker) {
+                    vm.select(null)
+                    vm.panel = Panel.Stickers
+                },
+                layer,
+                timing,
+                keyframes.takeIf { it.enabled },
+            )
+            clip.kind == "text" && clip.id in vm.captions -> listOf(
+                Tool("tts", "Text to speech", LucideIcons.AudioLines) { vm.panel = Panel.Speech(clip.id) },
+                position,
+                layer,
+            )
+            else -> listOfNotNull(
+                Tool("texteffects", "Effects", LucideIcons.WandSparkles) { vm.panel = Panel.Text(clip.id, tab = 4) }.takeIf { clip.kind == "text" },
+                position,
+                tracking,
+                Tool("tts", "Text to speech", LucideIcons.AudioLines) { vm.panel = Panel.Speech(clip.id) }.takeIf { clip.kind == "text" },
+                // on screen from the first frame to the last
+                Tool("lasting", "Lasting text", LucideIcons.MoveHorizontal) {
+                    vm.edit(select = { clip.id }) { lastingText(clip.id) }
+                    vm.message = "The text now shows for the whole video"
+                },
+                // one clip per line or sentence, each for its share of the time
+                Tool("autosplit", "Auto split", LucideIcons.SquareSplitHorizontal) {
+                    vm.edit(select = { clip.id }) { autoSplitText(clip.id) }
+                }.takeIf { clip.kind == "text" },
+                behind,
+                layer,
+                timing,
+                keyframes.takeIf { it.enabled },
+            )
+        }
+        // a sound's: what is done to it with the rest of the video, then cleaning it
+        "soundsmart" -> listOf(
+            // the song made to end with the video, joined on the beat
+            Tool("remix", "Fit to video", LucideIcons.Scissors) { vm.remixToFit(clip) },
+            // turned down wherever the other clips speak
+            Tool("duck", "Auto duck", LucideIcons.AudioWaveform) { vm.autoDuck(clip) },
+            Tool("beats", "Beats", LucideIcons.Flag) { vm.panel = Panel.Beats },
+            // another sound in its place, keeping where it sits and how long it plays
+            Tool("replace", "Replace", LucideIcons.Repeat) {
+                vm.replacingSound = clip.id
+                vm.panel = Panel.Sounds
+            },
+            Tool("record", "Record", LucideIcons.Mic) {
+                vm.select(null)
+                vm.panel = Panel.Voiceover
+            },
+        )
+        "clean" -> listOf(
+            Tool("isolate", "Isolate voice", LucideIcons.Speech) { vm.panel = Panel.IsolateVoice },
+            Tool("noise", "Reduce noise", LucideIcons.AudioWaveform) { vm.toggleCleaner(clip, "concat.denoise", "Noise reduction") },
+            Tool("enhance", "Enhance voice", LucideIcons.MicVocal) { vm.toggleCleaner(clip, "concat.enhance-voice", "Voice enhancement") },
+            Tool("voice", "Audio effects", LucideIcons.Headphones) { vm.panel = Panel.Packages("audio", Panel.Target.Clip) },
+            Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
+        )
+        else -> emptyList()
+    }
+}
+
+/** Every drawer [clipTools] offers for `clip`, for the search to look through. */
+private fun drawersOf(clip: ClipView, row: RowKind): List<String> = when {
+    clip.kind == "video" -> listOf("edit", "look", "smart", "motion", "sound", "speed", "effects", "removebg")
+    clip.kind == "image" && row != RowKind.TEXT -> listOf("edit", "look", "smart", "motion", "effects", "removebg")
+    clip.kind == "audio" -> listOf("soundsmart", "clean")
+    clip.kind in setOf("image", "text", "shape") -> listOf("more")
     else -> emptyList()
 }
 
 private fun clipTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers: Pickers): List<Tool> {
-    val tools = ownTools(vm, clip, row, pickers)
+    val tools = ownTools(vm, clip, row)
     if (row == RowKind.MAIN) {
         return tools + Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {
             vm.select(null)
@@ -410,7 +583,11 @@ private fun clipTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers
     }
 }
 
-private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers: Pickers): List<Tool> {
+/**
+ * A selected clip's bar: the few things done to every clip of its kind, always in the same places,
+ * then the drawers that hold the rest (see [clipSubTools]). Each tool is in one place only.
+ */
+private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind): List<Tool> {
     val inside = vm.playhead > clip.startUs + 30_000 && vm.playhead < clip.startUs + clip.durationUs - 30_000
     // always offered, as the reference does; at a clip's very edge there is nothing to cut
     val split = Tool("split", "Split", LucideIcons.SquareSplitHorizontal) {
@@ -421,215 +598,72 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
         vm.select(null)
     }
     val duplicate = Tool("duplicate", "Duplicate", LucideIcons.Copy) { vm.edit(select = { it.createdId.ifEmpty { null } }) { duplicate(clip.id) } }
-    // the curve between keyframes needs two of them
-    val graphs = Tool("graphs", "Graphs", LucideIcons.Spline, enabled = clip.keysUs.distinct().size >= 2) { vm.panel = Panel.Graphs }
-    val layer = Tool("layer", "Layers", LucideIcons.Layers) { vm.panel = Panel.Layer }
-    val timing = Tool("timing", "Timing", LucideIcons.Timer) { vm.panel = Panel.Timing }
+    val animations = Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation }
+    fun drawer(id: String, label: String, icon: ImageVector) = Tool(id, label, icon) { vm.clipLevel = id }
     if (clip.kind == "image" && row == RowKind.TEXT) {
-        // a sticker, in the reference's order: another sticker set apart, the clip's edits, then the rest
-        return listOfNotNull(
-            Tool("stickers", "Stickers", LucideIcons.Sticker) {
-                vm.select(null)
-                vm.panel = Panel.Stickers
-            },
-            divider("d-stickers"),
-            split,
-            timing,
-            Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation },
+        // a sticker
+        return listOf(
+            animations,
             Tool("stickereffects", "Effects", LucideIcons.Star) { vm.panel = Panel.Packages("effect", Panel.Target.Clip) },
-            Tool("behind", if (io.github.artcraftandroid.capcraft.ui.editor.panels.isBehindPeople(vm, clip)) "In front" else "Behind person", LucideIcons.UserRound) {
-                io.github.artcraftandroid.capcraft.ui.editor.panels.toggleBehindPeople(vm, clip)
-            },
             duplicate,
             delete,
-            Tool("mirror", "Mirror", LucideIcons.FlipVertical2) { vm.mirror(clip) },
-            divider("d-stickermore"),
-            // several titles and stickers at once, starting with this one
-            Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {
-                vm.select(null)
-                vm.chosen = setOf(clip.id)
-            },
-            Tool("basic", "Basic", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
-            layer,
-            Tool("tracking", "Tracking", LucideIcons.Crosshair) { vm.panel = Panel.Tracking },
-            // the curve between keyframes, once there are two
-            graphs.takeIf { it.enabled },
+            split,
+            divider("d-sticker"),
+            drawer("more", "More", LucideIcons.Ellipsis),
         )
     }
-    // a caption, in the reference's order for one, its cloud tools left out
     if (clip.kind == "text" && clip.id in vm.captions) {
         return listOf(
-            split,
             Tool("style", "Style", LucideIcons.ALargeSmall) { vm.panel = Panel.Text(clip.id) },
             // every caption's words in one list
             Tool("editcaptions", "Edit captions", LucideIcons.TextCursorInput) { vm.panel = Panel.BatchEdit },
             Tool("highlight", "Highlight", LucideIcons.Paintbrush) { vm.panel = Panel.Highlight },
-            duplicate,
             delete,
-            Tool("tts", "Text to speech", LucideIcons.AudioLines) { vm.panel = Panel.Speech(clip.id) },
-            Tool("basic", "Basic", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
-            layer,
+            split,
+            duplicate,
+            divider("d-caption"),
+            drawer("more", "More", LucideIcons.Ellipsis),
         )
     }
     return when (clip.kind) {
         "video", "image" -> buildList {
             val video = clip.kind == "video"
-            val main = row == RowKind.MAIN
-            // over the video, the bar starts with another overlay, set apart, as the reference's does
-            if (!main) {
-                add(Tool("addoverlay", "Add overlay", LucideIcons.SquarePlus) {
-                    vm.select(null)
-                    pickers.single { vm.addFile(it, asAudio = false) }
-                })
-                add(divider("d-addoverlay"))
-            }
             add(split)
-            if (!main) add(timing)
-            // a picture with no sound of its own (none recorded, or taken out to a track) has no
-            // Volume, and its Delete comes after Speed, as the reference lays such a clip's bar out
-            val ownSound = video && (clip.audible || clip.muted) && !vm.extracted(clip)
-            if (ownSound) add(Tool("volume", "Volume", LucideIcons.Volume2) { vm.panel = Panel.Volume })
-            // how an overlay mixes with what is under it, under the reference's name for it
-            if (!main) add(Tool("blend", "Splice", LucideIcons.Layers2) { vm.panel = Panel.Blend })
-            if (main) {
-                add(Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation })
-                add(Tool("effects", "Effects", LucideIcons.Star) { vm.clipLevel = "effects" })
-                if (ownSound || !video) add(delete)
-            } else {
-                add(delete)
-                add(Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation })
-                add(Tool("effects", "Effects", LucideIcons.Star) { vm.clipLevel = "effects" })
+            if (video) {
+                add(Tool("speed", "Speed", LucideIcons.Gauge) { vm.clipLevel = "speed" })
+                // in its place whether or not the clip has sound of its own, so the bar never shifts
+                val ownSound = (clip.audible || clip.muted) && !vm.extracted(clip)
+                add(Tool("volume", "Volume", LucideIcons.Volume2, enabled = ownSound) { vm.panel = Panel.Volume })
             }
-            if (video) add(Tool("speed", "Speed", LucideIcons.Gauge) { vm.clipLevel = "speed" })
-            if (main && video && !ownSound) add(delete)
-            if (video) add(Tool("beats", "Beats", LucideIcons.Flag, enabled = clip.audible) { vm.panel = Panel.Beats })
-            add(Tool("crop", "Crop", LucideIcons.Crop) { vm.panel = Panel.Crop })
             add(duplicate)
-            add(Tool("replace", "Replace", LucideIcons.Repeat) { pickers.single { vm.replace(clip, it) } })
-            // a live photo's picture moves: its video takes its place
-            if (!video) add(Tool("live", "Live photo", LucideIcons.ImagePlay) { vm.playLive(clip) })
-            if (main) add(Tool("tooverlay", "Overlay", LucideIcons.Shuffle) { vm.switchToOverlay(clip) })
-            else add(Tool("tomain", "Maintrack", LucideIcons.Shuffle) { vm.switchToMain(clip) })
-            add(Tool("adjust", "Adjust", LucideIcons.Settings2) { vm.panel = Panel.Adjust })
-            add(Tool("filters", "Filters", LucideIcons.Blend) { vm.panel = Panel.Packages("filter", Panel.Target.Clip) })
-            add(divider("d-look"))
-            add(Tool("retouch", "Retouch", LucideIcons.Smile) { vm.panel = Panel.Retouch })
-            // a clearer copy, for photos and footage alike
-            add(Tool("enhancequality", "Video quality", MaterialIcons.Hd) { vm.panel = Panel.Quality })
-            // people and things taken out of a photo, or put over the video
-            if (!video) add(Tool("eraseobjects", "Remove objects", LucideIcons.Eraser) { vm.panel = Panel.EraseObjects })
-            add(Tool("removebg", "Remove BG", LucideIcons.UserRoundX) { vm.clipLevel = "removebg" })
-            // the picture lit again, on the main track as the reference offers it
-            if (main) add(Tool("relight", "Relight", LucideIcons.Lightbulb) { vm.panel = Panel.Relight })
-            // the light people want, the rest left alone
-            if (main) add(Tool("lightpeople", "Light people", LucideIcons.SunMedium) { vm.panel = Panel.LightPeople })
-            add(Tool("atmosphere", "Atmosphere", LucideIcons.Wind) { vm.panel = Panel.Atmosphere })
-            add(Tool("opacity", "Opacity", LucideIcons.Droplet) { vm.panel = Panel.Opacity })
-            if (video) add(Tool("motionblur", "Motion blur", LucideIcons.Wind) { vm.panel = Panel.MotionBlur })
-            add(divider("d-shape"))
-            add(Tool("transform", "Transform", LucideIcons.Crop) { vm.clipLevel = "transform" })
-            if (!main) add(Tool("layer", "Layer", LucideIcons.Layers) { vm.panel = Panel.Layer })
-            add(Tool("autoreframe", "Auto reframe", LucideIcons.Ratio) { vm.panel = Panel.AutoReframe })
-            if (video) {
-                add(Tool("stabilize", "Stabilize", LucideIcons.Vibrate) { vm.panel = Panel.Stabilize })
-                add(Tool("cameratracking", "Camera tracking", LucideIcons.Crosshair) { vm.panel = Panel.CameraTracking })
-            }
-            // a picture over the video can follow what is under it
-            if (!main) add(Tool("tracking", "Tracking", LucideIcons.Crosshair) { vm.panel = Panel.Tracking })
-            if (video) {
-                add(divider("d-sound"))
-                // once its sound is out on a track of its own, the clip offers only to take it back
-                if (vm.extracted(clip)) {
-                    add(Tool("recover", "Recover audio", LucideIcons.Undo2) { vm.recoverAudio(clip) })
-                } else {
-                    add(Tool("extract", "Extract audio", LucideIcons.AudioLines, enabled = clip.audible) { vm.extractAudio(clip) })
-                    add(Tool("isolate", "Isolate voice", LucideIcons.Speech, enabled = clip.audible) { vm.panel = Panel.IsolateVoice })
-                    add(Tool("noise", "Reduce noise", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.denoise", "Noise reduction") })
-                    add(Tool("voice", "Audio effects", LucideIcons.Headphones, enabled = clip.audible) { vm.panel = Panel.Packages("audio", Panel.Target.Clip) })
-                    add(Tool("enhance", "Enhance voice", LucideIcons.MicVocal, enabled = clip.audible) { vm.toggleCleaner(clip, "concat.enhance-voice", "Voice enhancement") })
-                    add(Tool("duck", "Auto duck", LucideIcons.AudioWaveform, enabled = clip.audible) { vm.autoDuck(clip) })
-                }
-            }
-            add(divider("d-time"))
-            if (video) {
-                add(Tool("freeze", "Freeze", LucideIcons.GalleryHorizontal, enabled = inside) { vm.freeze(clip) })
-                add(Tool("reverse", "Reverse", LucideIcons.RotateCcw) { vm.reverse(clip) })
-                add(Tool("scenes", "Split scenes", LucideIcons.SquareSplitHorizontal) { vm.splitScenes(clip) })
-            }
-            add(Tool("mask", "Mask", LucideIcons.CircleDashed) { vm.panel = Panel.Mask })
-            if (main) {
-                val free = vm.unlinked(clip)
-                add(Tool("unlink", if (free) "Link" else "Unlink", if (free) LucideIcons.Link2 else LucideIcons.Unlink2) { vm.toggleUnlinked(clip) })
-            }
-            if (video) add(Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript })
-            add(graphs)
+            add(delete)
+            add(divider("d-drawers"))
+            add(drawer("edit", "Edit", LucideIcons.Scissors))
+            add(drawer("look", "Look", LucideIcons.Palette))
+            add(drawer("smart", "Smart", LucideIcons.WandSparkles))
+            add(drawer("motion", "Motion", LucideIcons.Spline))
+            if (video) add(drawer("sound", "Sound", LucideIcons.AudioLines))
         }
-        // in the reference's order: a new recording set apart, the clip's edits, then its sound
         "audio" -> listOf(
-            Tool("record", "Record", LucideIcons.Mic) {
-                vm.select(null)
-                vm.panel = Panel.Voiceover
-            },
-            divider("d-record"),
-            split,
             Tool("volume", "Volume", LucideIcons.Volume2) { vm.panel = Panel.Volume },
-            duplicate,
-            delete,
-            // another sound in its place, keeping where it sits and how long it plays
-            Tool("replace", "Replace", LucideIcons.Repeat) {
-                vm.replacingSound = clip.id
-                vm.panel = Panel.Sounds
-            },
-            Tool("beats", "Beats", LucideIcons.Flag) { vm.panel = Panel.Beats },
-            // the song made to end with the video, joined on the beat
-            Tool("remix", "Fit to video", LucideIcons.Scissors) { vm.remixToFit(clip) },
-            // turned down wherever the other clips speak
-            Tool("duck", "Auto duck", LucideIcons.AudioWaveform) { vm.autoDuck(clip) },
+            Tool("fade", "Fade", LucideIcons.ChartSpline) { vm.panel = Panel.Fade },
             // a sound's speed is one ruler, no curve, as the reference has it
             Tool("speed", "Speed", LucideIcons.Gauge) { vm.panel = Panel.Speed(curve = false) },
-            Tool("fade", "Fade", LucideIcons.ChartSpline) { vm.panel = Panel.Fade },
-            Tool("isolate", "Isolate voice", LucideIcons.Speech) { vm.panel = Panel.IsolateVoice },
-            Tool("voice", "Audio effects", LucideIcons.Headphones) { vm.panel = Panel.Packages("audio", Panel.Target.Clip) },
-            Tool("enhance", "Enhance voice", LucideIcons.MicVocal) { vm.toggleCleaner(clip, "concat.enhance-voice", "Voice enhancement") },
-            Tool("noise", "Reduce noise", LucideIcons.AudioWaveform) { vm.toggleCleaner(clip, "concat.denoise", "Noise reduction") },
-            Tool("transcript", "Transcript", LucideIcons.FileText) { vm.panel = Panel.Transcript },
+            duplicate,
+            delete,
+            split,
+            divider("d-sound"),
+            drawer("soundsmart", "Smart", LucideIcons.WandSparkles),
+            drawer("clean", "Clean", LucideIcons.Speech),
         )
         "text", "shape" -> listOf(
-            // a new title from here too, set apart, as the reference starts this bar
-            Tool("addtext", "Add text", LucideIcons.Type) {
-                vm.select(null)
-                vm.panel = Panel.Text(null)
-            },
-            divider("d-addtext"),
-            split,
             Tool("style", "Style", LucideIcons.ALargeSmall) { vm.panel = if (clip.kind == "shape") Panel.ShapeStyle else Panel.Text(clip.id) },
-            Tool("animation", "Animations", LucideIcons.SquarePlay) { vm.panel = Panel.Animation },
-            delete,
+            animations,
             duplicate,
-            divider("d-texttools"),
-            Tool("tts", "Text to speech", LucideIcons.AudioLines, enabled = clip.kind == "text") { vm.panel = Panel.Speech(clip.id) },
-            // on screen from the first frame to the last
-            Tool("lasting", "Lasting text", LucideIcons.MoveHorizontal) {
-                vm.edit(select = { clip.id }) { lastingText(clip.id) }
-                vm.message = "The text now shows for the whole video"
-            },
-            Tool("texteffects", "Effects", LucideIcons.WandSparkles, enabled = clip.kind == "text") { vm.panel = Panel.Text(clip.id, tab = 4) },
-            Tool("tracking", "Tracking", LucideIcons.Crosshair) { vm.panel = Panel.Tracking },
-            // one clip per line or sentence, each for its share of the time
-            Tool("autosplit", "Auto split", LucideIcons.SquareSplitHorizontal, enabled = clip.kind == "text") {
-                vm.edit(select = { clip.id }) { autoSplitText(clip.id) }
-            },
-            layer,
-            timing,
-            Tool("behind", if (io.github.artcraftandroid.capcraft.ui.editor.panels.isBehindPeople(vm, clip)) "In front" else "Behind person", LucideIcons.UserRound) {
-                io.github.artcraftandroid.capcraft.ui.editor.panels.toggleBehindPeople(vm, clip)
-            },
-            Tool("basic", "Basic", LucideIcons.SlidersHorizontal) { vm.panel = Panel.Basic },
-            // several titles and stickers at once, starting with this one
-            Tool("multiselect", "Multi-select", LucideIcons.SquareCheckBig) {
-                vm.select(null)
-                vm.chosen = setOf(clip.id)
-            },
+            delete,
+            split,
+            divider("d-text"),
+            drawer("more", "More", LucideIcons.Ellipsis),
         )
         // a look on its row: its strength or its settings, then the clip tools
         else -> if (row == RowKind.FILTER) listOf(
@@ -639,6 +673,13 @@ private fun ownTools(vm: EditorViewModel, clip: ClipView, row: RowKind, pickers:
             duplicate,
             split,
             Tool("layer", "Layer", LucideIcons.Layers) { vm.panel = Panel.Layer },
+            delete,
+        ) else if (clip.kind == "layer" && (vm.clipJson(clip.id)?.optJSONArray("reelFx")?.length() ?: 0) > 0) listOf(
+            // a reel effect: its settings; its opacity (keyed or not) is how hard it draws
+            Tool("adjust", "Adjust", LucideIcons.SlidersHorizontal) { vm.panel = Panel.ReelFx },
+            Tool("layer", "Opacity", LucideIcons.Layers) { vm.panel = Panel.Layer },
+            duplicate,
+            split,
             delete,
         ) else listOf(
             // an effect: its settings, another in its place, and what it treats
@@ -669,14 +710,24 @@ fun ToolSearch(vm: EditorViewModel, onClose: () -> Unit) {
     val selected = vm.selectedClip
     val row = vm.selectedRow
     val all = buildList {
-        if (selected != null && row != null) addAll(clipTools(vm, selected, row, pickers))
-        addAll(rootTools(vm))
-        for (group in listOf("audio", "text", "effects", "overlay", "captions", "filters", "background")) addAll(groupTools(vm, group, pickers))
+        if (selected != null && row != null) {
+            // the clip's bar and what is in each of its drawers, never the drawers themselves
+            val drawers = drawersOf(selected, row)
+            addAll(clipTools(vm, selected, row, pickers).filter { it.id !in drawers })
+            for (drawer in drawers) addAll(clipSubTools(vm, selected, row, drawer, pickers))
+        }
+        addAll(rootTools(vm).filter { it.id != "project" })
+        for (group in listOf("audio", "text", "effects", "overlay", "captions", "filters", "background", "project")) addAll(groupTools(vm, group, pickers))
+        // in the top bar's menu now, and still found here
+        add(Tool("preview", "Preview quality", LucideIcons.Gauge) { vm.panel = Panel.PreviewQuality })
     }.filter { !it.divider && it.enabled }.distinctBy { it.label }
     val effects = io.github.artcraftandroid.capcraft.ui.editor.panels.rememberPackages("effect")
-        .filter { it.category !in setOf("Cutout", "Color", "Basic", "Text") }
+        .filter { it.category !in setOf("Cutout", "Color", "Basic", "Text") && it.id !in io.github.artcraftandroid.capcraft.ui.editor.panels.ADJUST_DUPLICATES }
     val words = query.trim()
-    val tools = if (words.isEmpty()) emptyList() else all.filter { it.label.contains(words, ignoreCase = true) }
+    // a tool is found by its name, or by the name it had before the tools moved
+    val tools = if (words.isEmpty()) emptyList() else all.filter { tool ->
+        tool.label.contains(words, ignoreCase = true) || tool.aliases.any { it.contains(words, ignoreCase = true) }
+    }
     val found = if (words.isEmpty()) emptyList() else effects.filter { it.name.contains(words, ignoreCase = true) }.take(8)
 
     /** The clip a suggestion acts on: the selected picture, or the main clip under the playhead. */
@@ -710,7 +761,8 @@ fun ToolSearch(vm: EditorViewModel, onClose: () -> Unit) {
                     listOf<Pair<String, () -> Unit>>(
                         "Flip video horizontally" to { target()?.let { vm.mirror(it) } ?: run { vm.message = "Add a clip first" } },
                         "Add auto captions" to { vm.panel = Panel.Captions },
-                        "Reduce video noise" to {
+                        // the sound's noise: there is no picture noise reduction yet
+                        "Reduce background noise" to {
                             target()?.let { vm.toggleCleaner(it, "concat.denoise", "Noise reduction") } ?: run { vm.message = "Add a clip first" }
                         },
                     ).forEach { (line, act) ->
