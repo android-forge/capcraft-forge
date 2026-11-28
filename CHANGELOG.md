@@ -9,7 +9,12 @@ dated, as the licence asks; `#` numbers are the original project's.
 - Collage is a home tool of its own: pick two to nine photos or videos and the collage opens on its own screen - the
   picture, and Layout, Borders and Frame under it - with the whole editor a tap away ("Edit in timeline").
   Layout adds a picture (+) or takes the last off (-) and swaps two pictures with two taps on the cell map; Borders
-  sets the gap's width, the corners' roundness and the gap's colour; Frame makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
+  sets the gap's width, the corners' roundness and the gap's colour; Size makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
+- Collage frames of our own, drawn in the app for any number of pictures: Film (a strip with sprocket holes), Prints
+  (turned prints on paper), Love (heart-cut pictures among doodled hearts), Shapes (circles, stars and rounded tiles on
+  a gradient), Party (gold edges, stripes and confetti), Floral (soft edges among leaves) and Classic (one big picture,
+  wide white margins). On the collage screen, pinch a picture to zoom it in its space, drag to move it, double-tap to
+  put it back; each picture keeps its framing through a change of frame or size.
 
 ### 24 November 2026
 Ideas from [FilmCraft](https://github.com/storytold/filmcraft) (Apache-2.0), written here for a phone.
