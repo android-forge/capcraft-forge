@@ -1234,14 +1234,10 @@ impl MobileSession {
     }
 
     pub fn set_canvas(&self, width: u32, height: u32) -> Result<TimelineView, MobileError> {
-        let (timeline_id, mut video): (String, VideoSettings) = {
-            let state = self.lock();
-            let project = state.session.project();
-            (project.active_timeline_id.clone(), project.active().video)
-        };
-        video.width = even(width);
-        video.height = even(height);
-        self.run(vec![Command::SetTimelineVideo { timeline_id, video }])
+        // one step of its own: a gesture with nothing else in it
+        let view = self.set_canvas_within(width, height, self.gesture());
+        self.end_gesture();
+        view
     }
 
     /// Sets the frame rate.
