@@ -1403,29 +1403,40 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(800)
-            withContext(Threads.commands) { runCatching { session?.save() } }
+            saved()
         }
+    }
+
+    /**
+     * Writes the project, and says so when it could not (a full phone, a folder gone): the edits are
+     * still here, and a later save may yet write them. True when written.
+     */
+    private suspend fun saved(): Boolean {
+        val failed = withContext(Threads.commands) { runCatching { session?.save() }.exceptionOrNull() }
+        if (failed != null) message = "Could not save the project: ${failed.userMessage}"
+        return failed == null
     }
 
     /** Writes the project now. */
     suspend fun saveNow() {
         saveJob?.cancel()
-        withContext(Threads.commands) { runCatching { session?.save() } }
+        saved()
     }
 
-    /** Saves now and lets the player go; a project left with nothing on it is deleted. */
-    suspend fun close() {
+    /**
+     * Saves now and lets the player go; a project left with nothing on it is deleted. False when the
+     * project could not be saved: the editor stays open, saying why, rather than close on lost edits.
+     */
+    suspend fun close(): Boolean {
         saveJob?.cancel()
         val empty = timeline?.rows?.all { it.clips.isEmpty() } ?: false
+        if (!empty && !saved()) return false
         withContext(Threads.commands) {
             runCatching { pause() }
             runCatching { clearPlayback() }
-            if (empty) {
-                runCatching { io.github.artcraftandroid.capcraft.core.deleteProject(path) }
-            } else {
-                runCatching { session?.save() }
-            }
+            if (empty) runCatching { io.github.artcraftandroid.capcraft.core.deleteProject(path) }
         }
+        return true
     }
 
     override fun onCleared() {
