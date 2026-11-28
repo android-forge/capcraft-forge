@@ -1427,10 +1427,14 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
      * Saves now and lets the player go; a project left with nothing on it is deleted. False when the
      * project could not be saved: the editor stays open, saying why, rather than close on lost edits.
      */
+    /** Saved (or deleted) by [close]: nothing left for [onCleared] to write. */
+    private var closed = false
+
     suspend fun close(): Boolean {
         saveJob?.cancel()
         val empty = timeline?.rows?.all { it.clips.isEmpty() } ?: false
         if (!empty && !saved()) return false
+        closed = true
         withContext(Threads.commands) {
             runCatching { pause() }
             runCatching { clearPlayback() }
@@ -1441,7 +1445,8 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
 
     override fun onCleared() {
         super.onCleared()
-        runCatching { session?.save() }
+        // close() has saved it already; only a teardown without leaving saves here, on the UI thread
+        if (!closed) runCatching { session?.save() }
         runCatching { clearPlayback() }
         session?.destroy()
     }

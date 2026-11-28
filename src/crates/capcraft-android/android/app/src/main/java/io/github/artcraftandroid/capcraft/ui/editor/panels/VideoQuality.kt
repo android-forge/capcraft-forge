@@ -430,7 +430,7 @@ internal fun ColumnScope.QualityContent(vm: EditorViewModel) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     t.label,
-                    style = Type.Small.copy(fontSize = 11.sp, color = if (which == t.key) Palette.Text else Palette.TextSecondary),
+                    style = Type.Small.copy(fontSize = 12.sp, color = if (which == t.key) Palette.Text else Palette.TextSecondary),
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     // narrow enough that two-word names break onto two lines, as the reference sets them

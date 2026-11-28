@@ -552,7 +552,7 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
                         picture?.let { Image(it.asImageBitmap(), contentDescription = p.by, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
                         if (place >= 0) Box(Modifier.fillMaxSize().background(Color(0x7A06343A)))
                         Text(
-                            p.by, style = Type.Tiny.copy(color = Color.White, fontSize = 9.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            p.by, style = Type.Tiny.copy(color = Color.White, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Color(0x66000000)).padding(horizontal = 4.dp, vertical = 2.dp),
                         )
                         Text(
@@ -561,14 +561,14 @@ internal fun StockPage(multiple: Boolean, onDone: (List<Uri>) -> Unit, wanted: M
                                 maxOf(p.width, p.height) >= 3840 -> "4K"
                                 maxOf(p.width, p.height) >= 1920 -> "HD"
                                 else -> "${maxOf(p.width, p.height)}"
-                            }, style = Type.Tiny.copy(color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
+                            }, style = Type.Tiny.copy(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                             modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x99000000)).padding(horizontal = 4.dp, vertical = 1.dp),
                         )
                         if (multiple) Box(
                             Modifier.align(Alignment.TopEnd).padding(6.dp).size(20.dp).clip(CircleShape)
                                 .then(if (place >= 0) Modifier.background(Palette.Accent) else Modifier.border(1.5.dp, Color.White, CircleShape)),
                             contentAlignment = Alignment.Center,
-                        ) { if (place >= 0) Text("${place + 1}", style = Type.Small.copy(color = Color.White, fontSize = 11.sp)) }
+                        ) { if (place >= 0) Text("${place + 1}", style = Type.Small.copy(color = Color.White, fontSize = 12.sp)) }
                     }
                 }
             }

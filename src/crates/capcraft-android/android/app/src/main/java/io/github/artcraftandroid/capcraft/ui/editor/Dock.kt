@@ -874,7 +874,7 @@ private fun EffectRow(
                     io.github.artcraftandroid.capcraft.ui.editor.panels.PreviewTile(vm, e.id)
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(e.name, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(e.name, style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         repeat(4 - line.size) { Spacer(Modifier.weight(1f)) }

@@ -349,7 +349,7 @@ private fun ColumnScope.PackagesContent(vm: EditorViewModel, kind: String, targe
                             verticalArrangement = Arrangement.Center,
                         ) {
                             Glyph(LucideIcons.SlidersHorizontal, Color.White, size = 20.dp)
-                            Text("Adjust", style = Type.Small.copy(color = Color.White, fontSize = 11.sp))
+                            Text("Adjust", style = Type.Small.copy(color = Color.White, fontSize = 12.sp))
                         }
                     }
                 }
@@ -701,7 +701,7 @@ private fun ColumnScope.PresetsContent(vm: EditorViewModel) {
                     Text(
                         keys.map { key -> KNOBS.firstOrNull { it.key == key }?.label ?: if (key in HSL_KEYS) "HSL" else if ("." in key) "Curves" else key }
                             .distinct().joinToString(" · "),
-                        style = Type.Small.copy(fontSize = 11.sp, color = Palette.TextSecondary),
+                        style = Type.Small.copy(fontSize = 12.sp, color = Palette.TextSecondary),
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
@@ -1073,7 +1073,7 @@ private fun AdjustTool(label: String, selected: Boolean, changed: Boolean, onCli
         Spacer(Modifier.height(6.dp))
         Text(
             label,
-            style = Type.Small.copy(fontSize = 11.sp, color = tint, fontWeight = FontWeight.Medium),
+            style = Type.Small.copy(fontSize = 12.sp, color = tint, fontWeight = FontWeight.Medium),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2,
         )
@@ -1146,7 +1146,7 @@ private fun FilterTile(
             ) {
                 Text(
                     label,
-                    style = Type.Small.copy(fontSize = 11.5.sp, color = Color.White),
+                    style = Type.Small.copy(fontSize = 12.sp, color = Color.White),
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 4.dp),

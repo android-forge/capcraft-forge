@@ -498,7 +498,7 @@ private fun pictureBox(area: Size, aspect: Float, margin: Float): Rect {
 private fun DegreeRuler(value: Float, onChange: (Float) -> Unit, modifier: Modifier) {
     val latest by rememberUpdatedState(value)
     val measurer = rememberTextMeasurer()
-    val labelStyle = TextStyle(color = Color(0xFF8A8A8A), fontSize = 10.sp)
+    val labelStyle = TextStyle(color = Color(0xFF8A8A8A), fontSize = 12.sp)
     Canvas(
         modifier.pointerInput(Unit) {
             val gap = 8.dp.toPx()

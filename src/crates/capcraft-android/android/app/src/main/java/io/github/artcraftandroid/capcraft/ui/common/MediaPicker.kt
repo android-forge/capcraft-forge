@@ -1,5 +1,8 @@
 package io.github.artcraftandroid.capcraft.ui.common
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
@@ -376,7 +379,7 @@ private fun MediaPickerPage(req: MediaRequest, onClose: () -> Unit, onDone: (Lis
                                 Box(Modifier.size(56.dp)) {
                                     Thumb(item, Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)))
                                     if (item.video) {
-                                        Text(clock(item.durationMs), style = shadowed(11), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp))
+                                        Text(clock(item.durationMs), style = shadowed(12), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp))
                                     }
                                     Box(
                                         Modifier.align(Alignment.TopEnd).padding(top = 0.dp).size(18.dp).clip(CircleShape).background(Color.White)
@@ -438,14 +441,20 @@ private fun shadowed(size: Int) = Type.Small.copy(
  */
 @Composable
 private fun Tile(item: Item, place: Int, imported: Boolean, onOpen: () -> Unit, onPick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).clickable(onClick = onOpen)) {
+    // read out as what it is, and whether it is chosen: the picture alone says nothing to a screen reader
+    val said = buildString {
+        append(if (item.video) "Video, ${clock(item.durationMs)}" else "Photo")
+        if (imported) append(", imported")
+        if (place >= 0) append(", chosen ${place + 1}")
+    }
+    Box(Modifier.fillMaxWidth().aspectRatio(1f).semantics { contentDescription = said }.clickable(onClickLabel = "Open", onClick = onOpen)) {
         Thumb(item, Modifier.fillMaxSize())
         if (place >= 0) Box(Modifier.fillMaxSize().background(Color(0x7A06343A)))
         // already in the project, as the reference marks it
         if (imported) {
             Text(
                 "Imported",
-                style = Type.Small.copy(color = Color.White, fontSize = 10.sp),
+                style = Type.Small.copy(color = Color.White, fontSize = 12.sp),
                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(3.dp))
                     .background(Color(0x99000000)).padding(horizontal = 4.dp, vertical = 1.dp),
             )
@@ -454,13 +463,18 @@ private fun Tile(item: Item, place: Int, imported: Boolean, onOpen: () -> Unit, 
             Text(clock(item.durationMs), style = shadowed(12), modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 4.dp))
         }
         // the ring, with room round it for a thumb
-        Box(Modifier.align(Alignment.TopEnd).size(40.dp).clickable(onClick = onPick), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.align(Alignment.TopEnd).size(48.dp)
+                .semantics { contentDescription = if (place >= 0) "Unchoose" else "Choose" }
+                .clickable(role = Role.Checkbox, onClick = onPick),
+            contentAlignment = Alignment.Center,
+        ) {
             Box(
                 Modifier.size(20.dp).clip(CircleShape)
                     .then(if (place >= 0) Modifier.background(Palette.Accent) else Modifier.border(1.5.dp, Color.White, CircleShape)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (place >= 0) Text("${place + 1}", style = Type.Small.copy(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
+                if (place >= 0) Text("${place + 1}", style = Type.Small.copy(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
             }
         }
     }

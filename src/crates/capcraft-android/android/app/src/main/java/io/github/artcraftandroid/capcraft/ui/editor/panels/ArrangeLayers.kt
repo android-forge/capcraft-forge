@@ -189,7 +189,7 @@ private fun LayerTile(vm: EditorViewModel, c: ClipView, picked: Boolean, modifie
         when {
             c.kind == "text" -> Text(
                 c.text.ifBlank { c.name }.replace('\n', ' '),
-                style = Type.Small.copy(color = Color.White, fontSize = 11.sp),
+                style = Type.Small.copy(color = Color.White, fontSize = 12.sp),
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 modifier = Modifier.padding(horizontal = 4.dp),
@@ -204,7 +204,7 @@ private fun LayerTile(vm: EditorViewModel, c: ClipView, picked: Boolean, modifie
         }
         Text(
             label,
-            style = Type.Tiny.copy(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Medium),
+            style = Type.Tiny.copy(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium),
             modifier = Modifier.align(Alignment.TopStart).padding(2.dp)
                 .clip(RoundedCornerShape(3.dp)).background(Color(0x99000000)).padding(horizontal = 3.dp),
         )
