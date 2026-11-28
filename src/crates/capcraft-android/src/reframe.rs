@@ -146,6 +146,7 @@ impl MobileSession {
             media_size: plan.size,
             still,
             subject: Subject::Person,
+            skin: false,
             // only the instants the path is read at, not every one the model could look at
             ranges: if still {
                 vec![(0.0, 0.04)]

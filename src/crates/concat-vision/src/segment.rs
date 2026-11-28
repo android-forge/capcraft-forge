@@ -15,6 +15,9 @@
 //!   starts a run.
 //! - **Object**: IS-Net. The one thing the picture is of, whatever it is,
 //!   at 1024 × 1024; the answer for a car, a product, a cartoon.
+//! - **Skin**: MediaPipe's multiclass selfie segmentation, compiled in like
+//!   the selfie model (see `models/NOTICE.md`). Not a subject to cut out:
+//!   the face's and the body's skin, which Retouch smooths and nothing else.
 //!
 //! A source of any shape is resampled to the model's size on the way in
 //! and the mask is read as covering the whole source on the way out, which
@@ -31,6 +34,18 @@ use crate::{MODEL_ID, MODEL_SIZE, Mask};
 
 /// The compiled-in model.
 const SELFIE: &[u8] = include_bytes!("../models/selfie-segmentation.onnx");
+/// The compiled-in skin model: six classes a pixel, of which body skin and
+/// face skin are kept.
+const SKIN: &[u8] = include_bytes!("../models/selfie-multiclass.onnx");
+/// The name a mask store records for the skin model's masks.
+pub const SKIN_MODEL_ID: &str = "selfie-multiclass-256";
+/// The skin model's fixed input.
+const SKIN_SIZE: u32 = 256;
+/// The skin model's classes: background, hair, body skin, face skin,
+/// clothes, others. Body skin and face skin are skin.
+const SKIN_CLASSES: usize = 6;
+const BODY_SKIN: usize = 2;
+const FACE_SKIN: usize = 3;
 
 /// The person model's long edge: its stage one works at up to 512, and a
 /// larger frame would only be shrunk inside it.
@@ -50,6 +65,8 @@ pub enum Kind {
     Person,
     /// The downloaded object model.
     Object,
+    /// The compiled-in skin model, for Retouch.
+    Skin,
 }
 
 /// A loaded model, ready to run. `Send + Sync`; the runtime's own threads
@@ -75,6 +92,15 @@ impl Segmenter {
     /// The compiled-in model; see [`Segmenter::selfie`].
     pub fn load() -> Result<Segmenter, String> {
         Segmenter::selfie()
+    }
+
+    /// The compiled-in skin model: where the face's and the body's skin are.
+    pub fn skin() -> Result<Segmenter, String> {
+        Ok(Segmenter {
+            kind: Kind::Skin,
+            model: Mutex::new(Model::from_bytes(SKIN)?),
+            state: Mutex::new(None),
+        })
     }
 
     /// The person matting model, from its downloaded file.
@@ -106,6 +132,7 @@ impl Segmenter {
             Kind::Selfie => MODEL_ID,
             Kind::Person => ModelId::Person.name(),
             Kind::Object => ModelId::Object.name(),
+            Kind::Skin => SKIN_MODEL_ID,
         }
     }
 
@@ -116,6 +143,7 @@ impl Segmenter {
         match self.kind {
             Kind::Selfie => (MODEL_SIZE, MODEL_SIZE),
             Kind::Object => (OBJECT_SIZE, OBJECT_SIZE),
+            Kind::Skin => (SKIN_SIZE, SKIN_SIZE),
             Kind::Person => {
                 let (width, height) = (width.max(1) as f64, height.max(1) as f64);
                 let scale = f64::from(PERSON_EDGE) / width.max(height);
@@ -148,6 +176,7 @@ impl Segmenter {
             Kind::Selfie => self.selfie_mask(planes, width, height),
             Kind::Object => self.object_mask(planes, width, height),
             Kind::Person => self.person_mask(planes, width, height),
+            Kind::Skin => self.skin_mask(planes, width, height),
         }
     }
 
@@ -167,6 +196,25 @@ impl Segmenter {
         };
         let outputs = self.run(vec![input], &["alphas"])?;
         probabilities(&outputs[0].data, size, width, height)
+    }
+
+    fn skin_mask(&self, planes: Vec<f32>, width: u32, height: u32) -> Result<Mask, String> {
+        // The model was converted from LiteRT and keeps its layout: one
+        // pixel's three channels together, in 0..=1.
+        let size = (width * height) as usize;
+        let mut interleaved = vec![0f32; 3 * size];
+        for (at, pixel) in interleaved.chunks_exact_mut(3).enumerate() {
+            for (c, value) in pixel.iter_mut().enumerate() {
+                *value = planes[c * size + at];
+            }
+        }
+        let input = Input {
+            name: "input_29",
+            dims: vec![1, height as usize, width as usize, 3],
+            data: interleaved.into(),
+        };
+        let outputs = self.run(vec![input], &["Identity"])?;
+        skin_of(&outputs[0].data, size, width, height)
     }
 
     fn object_mask(&self, mut planes: Vec<f32>, width: u32, height: u32) -> Result<Mask, String> {
@@ -278,6 +326,33 @@ fn probabilities(data: &[f32], size: usize, width: u32, height: u32) -> Result<M
         .ok_or_else(|| "cutout: the model's answer is the wrong size".to_owned())
 }
 
+/// The skin model's answer - six classes' scores a pixel - as how likely
+/// each pixel is skin, the face's or the body's.
+fn skin_of(logits: &[f32], size: usize, width: u32, height: u32) -> Result<Mask, String> {
+    if logits.len() < size * SKIN_CLASSES {
+        return Err("skin: the model's answer is the wrong size".to_owned());
+    }
+    let bytes: Vec<u8> = logits
+        .chunks_exact(SKIN_CLASSES)
+        .take(size)
+        .map(|scores| {
+            let top = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let mut total = 0.0;
+            let mut skin = 0.0;
+            for (class, &score) in scores.iter().enumerate() {
+                let weight = (score - top).exp();
+                total += weight;
+                if class == BODY_SKIN || class == FACE_SKIN {
+                    skin += weight;
+                }
+            }
+            ((skin / total.max(1e-12)).clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+        })
+        .collect();
+    Mask::from_bytes(width, height, bytes)
+        .ok_or_else(|| "skin: the model's answer is the wrong size".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,6 +372,34 @@ mod tests {
     }
 
     #[test]
+    fn skin_is_the_face_and_the_body_and_nothing_else() {
+        // three pixels: face skin, body skin, clothes - each class clearly ahead
+        let mut logits = vec![0f32; 3 * SKIN_CLASSES];
+        logits[FACE_SKIN] = 8.0;
+        logits[SKIN_CLASSES + BODY_SKIN] = 8.0;
+        logits[2 * SKIN_CLASSES + 4] = 8.0;
+        let mask = skin_of(&logits, 3, 3, 1).expect("a mask");
+        let values: Vec<f32> = (0..3).map(|x| mask.sample((x as f32 + 0.5) / 3.0, 0.5)).collect();
+        assert!(values[0] > 0.95 && values[1] > 0.95, "{values:?}");
+        assert!(values[2] < 0.05, "{values:?}");
+        assert!(skin_of(&logits[..5], 3, 3, 1).is_err());
+    }
+
+    #[test]
+    fn the_skin_model_loads_and_finds_no_skin_in_grey() {
+        let segmenter = Segmenter::skin().expect("loads");
+        assert_eq!(segmenter.input_size(1920, 1080), (SKIN_SIZE, SKIN_SIZE));
+        assert_eq!(segmenter.name(), SKIN_MODEL_ID);
+        let mut frame = Frame::black(64, 48);
+        for pixel in frame.pixels_mut().chunks_exact_mut(4) {
+            pixel[..3].copy_from_slice(&[90, 140, 200]);
+        }
+        let mask = segmenter.mask(&frame).expect("runs");
+        assert_eq!((mask.width(), mask.height()), (SKIN_SIZE, SKIN_SIZE));
+        assert!(mask.sample(0.5, 0.5) < 0.2, "a flat blue is not skin");
+    }
+
+    #[test]
     fn the_person_model_works_at_the_pictures_shape() {
         let segmenter = Segmenter {
             kind: Kind::Person,
@@ -312,7 +415,8 @@ mod tests {
 #[cfg(test)]
 mod picture_mask {
     /// The selfie mask of a picture (`MASK_IN`, raw RGBA, `MASK_SIZE` "w h"),
-    /// written as a PNG to `MASK_OUT`: for looking at by eye.
+    /// written as a PNG to `MASK_OUT`: for looking at by eye. `MASK_MODEL=skin`
+    /// asks the skin model instead.
     #[test]
     #[ignore = "needs a picture"]
     fn a_picture_is_masked() {
@@ -320,7 +424,12 @@ mod picture_mask {
         let mut size = size.split(' ').map(|v| v.parse::<u32>().unwrap());
         let (w, h) = (size.next().unwrap(), size.next().unwrap());
         let frame = concat_core::frame::Frame::from_rgba(w, h, std::fs::read(input).unwrap()).unwrap();
-        let mask = super::Segmenter::selfie().unwrap().mask(&frame).unwrap();
+        let segmenter = if std::env::var("MASK_MODEL").as_deref() == Ok("skin") {
+            super::Segmenter::skin().unwrap()
+        } else {
+            super::Segmenter::selfie().unwrap()
+        };
+        let mask = segmenter.mask(&frame).unwrap();
         std::fs::write(out, mask.to_png()).unwrap();
     }
 }

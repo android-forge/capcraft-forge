@@ -68,6 +68,11 @@ The editor's tools reorganised (the first three steps of `docs/proposals/app-cle
 - The search sheet's "Reduce video noise" suggestion, which turned on the sound's noise reducer, now says "Reduce
   background noise".
 - The effect browser no longer offers Vignette and Film grain, which are Adjust's knobs.
+- Retouch finds skin with a model: Google's MediaPipe Selfie Multiclass Segmentation (Apache-2.0), converted to ONNX
+  and built into the app, so nothing is downloaded. Once Retouch is on a photo or video, the face's and the body's skin
+  are found on the phone, ten looks a second, kept with the project like Remove BG's masks, with "Finding skin" and its
+  progress in the panel. Skin-coloured walls, wood and sand are no longer smoothed, and darker skin that the colour
+  guess missed is. Until a stretch has been looked at, Retouch goes by colour as before.
 
 ## 0.0.8 (24 November 2026)
 

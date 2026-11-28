@@ -220,6 +220,17 @@ pub fn flatten_timeline_in(
                     Some(dir) if !reel_fx.is_empty() => concat_vision::faces::face_file(dir, &media.path).to_string_lossy().into_owned(),
                     _ => String::new(),
                 },
+                skin_dir: match project_dir {
+                    Some(dir)
+                        if matches!(kind, ClipKind::Video | ClipKind::Image)
+                            && clip.video_effects.iter().any(|link| link.id == crate::RETOUCH) =>
+                    {
+                        concat_vision::skin_dir(dir, &media.path)
+                            .to_string_lossy()
+                            .into_owned()
+                    }
+                    _ => String::new(),
+                },
                 stabilize: clip.stabilize.filter(|_| kind == ClipKind::Video),
                 voice: match (&clip.voice, project_dir) {
                     (Some(mix), Some(dir)) if kind != ClipKind::Image => {

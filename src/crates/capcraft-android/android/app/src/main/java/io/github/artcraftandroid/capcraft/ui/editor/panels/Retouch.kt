@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,6 +25,13 @@ import io.github.artcraftandroid.capcraft.ui.Palette
 import io.github.artcraftandroid.capcraft.ui.Type
 import io.github.artcraftandroid.capcraft.ui.editor.EditorViewModel
 import kotlin.math.roundToInt
+import io.github.artcraftandroid.capcraft.core.SpeechListener
+import io.github.artcraftandroid.capcraft.core.TimelineView
+import io.github.artcraftandroid.capcraft.engine.Threads
+import io.github.artcraftandroid.capcraft.engine.userMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,8 +60,9 @@ private fun setRetouch(vm: EditorViewModel, clipId: String, key: String?, value:
 }
 
 /**
- * Retouch: skin smoothed and brightened. Skin is told from the rest by its colour, so a warm
- * wall may soften a little with it.
+ * Retouch: skin smoothed and brightened. Once Retouch is on a picture, the skin model finds the
+ * face's and the body's skin on the phone (built in, nothing to download), with its progress here;
+ * until it has, skin is told from the rest by its colour, so a warm wall may soften a little with it.
  */
 @Composable
 fun RetouchPanel(vm: EditorViewModel) {
@@ -61,6 +71,44 @@ fun RetouchPanel(vm: EditorViewModel) {
         vm.clipJson(clip.id)?.optJSONArray("videoEffects")?.let { chain ->
             (0 until chain.length()).map { chain.getJSONObject(it) }.firstOrNull { it.optString("id") == RETOUCH }
         }?.optJSONObject("params")
+    }
+    val scope = rememberCoroutineScope()
+    // how far finding the clip's skin has got, while it runs
+    var finding by remember(clip.id) { mutableStateOf<Float?>(null) }
+    val listener = remember(clip.id) {
+        object : SpeechListener {
+            override fun onProgress(fraction: Float, stage: String) {
+                scope.launch(Dispatchers.Main) { finding = fraction }
+            }
+
+            override fun onDone(result: TimelineView?) {
+                scope.launch(Dispatchers.Main) {
+                    finding = null
+                    result?.let { vm.applyView(it) }
+                }
+            }
+
+            override fun onFailed(message: String) {
+                scope.launch(Dispatchers.Main) {
+                    finding = null
+                    vm.message = message
+                }
+            }
+        }
+    }
+    // the skin found once Retouch is on a picture, and again for a stretch of it not looked at yet
+    val retouched = params != null
+    LaunchedEffect(clip.id, retouched) {
+        val s = vm.session ?: return@LaunchedEffect
+        if (!retouched || (clip.kind != "video" && clip.kind != "image")) return@LaunchedEffect
+        withContext(Threads.commands) {
+            runCatching {
+                if (s.skinMissing(clip.id)) {
+                    withContext(Dispatchers.Main) { finding = 0f }
+                    s.findSkin(clip.id, listener)
+                }
+            }.onFailure { e -> withContext(Dispatchers.Main) { finding = null; vm.message = e.userMessage } }
+        }
     }
     PanelFrame("Retouch", vm, height = 240.dp, titleOnTop = true, left = {
         Row(
@@ -74,6 +122,13 @@ fun RetouchPanel(vm: EditorViewModel) {
         }
     }) {
         Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+            finding?.let { done ->
+                Text(
+                    "Finding skin  ${(done * 100).roundToInt()}%",
+                    style = Type.Small.copy(color = Palette.TextSecondary),
+                    modifier = Modifier.padding(start = 20.dp, bottom = 8.dp),
+                )
+            }
             RetouchSlider(vm, clip.id, "Smooth", "soften", params?.optDouble("soften", 0.0) ?: 0.0)
             Spacer(Modifier.height(10.dp))
             RetouchSlider(vm, clip.id, "Brighten", "brighten", params?.optDouble("brighten", 0.0) ?: 0.0)
