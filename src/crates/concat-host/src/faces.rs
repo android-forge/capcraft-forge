@@ -135,6 +135,7 @@ impl Faces {
                         media_size: size,
                         still,
                         subject: Subject::Person,
+                        skin: false,
                         ranges,
                     },
                 )),

@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "capcraft-reelfx"
-version = "0.2.8"
+version = "0.2.12"
 dependencies = [
  "concat-text",
  "tiny-skia 0.12.0",

@@ -2225,7 +2225,7 @@ fn render_picture(
                     let frame = fx
                         .get(&layer.clip)
                         .and_then(|job| job.apply(&frame, time, layer.source_time))
-                        .unwrap_or(frame);
+                        .map_or(frame, std::sync::Arc::new);
                     layers.push(filled(
                         layer,
                         frame,

@@ -712,6 +712,7 @@ pub(crate) fn build_timeline(
             }
             if let Some(job) = FxJob::of(clip, planned.is_none()) {
                 fx.insert(id, job);
+            }
             if let Some(job) = SkinJob::of(clip, planned.is_none()) {
                 skins.insert(id, job);
             }
