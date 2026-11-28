@@ -804,7 +804,7 @@ fn separate(path: &str, model: &std::path::Path, folder: &std::path::Path, step:
     let read = |rate: u32, channels: u16| -> Result<Vec<f32>, String> {
         AudioDecoder::open(
             path,
-            &AudioOptions { start: None, duration: None, filters: Vec::new(), rate, channels, format: SampleFormat::F32, stream: None },
+            &AudioOptions { start: None, duration: None, filters: Vec::new(), rate, channels, format: SampleFormat::F32, stream: None, stretch: None },
         )
         .and_then(|mut d| d.collect_f32())
         .map_err(|error| error.to_string())

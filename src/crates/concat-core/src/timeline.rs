@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! The edit itself: a project, its tracks, and the clips on them.
 //!
@@ -13,8 +13,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::animate::Animation;
+use crate::animate::RidingMask;
 use crate::arena::{Arena, Id};
-use crate::mask::ShapeMask;
+use crate::mask::MaskStack;
+use crate::motion::{Motion, Pose};
 use crate::retime::SpeedCurve;
 use crate::time::{FrameRate, Rational, TimeRange};
 
@@ -93,6 +95,15 @@ pub struct Clip {
     /// Keys over the clip's placement and opacity, when it has any. See
     /// [`Animation`].
     pub animation: Option<Animation>,
+    /// How it comes on, goes off and moves in between, over its keys; see
+    /// [`Motion`]. None for none.
+    pub motion: Option<Motion>,
+    /// One moment of another clip, held for this one's whole span: every
+    /// key, move and keyed mask or effect number reads that moment, not
+    /// this clip's own time. A transition's stand-in holds the clip it
+    /// extends at its cut; read at its own time, the stand-in replayed the
+    /// clip's moves and keys squeezed into the transition.
+    pub frozen: Option<Frozen>,
     /// How the clip's colour meets what is beneath it.
     pub blend: Blend,
     /// One frame, held: every instant of the clip maps to `source_start`,
@@ -101,9 +112,9 @@ pub struct Clip {
     /// first frame shown for the length of the dissolve, where other
     /// editors show "repeated frames".
     pub hold: bool,
-    /// The shape that keeps part of the picture, when one does; its
-    /// numbers ride the animation's mask tracks.
-    pub mask: Option<ShapeMask>,
+    /// The masks that keep part of the picture, top first, each with the
+    /// keys its numbers ride. Empty keeps all of it.
+    pub masks: Vec<RidingMask>,
     /// How many times the frame the picture is drawn for, along the axis
     /// it is most: one - every picture but a title whose ink runs past the
     /// frame's edges, painted on a canvas grown to hold it. A picture past
@@ -271,6 +282,27 @@ impl Default for Transform {
     }
 }
 
+/// A moment of a clip: `local` seconds into it, of `length`. See
+/// [`Clip::frozen`].
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Frozen {
+    /// Seconds into the clip.
+    pub local: f64,
+    /// The clip's length, in seconds.
+    pub length: f64,
+}
+
+impl Frozen {
+    /// Where the moment falls in the clip, `0..=1`.
+    pub fn fraction(self) -> f64 {
+        if self.length > 0.0 {
+            (self.local / self.length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
 impl Clip {
     /// A clip that starts at the beginning of its media and is fully opaque.
     pub fn new(media: MediaRef, start: Rational, duration: Rational) -> Self {
@@ -286,15 +318,20 @@ impl Clip {
             transform: Transform::IDENTITY,
             retime: None,
             animation: None,
+            motion: None,
+            frozen: None,
             blend: Blend::Normal,
             hold: false,
-            mask: None,
+            masks: Vec::new(),
             overscan: 1.0,
         }
     }
 
     /// Where in the clip `time` falls, `0..=1`; zero outside it.
     pub fn fraction_at(&self, time: Rational) -> f64 {
+        if let Some(frozen) = self.frozen {
+            return frozen.fraction();
+        }
         if self.duration.is_zero() {
             return 0.0;
         }
@@ -305,28 +342,51 @@ impl Clip {
 
     /// The placement at `time`: the clip's own, moved by its animation.
     pub fn transform_at(&self, time: Rational) -> Transform {
-        match &self.animation {
+        let keyed = match &self.animation {
             Some(animation) => animation.transform_at(self.transform, self.fraction_at(time)),
             None => self.transform,
+        };
+        match self.pose_at(time) {
+            Some(pose) => Transform {
+                scale: (keyed.scale * pose.scale).max(0.001),
+                offset_x: keyed.offset_x + pose.dx,
+                offset_y: keyed.offset_y + pose.dy,
+                rotation: keyed.rotation + pose.rotation,
+                stretch_x: keyed.stretch_x * pose.stretch_x.max(0.001),
+                stretch_y: keyed.stretch_y * pose.stretch_y.max(0.001),
+            },
+            None => keyed,
         }
     }
 
-    /// The mask at `time`: the clip's own, its keyed numbers at their
-    /// ride's values. None for a clip with no mask.
-    pub fn mask_at(&self, time: Rational) -> Option<ShapeMask> {
-        let mask = self.mask?;
-        Some(match &self.animation {
-            Some(animation) => animation.mask.mask_at(mask, self.fraction_at(time)),
-            None => mask,
+    /// Where the clip's moves have it at `time`; None for a clip with none.
+    pub fn pose_at(&self, time: Rational) -> Option<Pose> {
+        let motion = self.motion.as_ref().filter(|motion| !motion.is_empty())?;
+        Some(match self.frozen {
+            Some(frozen) => motion.pose_at(frozen.local, frozen.length),
+            None => motion.pose_at((time - self.start).as_f64(), self.duration.as_f64()),
         })
+    }
+
+    /// The masks at `time`, top first: each one's keyed numbers at their
+    /// rides' values.
+    pub fn masks_at(&self, time: Rational) -> MaskStack {
+        let x = self.fraction_at(time);
+        MaskStack {
+            masks: self.masks.iter().map(|mask| mask.at(x)).collect(),
+        }
     }
 
     /// The opacity at `time`, before the fade ramps: the clip's own, scaled
     /// by its animation.
     pub fn opacity_at(&self, time: Rational) -> f32 {
-        match &self.animation {
+        let keyed = match &self.animation {
             Some(animation) => animation.opacity_at(self.opacity, self.fraction_at(time)),
             None => self.opacity,
+        };
+        match self.pose_at(time) {
+            Some(pose) => (f64::from(keyed) * pose.opacity).clamp(0.0, 1.0) as f32,
+            None => keyed,
         }
     }
 

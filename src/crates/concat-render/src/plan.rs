@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use concat_core::frame::{Frame, Signal};
-use concat_core::mask::{MaskUniform, ShapeMask};
+use concat_core::mask::{MaskStack, MaskUniform, StackUniform};
 use concat_core::shader::ShaderPass;
 use concat_core::time::Rational;
 use concat_core::timeline::{Blend, ClipId, Timeline, TrackKind, Transform};
@@ -287,11 +287,12 @@ pub struct PlannedLayer {
     /// picture whatever its own size: what a cutout leaves. `None` keeps
     /// the picture whole.
     pub mask: Option<Arc<Frame>>,
-    /// The clip's shape mask at this frame: a circle, a band, a heart that
-    /// keeps part of the picture, drawn analytically over it and multiplied
-    /// with `mask`, the crop and everything else that weighs the picture.
-    /// `None` keeps it whole.
-    pub shape: Option<ShapeMask>,
+    /// The clip's masks at this frame, top first: the shapes that keep part
+    /// of the picture, multiplied with `mask`, the crop and everything else
+    /// that weighs it. One plain adding shape is drawn analytically on the
+    /// layer's own draw; anything more is drawn by a mask pass into the
+    /// matte. Empty keeps it whole.
+    pub masks: MaskStack,
     /// What the cuts at either end do to the picture at this frame.
     pub transitions: Vec<Transition>,
     /// How the layer's colour meets what is beneath it.
@@ -328,7 +329,7 @@ impl PlannedLayer {
             transform: Transform::default(),
             effects: Vec::new(),
             mask: None,
-            shape: None,
+            masks: MaskStack::default(),
             transitions: Vec::new(),
             blend: Blend::Normal,
             opacity: 1.0,
@@ -352,14 +353,32 @@ impl PlannedLayer {
     /// output pixel in its shorter side as the narrowest edge. The one
     /// place both compositors get it from, so the two cannot differ on it.
     pub fn shape_uniform(&self, geometry: &Geometry) -> MaskUniform {
-        let Some(shape) = &self.shape else {
+        let Some(shape) = self.masks.analytic() else {
             return MaskUniform::NONE;
         };
+        let (width, height, pixel) = Self::mask_scale(geometry);
+        shape.uniform(width, height, pixel)
+    }
+
+    /// The masks packed for a mask pass, when they need one: anything that
+    /// cuts and is more than one plain adding shape. None when the layer's
+    /// own draw carries its mask (see [`PlannedLayer::shape_uniform`]) or
+    /// it has none. Both compositors take it from here.
+    pub fn stack_uniform(&self, geometry: &Geometry) -> Option<StackUniform> {
+        if !self.masks.cuts() || self.masks.analytic().is_some() {
+            return None;
+        }
+        let (width, height, pixel) = Self::mask_scale(geometry);
+        Some(self.masks.uniform(width, height, pixel))
+    }
+
+    /// The picture's fitted size, and one output pixel in its shorter side
+    /// as it is drawn: the narrowest edge a mask may have.
+    fn mask_scale(geometry: &Geometry) -> (f32, f32, f32) {
         let (width, height) = (geometry.fitted.0 as f32, geometry.fitted.1 as f32);
         let (scale_x, scale_y) = geometry.scale;
-        // One output pixel, in the picture's shorter side as it is drawn.
         let shown = (width * scale_x).min(height * scale_y).max(1.0);
-        shape.uniform(width, height, 1.0 / shown)
+        (width, height, 1.0 / shown)
     }
 
     /// The transitions folded; see [`Shading`].
@@ -417,7 +436,7 @@ impl PlannedLayer {
             || self.weight() < 1.0
             || !self.effects.is_empty()
             || self.mask.is_some()
-            || self.shape.is_some()
+            || self.masks.cuts()
             || !self.transitions.is_empty()
             || self.blend != Blend::Normal
         {
@@ -465,7 +484,7 @@ impl PlannedLayer {
             mask: None,
             // The picture's shape mask is the picture's: the background
             // fills the frame behind it, and shows where the mask cuts.
-            shape: None,
+            masks: MaskStack::default(),
             blend: Blend::Normal,
             ..self.clone()
         };
@@ -807,6 +826,71 @@ impl FramePlan {
     pub fn seconds(&self) -> f32 {
         self.time.as_f64() as f32
     }
+
+    /// What this frame is made of, for the log line that says what a
+    /// device was drawing when it was lost: its size, each layer's picture
+    /// and what is done to it, and the effects by package. Never a file's
+    /// name or a title's words. Built only when something has gone wrong.
+    pub fn summary(&self) -> String {
+        use std::fmt::Write;
+        let mut layers: Vec<(String, usize)> = Vec::new();
+        for layer in &self.layers {
+            let mut words = match &layer.source {
+                Some(picture) => format!("{}x{}", picture.width(), picture.height()),
+                None => "no picture".to_owned(),
+            };
+            let deep = layer
+                .source
+                .as_ref()
+                .is_some_and(|picture| picture.depth() == concat_core::frame::Depth::Sixteen);
+            let marks = [
+                (deep, "deep"),
+                (!layer.transform.is_identity(), "placed"),
+                (!layer.crop.is_none(), "cropped"),
+                (layer.flip_h || layer.flip_v, "flipped"),
+                (!layer.warp.is_none(), "stabilized"),
+                (layer.mask.is_some(), "matte"),
+                (!layer.masks.masks.is_empty(), "masks"),
+                (!layer.transitions.is_empty(), "fading"),
+                (layer.weight() < 1.0, "see-through"),
+            ];
+            for (_, mark) in marks.iter().filter(|(on, _)| *on) {
+                let _ = write!(words, " {mark}");
+            }
+            if layer.blend != Blend::Normal {
+                let _ = write!(words, " {:?}", layer.blend);
+            }
+            for pass in &layer.effects {
+                let _ = write!(words, " +{}", pass.package);
+            }
+            match layers.last_mut() {
+                Some((last, count)) if *last == words => *count += 1,
+                _ => layers.push((words, 1)),
+            }
+        }
+        let mut out = format!(
+            "a {}x{} frame of {} layers",
+            self.width,
+            self.height,
+            self.layers.len()
+        );
+        for (words, count) in &layers {
+            out.push_str(if out.ends_with("layers") { ": " } else { ", " });
+            out.push_str(words);
+            if *count > 1 {
+                let _ = write!(out, " x{count}");
+            }
+        }
+        for treatment in &self.treatments {
+            for pass in &treatment.effects {
+                let _ = write!(out, " · +{} over track {}", pass.package, treatment.track);
+            }
+        }
+        if self.output != Signal::Sdr {
+            let _ = write!(out, " · {:?} output", self.output);
+        }
+        out
+    }
 }
 
 /// A clip id for a layer that belongs to no timeline: a picture handed
@@ -864,7 +948,7 @@ pub fn plan_frame(timeline: &Timeline, time: Rational) -> FramePlan {
             transform: clip.transform_at(time),
             effects: Vec::new(),
             mask: None,
-            shape: clip.mask_at(time),
+            masks: clip.masks_at(time),
             transitions: Vec::new(),
             blend: clip.blend,
             // The fade ramp multiplies in here, so the compositor only ever

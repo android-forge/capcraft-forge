@@ -301,6 +301,7 @@ pub(crate) fn smooth_copy(
             duration: stretch.span,
             source_start: stretch.from,
             speed: 1.0,
+            tempo: Vec::new(),
             preserve_pitch: false,
             volume: 1.0,
             volume_curve: Default::default(),

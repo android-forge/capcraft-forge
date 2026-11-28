@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! Core vocabulary of the Concat engine.
 //!
@@ -11,6 +11,8 @@
 //! - [`arena`] - generational arenas and `Copy` handles, the way Concat models
 //!   graphs.
 //! - [`frame`] - a decoded RGBA8 image buffer.
+//! - [`halt`] - how work that can be told to stop says whether it was
+//!   cancelled or failed.
 //! - [`timeline`] - projects, tracks and clips.
 //!
 //! If you are about to add a dependency to this crate, the thing you are adding
@@ -20,13 +22,18 @@ pub mod animate;
 pub mod arena;
 pub mod frame;
 pub mod gpu_import;
+pub mod halt;
 pub mod mask;
+pub mod motion;
 pub mod retime;
 pub mod shader;
+#[cfg(test)]
+mod speed_curve_tests;
 pub mod time;
 pub mod timeline;
 
 pub use frame::Frame;
+pub use halt::Halt;
 pub use retime::SpeedCurve;
 pub use shader::{Lut, RevealMap, ShaderPass, Stage, TransitionPass};
 pub use time::{FrameRate, Rational, TimeRange};

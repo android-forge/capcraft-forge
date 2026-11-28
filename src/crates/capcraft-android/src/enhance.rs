@@ -88,12 +88,13 @@ impl MobileSession {
             listener.on_done(Some(view));
             return Ok(());
         }
-        let factor = concat_vision::enhance::factor_for(current.width, current.height);
+        // Auto: twice, or as far as 2K allows (Concat 0.2.10's enhance at any scale).
+        let scale = concat_vision::enhance::auto_scale(current.width, current.height);
         // the whole file, kept as the model answers it
         let target = target_for(
             Path::new(&current.project),
             &current.path,
-            factor,
+            scale,
             1.0,
             current.still,
             None,
@@ -106,7 +107,7 @@ impl MobileSession {
                 let request = EnhanceRequest {
                     media_path: current.path,
                     still: current.still,
-                    factor,
+                    scale,
                     strength: 1.0,
                     target,
                     span: None,

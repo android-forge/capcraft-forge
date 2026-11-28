@@ -193,6 +193,9 @@ pub(crate) fn kind_of(clip: &Clip) -> RowKind {
         ClipKind::Audio | ClipKind::SoundLayer => RowKind::Audio,
         ClipKind::Text | ClipKind::Shape => RowKind::Text,
         ClipKind::Layer => layer_kind(clip.video_effects.first().map(|link| link.id.as_str())),
+        // Concat's transitions placed as clips (0.2.9): Forge draws its own on
+        // the cut, so one from elsewhere sits on an effect row like a layer.
+        ClipKind::Transition => layer_kind(None),
     }
 }
 
@@ -248,6 +251,7 @@ pub(crate) fn clip_view(project: &Project, clip: &Clip) -> ClipView {
         ClipKind::Shape => "shape",
         ClipKind::Layer => "layer",
         ClipKind::SoundLayer => "soundlayer",
+        ClipKind::Transition => "transition",
     };
     let audible = match clip.kind {
         ClipKind::Audio => true,

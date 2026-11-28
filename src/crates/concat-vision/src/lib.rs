@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah
 
 //! What the engine sees in a picture.
 //!
@@ -45,6 +45,7 @@
 //! are undone.
 
 pub mod apply;
+pub mod int8;
 #[cfg(feature = "infer")]
 pub mod brush;
 pub mod compact;

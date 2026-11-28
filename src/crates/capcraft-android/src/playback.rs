@@ -156,6 +156,8 @@ fn specs(session: &Session) -> Vec<ClipSpec> {
             fade_in: piece.fade_in,
             fade_out: piece.fade_out,
             speed: piece.speed,
+            // a speed curve heard as it is exported
+            tempo: piece.tempo,
             preserve_pitch: piece.preserve_pitch,
             chain: piece.filter_chain,
         })

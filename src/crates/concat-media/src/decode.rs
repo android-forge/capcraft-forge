@@ -39,12 +39,24 @@ use crate::feed;
 use crate::ffi;
 use crate::hardware::{self, Device, HwDevice, HwPolicy, Seat};
 
+/// The threads a reader's codec runs on a hwaccel device: what the caller
+/// asked for, but never more than [`hardware::DEVICE_FRAME_THREADS`], and
+/// that many where it left the count to the codec (zero), which would be
+/// one a core.
+fn device_threads(options: &DecodeOptions) -> u16 {
+    match options.threads {
+        0 => hardware::DEVICE_FRAME_THREADS,
+        asked => asked.min(hardware::DEVICE_FRAME_THREADS),
+    }
+}
+
 /// How [`Decoder::open_codec`] opens the codec.
 enum Codec<'a> {
     /// libavcodec's own decoder for the stream, on the CPU.
     Software,
-    /// libavcodec's own decoder, with this hwaccel device attached.
-    On(&'a Device),
+    /// libavcodec's own decoder, with this hwaccel device attached and the
+    /// card's memory its pictures will hold already charged.
+    On(&'a Device, hardware::Charge),
     /// A decoder by name in place of the built-in one: the platform's
     /// decoder wrapped as a codec, MediaCodec's.
     Named(&'static str),
@@ -53,8 +65,13 @@ enum Codec<'a> {
 /// Where a reader's codec runs when it is not plain software.
 enum OnChip {
     /// A hwaccel: frames arrive in the device's memory, in this format,
-    /// and are copied back.
-    Accel(HwDevice, Pixel),
+    /// and are copied back. Holds the card's memory its pictures take for
+    /// as long as it lasts; see [`hardware::surface_bytes`].
+    Accel {
+        device: HwDevice,
+        format: Pixel,
+        _charge: hardware::Charge,
+    },
     /// The platform's own decoder behind a codec of its own: frames arrive
     /// in memory already. Holds its seat on the chip for as long as it
     /// lasts; see [`hardware::MEDIACODEC_READERS`].
@@ -64,7 +81,7 @@ enum OnChip {
 impl OnChip {
     fn device(&self) -> HwDevice {
         match self {
-            OnChip::Accel(device, _) | OnChip::Wrapped { device, .. } => *device,
+            OnChip::Accel { device, .. } | OnChip::Wrapped { device, .. } => *device,
         }
     }
 }
@@ -143,6 +160,12 @@ pub struct DecodeOptions {
     /// decoded frame. Never for anything a person will watch or export: the
     /// frame is near the instant, not at it.
     pub keyframes_only: bool,
+    /// A picture for a glance - a filmstrip tile a few dozen pixels high -
+    /// where being a frame or two away from the instant and a little
+    /// blocky are invisible: the codec skips its deblocking and the frames
+    /// no other frame is built from. A 4K H.264 strip read through took
+    /// half the CPU so (11.4 s against 22.5) and a fifth less time.
+    pub glance: bool,
     /// Threads the codec may use, or zero to let it count the cores.
     ///
     /// Zero for anything a person is waiting on: a scrub wants its frame
@@ -234,6 +257,12 @@ impl DecodeOptions {
     /// Decodes keyframes only. See [`DecodeOptions::keyframes_only`].
     pub fn nearest_keyframes(mut self) -> Self {
         self.keyframes_only = true;
+        self
+    }
+
+    /// Decodes for a glance. See [`DecodeOptions::glance`].
+    pub fn at_a_glance(mut self) -> Self {
+        self.glance = true;
         self
     }
 
@@ -631,6 +660,8 @@ struct Landing {
 struct Source {
     frame: Video,
     pts: Option<Rational>,
+    /// How long the picture lasts, as the stream says, where it says.
+    lasts: Option<Rational>,
 }
 
 /// Decodes a file through libavcodec and libavfilter.
@@ -747,7 +778,9 @@ impl Decoder {
         // https://github.com/jub0t/Concat/issues/429
         let (decoder, accelerated) = match (
             alpha_decoder(&stream),
-            options.hardware.device_for(codec, format),
+            options
+                .hardware
+                .device_for(codec, format, options.keyframes_only),
         ) {
             (Some(name), _) => match Self::open_codec(path, &stream, options, Codec::Named(name)) {
                 Ok((decoder, _)) => (decoder, None),
@@ -845,16 +878,44 @@ impl Decoder {
             }
             (None, Some(device)) => match hardware::device(device) {
                 Some(device) => {
-                    match Self::open_codec(path, &stream, options, Codec::On(&device)) {
-                        Ok(opened) => opened,
-                        Err(error) => {
-                            hardware::note_fallback(
-                                device.kind(),
-                                "open the decoder",
-                                &error.to_string(),
-                            );
-                            software()?
-                        }
+                    // What its pictures will hold on the card, charged
+                    // before it opens: past the decoders' share, this
+                    // reader decodes on the CPU (#873).
+                    // SAFETY: the stream's codec parameters; plain fields.
+                    let coded = unsafe {
+                        let raw = stream.parameters().as_ptr();
+                        ((*raw).width.max(0) as u32, (*raw).height.max(0) as u32)
+                    };
+                    let frame_threads = if options.keyframes_only {
+                        0
+                    } else {
+                        device_threads(options)
+                    };
+                    let bytes = hardware::surface_bytes(
+                        device.kind(),
+                        codec,
+                        coded,
+                        hardware::deep(format),
+                        frame_threads,
+                    );
+                    match hardware::charge(bytes) {
+                        Some(charge) => match Self::open_codec(
+                            path,
+                            &stream,
+                            options,
+                            Codec::On(&device, charge),
+                        ) {
+                            Ok(opened) => opened,
+                            Err(error) => {
+                                hardware::note_fallback(
+                                    device.kind(),
+                                    "open the decoder",
+                                    &error.to_string(),
+                                );
+                                software()?
+                            }
+                        },
+                        None => software()?,
                     }
                 }
                 None => software()?,
@@ -950,26 +1011,14 @@ impl Decoder {
     ) -> Result<(decoder::Video, Option<OnChip>)> {
         let mut context = ffmpeg::codec::Context::from_parameters(stream.parameters())
             .map_err(|error| ffi::fail("codec parameters", path, error))?;
-        // Every core. libavcodec's API opens a decoder on one thread unless
-        // told otherwise (the `ffmpeg` tool turns threads on for itself), and
-        // a seek decodes every frame from the keyframe before it: on one
-        // thread a 4K H.264 file decoded at about 87 frames a second, and a
-        // scrub waited 400 ms for its frame. Frame threads for that walk,
-        // slice threads for files cut into slices; zero lets the codec
-        // count, and a caller working in the background says how many.
-        // SAFETY: the context is not opened yet, which is when threading is
-        // set, and both fields are plain integers.
-        unsafe {
-            let raw = context.as_mut_ptr();
-            (*raw).thread_type = ffmpeg::sys::FF_THREAD_FRAME | ffmpeg::sys::FF_THREAD_SLICE;
-            (*raw).thread_count = i32::from(options.threads);
-        }
         let (accelerated, named) = match codec {
             Codec::Software => (None, None),
-            Codec::On(device) => (
-                device
-                    .attach(&mut context)
-                    .map(|format| OnChip::Accel(device.kind(), format)),
+            Codec::On(device, charge) => (
+                device.attach(&mut context).map(|format| OnChip::Accel {
+                    device: device.kind(),
+                    format,
+                    _charge: charge,
+                }),
                 None,
             ),
             Codec::Named(name) => {
@@ -997,6 +1046,43 @@ impl Decoder {
                 (None, Some(found))
             }
         };
+        // Every core. libavcodec's API opens a decoder on one thread unless
+        // told otherwise (the `ffmpeg` tool turns threads on for itself), and
+        // a seek decodes every frame from the keyframe before it: on one
+        // thread a 4K H.264 file decoded at about 87 frames a second, and a
+        // scrub waited 400 ms for its frame. Frame threads for that walk,
+        // slice threads for files cut into slices; zero lets the codec
+        // count, and a caller working in the background says how many.
+        // Keyframes only, no frame threads: they hold each picture back
+        // until every thread has a packet, and with the frames between
+        // skipped that is a keyframe a thread - the next ten of them read,
+        // and decoded, before the one sought came out. A scrub's keyframe
+        // of a 4K file with one every four seconds took up to 260 ms so.
+        // On a hwaccel device the chip decodes and the threads only queue
+        // its work, while each frame thread is a picture more on the card:
+        // see `hardware::DEVICE_FRAME_THREADS`.
+        // Only once the device has taken the codec: one it has no decoder
+        // for leaves the codec in software, on every thread asked for.
+        let threads = match accelerated {
+            Some(OnChip::Accel { .. }) => device_threads(options),
+            _ => options.threads,
+        };
+        // SAFETY: the context is not opened yet, which is when threading is
+        // set, and both fields are plain integers.
+        unsafe {
+            let raw = context.as_mut_ptr();
+            (*raw).thread_type = if options.keyframes_only {
+                ffmpeg::sys::FF_THREAD_SLICE
+            } else {
+                ffmpeg::sys::FF_THREAD_FRAME | ffmpeg::sys::FF_THREAD_SLICE
+            };
+            (*raw).thread_count = i32::from(threads);
+            if options.glance {
+                (*raw).skip_loop_filter = ffmpeg::sys::AVDiscard::ALL;
+                (*raw).skip_frame = ffmpeg::sys::AVDiscard::NONREF;
+            }
+        }
+        ffi::begin();
         let opened = match named {
             Some(found) => context
                 .decoder()
@@ -1004,7 +1090,7 @@ impl Decoder {
                 .and_then(|opened| opened.video()),
             None => context.decoder().video(),
         };
-        let mut decoder = opened.map_err(|error| ffi::fail("open decoder", path, error))?;
+        let mut decoder = opened.map_err(|error| ffi::fail_said("open decoder", path, error))?;
         if options.keyframes_only {
             decoder.skip_frame(ffmpeg::Discard::NonKey);
         }
@@ -1022,6 +1108,22 @@ impl Decoder {
     /// it declined the device for this stream.
     pub fn hardware(&self) -> Option<HwDevice> {
         self.hardware.as_ref().map(OnChip::device)
+    }
+
+    /// The threads the codec was opened on, as libavcodec holds them.
+    #[cfg(test)]
+    fn codec_threads(&self) -> i32 {
+        // SAFETY: an open codec context this reader owns; a plain field.
+        unsafe { (*self.decoder.as_ptr()).thread_count }
+    }
+
+    /// The decoder libavcodec is running, by its own name: `h264`,
+    /// `libdav1d`, `libvpx-vp9`, `hevc_mediacodec`. Under a hwaccel it is
+    /// the codec's own decoder; [`Decoder::hardware`] says where it runs.
+    pub fn codec_name(&self) -> String {
+        self.decoder
+            .codec()
+            .map_or_else(|| "unknown".to_owned(), |codec| codec.name().to_owned())
     }
 
     /// Reopens the codec in software and carries on from `from`: the frame
@@ -1323,7 +1425,12 @@ impl Decoder {
             {
                 continue;
             }
-            if let Some(&OnChip::Accel(device, format)) = self.hardware.as_ref() {
+            // Read before the picture is copied off a device: the copy
+            // carries the pixels, not the stream's timing.
+            // SAFETY: a frame this reader owns; a plain field read.
+            let lasts = ffi::seconds(unsafe { (*frame.as_ptr()).duration }, self.time_base)
+                .filter(|lasts| *lasts > Rational::ZERO);
+            if let Some(&OnChip::Accel { device, format, .. }) = self.hardware.as_ref() {
                 if frame.format() == format {
                     frame = match hardware::download(&frame) {
                         Ok(copy) => copy,
@@ -1340,13 +1447,16 @@ impl Decoder {
                 } else {
                     // The codec set the device up for this stream and the
                     // device said no, so the codec went on in software by
-                    // itself; the frames are fine.
+                    // itself. The frames are fine, but it runs on the few
+                    // threads a device reader is given: it opens again in
+                    // software, on all of them, at this frame.
                     hardware::note_fallback(
                         device,
                         "take this stream",
                         "the codec decoded it in software",
                     );
-                    self.hardware = None;
+                    self.resume_in_software(pts, false)?;
+                    continue;
                 }
             }
             // FFmpeg's ProRes decoder reads the picture's matrix into the
@@ -1385,7 +1495,7 @@ impl Decoder {
             self.discard_before = None;
             self.discard_through = None;
             self.last_pts = pts;
-            return Ok(Some(Source { frame, pts }));
+            return Ok(Some(Source { frame, pts, lasts }));
         }
     }
 
@@ -1442,6 +1552,7 @@ impl Decoder {
     }
 
     fn build_graph(&self, format: Pixel, width: u32, height: u32) -> Result<filter::Graph> {
+        ffi::begin();
         let mut graph = filter::Graph::new();
         let args = format!(
             "video_size={width}x{height}:pix_fmt={}:time_base={}/{}:pixel_aspect=1/1",
@@ -1459,14 +1570,14 @@ impl Decoder {
                 "in",
                 &args,
             )
-            .map_err(|error| ffi::fail("buffer source", &self.path, error))?;
+            .map_err(|error| ffi::fail_said("buffer source", &self.path, error))?;
         graph
             .add(
                 &filter::find("buffersink").ok_or_else(|| missing("buffersink"))?,
                 "out",
                 "",
             )
-            .map_err(|error| ffi::fail("buffer sink", &self.path, error))?;
+            .map_err(|error| ffi::fail_said("buffer sink", &self.path, error))?;
         let spec = video_filter(
             self.rotation,
             &self.options,
@@ -1478,10 +1589,10 @@ impl Decoder {
             .output("in", 0)
             .and_then(|parser| parser.input("out", 0))
             .and_then(|parser| parser.parse(&spec))
-            .map_err(|error| ffi::fail("filter graph", &self.path, error))?;
+            .map_err(|error| ffi::fail_said("filter graph", &self.path, error))?;
         graph
             .validate()
-            .map_err(|error| ffi::fail("filter graph", &self.path, error))?;
+            .map_err(|error| ffi::fail_said("filter graph", &self.path, error))?;
         Ok(graph)
     }
 
@@ -1551,12 +1662,20 @@ impl Decoder {
             return Ok(None);
         };
         if self.source_done && self.pending.is_none() && !self.options.looping {
-            // Past the last frame. It has already shown once at its own
-            // instant; the file is over. Its stamp is read with the same
+            // Past the last frame: the file is over once the last frame has
+            // lasted its own length - as long as the stream says it does,
+            // and never less than one output frame, so it shows at least
+            // once. Held one output frame instead, the last frame of 30 fps
+            // footage in a 60 fps export, or of any clip slowed down, was
+            // let go half-way through its own time and the clip's last
+            // frame came out black (#756). Its stamp is read with the same
             // tick of slack as above: a last frame stamped late would
             // otherwise be held for one output frame more than it lasts.
+            let lasts = current.lasts.map_or(rate.frame_duration(), |lasts| {
+                lasts.max(rate.frame_duration())
+            });
             if let Some(pts) = current.pts
-                && pts + rate.frame_duration() <= due
+                && pts + lasts <= due
             {
                 return Ok(None);
             }
@@ -2064,15 +2183,22 @@ mod tests {
             software_only: false,
             keyframe_seconds: 0,
         };
-        let mut encoder = Encoder::create_tagged(
+        let encoder = Encoder::create_tagged(
             &path,
             64,
             64,
             FrameRate::THIRTY,
             &options,
             (Primaries::BT2020, Transfer::SMPTE2084, Space::BT2020NCL),
-        )
-        .expect("an HEVC encoder");
+        );
+        let mut encoder = match encoder {
+            Ok(encoder) => encoder,
+            Err(error) if VideoCodec::Hevc.ten_bit_only_on_hardware() => {
+                eprintln!("no ten-bit HEVC encoder opens here ({error}); skipped");
+                return;
+            }
+            Err(error) => panic!("an HEVC encoder: {error}"),
+        };
         let mut frame = Frame::black(64, 64);
         frame.fill([180, 180, 180, 255]);
         for _ in 0..3 {
@@ -2321,6 +2447,31 @@ mod tests {
         frames
     }
 
+    /// Paced faster than it was shot, a file's last frame lasts its own
+    /// length: one second of 30 fps read at 60 is sixty frames, the last
+    /// two of them its last picture. The last frame used to last one
+    /// output frame, and the sixtieth of 30 fps footage in a 60 fps export
+    /// came out black (#756).
+    #[test]
+    fn a_paced_files_last_frame_lasts_its_own_length() {
+        let path = grey_steps_in("last-frame", "mp4");
+        let options = DecodeOptions::default().scaled_to(64, 64).in_software();
+        for (fps, count) in [(60, 60), (30, 30)] {
+            let mut paced =
+                Decoder::open(&path, &options.clone().at_rate(FrameRate::from_int(fps)))
+                    .expect("opens");
+            let frames = drain(&mut paced);
+            assert_eq!(frames.len(), count, "one second read at {fps} fps");
+            let last = &frames[count - 1].1;
+            assert!(
+                (i32::from(last.pixels()[0]) - 29 * 8).abs() <= 6,
+                "at {fps} fps the last frame is the file's last picture, not {}",
+                last.pixels()[0]
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// The largest difference between two frames, over every channel.
     fn worst_difference(a: &Frame, b: &Frame) -> u32 {
         a.pixels()
@@ -2364,7 +2515,18 @@ mod tests {
 
         let mut cpu = Decoder::open(&path, &software).expect("opens in software");
         let cpu_frames = drain(&mut cpu);
+        let hardware = DecodeOptions {
+            threads: 6,
+            ..hardware
+        };
         let mut gpu = Decoder::open(&path, &hardware).expect("opens on the device");
+        if gpu.hardware().is_some() {
+            assert_eq!(
+                gpu.codec_threads(),
+                i32::from(hardware::DEVICE_FRAME_THREADS),
+                "on the device, its few threads"
+            );
+        }
         let gpu_frames = drain(&mut gpu);
         if cfg!(target_os = "macos") {
             assert_eq!(
@@ -2643,6 +2805,46 @@ mod tests {
         assert_eq!((decoded.width(), decoded.height()), (64, 64));
         let red = decoded.pixels()[0];
         assert!(red > 150, "the picture came through: red {red}");
+    }
+
+    /// A video codec the device has no decoder for - AV1, which this FFmpeg
+    /// reads through dav1d alone - decodes in software on every thread
+    /// asked for, not on the few a reader on the device runs (#873).
+    #[test]
+    fn a_codec_the_device_lacks_keeps_its_threads() {
+        use crate::{EncodeOptions, Encoder, FrameSink, VideoCodec};
+        let path =
+            std::env::temp_dir().join(format!("concat-decode-av1-{}.mp4", std::process::id()));
+        let Ok(mut encoder) = Encoder::create(
+            &path,
+            64,
+            64,
+            FrameRate::THIRTY,
+            &EncodeOptions {
+                codec: VideoCodec::Av1,
+                ..EncodeOptions::default()
+            },
+        ) else {
+            return;
+        };
+        for index in 0..10u8 {
+            let pixels = [index * 20, 90, 30, 255].repeat(64 * 64);
+            let frame = Frame::from_rgba(64, 64, pixels).expect("a frame");
+            encoder.write_frame(&frame).expect("writes");
+        }
+        encoder.finish().expect("finishes");
+        let device = HwDevice::platform_default().unwrap_or(HwDevice::VideoToolbox);
+        let options = DecodeOptions {
+            threads: 6,
+            ..DecodeOptions::default().accelerated(device)
+        };
+        let mut decoder = Decoder::open(&path, &options).expect("opens");
+        let threads = decoder.codec_threads();
+        let frames = drain(&mut decoder);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(decoder.hardware(), None, "AV1 is dav1d's here");
+        assert_eq!(threads, 6, "every thread asked for");
+        assert_eq!(frames.len(), 10);
     }
 
     /// A device the linked FFmpeg does not carry is asked for and quietly

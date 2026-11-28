@@ -112,6 +112,7 @@ impl MobileSession {
         let source = lattice();
         let (width, height) = (source.width(), source.height());
         let mut layer = PlannedLayer::picture(detached_clip(), Arc::new(source));
+        let kept: Vec<_> = kept.iter().map(concat_export::chains::engine_filter).collect();
         layer.effects = Catalogue::builtin().shader_passes_at(&kept, 0.0, None);
         let plan = FramePlan {
             layers: vec![layer],
