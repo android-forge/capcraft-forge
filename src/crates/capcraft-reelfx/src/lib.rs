@@ -305,9 +305,16 @@ pub fn draw(rgba: &mut [u8], w: usize, h: usize, mask: Option<&[f32]>, face: Opt
     if w == 0 || h == 0 || !runs.iter().any(|r| r.covers(t)) {
         return false;
     }
-    let mut img = Vec::with_capacity(w * h * 3);
-    for px in rgba.chunks_exact(4) {
-        img.extend(px[..3].iter().map(|&v| f32::from(v) / 255.0));
+    let mut img = vec![0f32; w * h * 3];
+    {
+        let from: &[u8] = rgba;
+        ctx::par_rows(&mut img, w * 3, h, |y0, band| {
+            for (o, px) in band.chunks_exact_mut(3).zip(from[y0 * w * 4..].chunks_exact(4)) {
+                for i in 0..3 {
+                    o[i] = f32::from(px[i]) / 255.0;
+                }
+            }
+        });
     }
     let face = face.unwrap_or(Face { x: 0.5, y: 0.33, w: 0.15 });
     let mut c = Ctx {
@@ -336,11 +343,14 @@ pub fn draw(rgba: &mut [u8], w: usize, h: usize, mask: Option<&[f32]>, face: Opt
             }
         }
     }
-    for (px, v) in rgba.chunks_exact_mut(4).zip(c.img.chunks_exact(3)) {
-        for i in 0..3 {
-            px[i] = (v[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+    let drawn = &c.img;
+    ctx::par_rows(rgba, w * 4, h, |y0, band| {
+        for (px, v) in band.chunks_exact_mut(4).zip(drawn[y0 * w * 3..].chunks_exact(3)) {
+            for i in 0..3 {
+                px[i] = (v[i].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            }
         }
-    }
+    });
     true
 }
 
