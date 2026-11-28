@@ -132,13 +132,17 @@ private fun Canvas.boxed(b: Box, grow: Float, radius: Float, p: Paint) {
     restore()
 }
 
+/** How many frame backgrounds a project keeps: each is a whole frame, so they are not kept for good. */
+private const val KEPT_BACKGROUNDS = 8
+
 /**
  * Draws [style]'s background for [n] pictures on a [w] x [h] frame into a PNG in [dir], and gives its
  * path. The same drawing for the same style, count and size is kept and reused.
  */
 internal fun styleBackground(style: String, n: Int, w: Int, h: Int, dir: File): String {
     val file = File(dir.apply { mkdirs() }, "collage-2-$style-$n-${w}x$h.png")
-    if (file.exists()) return file.absolutePath
+    // in use again: newest, so the clean-up below keeps it
+    if (file.exists()) return file.absolutePath.also { file.setLastModified(System.currentTimeMillis()) }
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp)
     val fw = w.toFloat()
@@ -234,5 +238,10 @@ internal fun styleBackground(style: String, n: Int, w: Int, h: Int, dir: File): 
     }
     file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     bmp.recycle()
+    // the newest few kept, enough for undo to find the ones it goes back to; the rest go
+    dir.listFiles { f -> f.name.startsWith("collage-") && f.name.endsWith(".png") }
+        ?.sortedByDescending { it.lastModified() }
+        ?.drop(KEPT_BACKGROUNDS)
+        ?.forEach { it.delete() }
     return file.absolutePath
 }
