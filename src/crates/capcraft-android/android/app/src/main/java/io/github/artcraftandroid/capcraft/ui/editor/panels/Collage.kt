@@ -19,6 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.unit.sp
 import io.github.artcraftandroid.capcraft.engine.Media
 import io.github.artcraftandroid.capcraft.ui.Type
@@ -37,6 +41,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import io.github.artcraftandroid.capcraft.core.MobileSession
 import io.github.artcraftandroid.capcraft.core.TimelineView
@@ -49,7 +54,7 @@ import org.json.JSONObject
 private const val COLLAGE_KEY = "capcraftCollage"
 
 /** One cell of a collage: where it sits on the frame, in fractions of the frame's width and height. */
-internal class Cell(val x: Float, val y: Float, val w: Float, val h: Float)
+internal class Cell(val x: Float, val y: Float, val w: Float, val h: Float, val rot: Float = 0f, val shape: String = "")
 
 /**
  * A collage as the timeline keeps it: its pictures in cell order, the layout, and its borders - the
@@ -62,6 +67,10 @@ internal data class Collage(
     val gap: Float = 0f,
     val radius: Float = 0f,
     val color: String = "#ffffff",
+    /** A frame of Forge's own (see `CollageStyles.kt`), or empty for the plain grid. */
+    val style: String = "",
+    /** Each picture's zoom in its space and where its middle is moved to, by clip id. */
+    val adjust: Map<String, Triple<Float, Float, Float>> = emptyMap(),
 )
 
 /** The frame shapes a collage can take, as the canvas sizes they set. */
@@ -125,8 +134,21 @@ internal fun MobileSession.collage(): Collage? {
         kept.optDouble("gap", 0.0).toFloat(),
         kept.optDouble("radius", 0.0).toFloat(),
         kept.optString("color", "#ffffff"),
+        kept.optString("style", ""),
+        kept.optJSONObject("adjust")?.let { a ->
+            a.keys().asSequence().associateWith { k ->
+                val v = a.optJSONArray(k)
+                Triple(v?.optDouble(0, 1.0)?.toFloat() ?: 1f, v?.optDouble(1, 0.0)?.toFloat() ?: 0f, v?.optDouble(2, 0.0)?.toFloat() ?: 0f)
+            }
+        }.orEmpty(),
     )
 }
+
+/** Where [c]'s pictures go on a [fw] x [fh] frame, as the collage lays them. */
+internal fun collageCells(c: Collage, fw: Int, fh: Int, styled: Boolean = c.style.isNotEmpty()): List<Cell>? =
+    if (styled) styleCells(c.style, c.ids.size, fw, fh)
+    else collageLayouts(c.ids.size).getOrNull(c.layout.coerceIn(0, (collageLayouts(c.ids.size).size - 1).coerceAtLeast(0)))
+        ?.map { inset(it, c.gap, fw.toDouble(), fh.toDouble()) }
 
 /**
  * [cell] with its share of the gap taken off. The layout is first drawn in from the frame's edge by
@@ -156,11 +178,18 @@ internal fun MobileSession.layCollage(view: TimelineView, ids: List<String>, lay
  * Lays [c]'s pictures into its layout's cells, less the gaps, each cut to its cell and its corners
  * rounded by a mask; the gaps show the background, set to [c]'s colour. One step; the view after.
  */
-internal fun MobileSession.layCollage(view0: TimelineView, c: Collage): TimelineView {
+internal fun MobileSession.layCollage(view0: TimelineView, c: Collage, mediaDir: java.io.File? = null): TimelineView {
     val ids = c.ids
     val layout = c.layout.coerceIn(0, (collageLayouts(ids.size).size - 1).coerceAtLeast(0))
-    val view = setBackground(JSONObject().put("kind", "color").put("color", c.color).toString())
-    val cells = collageLayouts(ids.size).getOrNull(layout)?.map { inset(it, c.gap, view.width.toDouble(), view.height.toDouble()) } ?: return view0
+    val (fw, fh) = view0.width.toInt() to view0.height.toInt()
+    // a frame of our own draws its background; the grid shows its gap colour
+    val styled = c.style.isNotEmpty() && mediaDir != null
+    val view = if (styled) {
+        setBackground(JSONObject().put("kind", "image").put("path", styleBackground(c.style, ids.size, fw, fh, mediaDir!!)).toString())
+    } else {
+        setBackground(JSONObject().put("kind", "color").put("color", c.color).toString())
+    }
+    val cells = collageCells(c, fw, fh, styled) ?: return view0
     val frameW = view.width.toDouble()
     val frameH = view.height.toDouble()
     val clips = view.rows.flatMap { it.clips }
@@ -175,21 +204,35 @@ internal fun MobileSession.layCollage(view0: TimelineView, c: Collage): Timeline
         var left = 0.0
         var top = 0.0
         if (mw / mh > cellW / cellH) left = (1 - (cellW / cellH) / (mw / mh)) / 2 else top = (1 - (mw / mh) / (cellW / cellH)) / 2
-        val cutW = mw * (1 - 2 * left)
-        val cutH = mh * (1 - 2 * top)
+        // zoomed and moved within its space: a smaller window, its middle shifted, kept on the picture
+        val (zoom, ox, oy) = c.adjust[id] ?: Triple(1f, 0f, 0f)
+        val z = zoom.coerceIn(1f, 6f).toDouble()
+        val winW = (1 - 2 * left) / z
+        val winH = (1 - 2 * top) / z
+        val cx = (0.5 + ox).coerceIn(winW / 2, 1 - winW / 2)
+        val cy = (0.5 + oy).coerceIn(winH / 2, 1 - winH / 2)
+        val cropL = cx - winW / 2
+        val cropR = 1 - cx - winW / 2
+        val cropT = cy - winH / 2
+        val cropB = 1 - cy - winH / 2
+        val cutW = mw * winW
+        val cutH = mh * winH
         // the engine fits the cut picture to the frame; the scale takes it from there to the cell
         val fit = minOf(frameW / cutW, frameH / cutH)
         // rounded corners: a rectangle mask the cell's shape, over the whole cut picture
         val aspect = cellW / cellH
-        val mask = if (c.radius > 0f) {
-            JSONObject().put("shape", "rectangle").put("x", 0.0).put("y", 0.0)
-                .put("width", maxOf(aspect, 1.0)).put("height", maxOf(1 / aspect, 1.0))
-                .put("rotation", 0.0).put("roundness", c.radius.toDouble()).put("feather", 0.0)
-        } else JSONObject.NULL
+        val box = JSONObject().put("x", 0.0).put("y", 0.0).put("rotation", 0.0).put("feather", 0.0)
+        val mask = when (cell.shape) {
+            "circle", "heart", "star" -> box.put("shape", cell.shape).put("width", 1.0).put("height", 1.0)
+            "round" -> box.put("shape", "rectangle").put("width", maxOf(aspect, 1.0)).put("height", maxOf(1 / aspect, 1.0)).put("roundness", 0.45)
+            else -> if (!styled && c.radius > 0f) {
+                box.put("shape", "rectangle").put("width", maxOf(aspect, 1.0)).put("height", maxOf(1 / aspect, 1.0)).put("roundness", c.radius.toDouble())
+            } else JSONObject.NULL
+        }
         batch.put(
             JSONObject().put("op", "updateClip").put("clipId", id).put(
                 "patch",
-                JSONObject().put("crop", JSONObject().put("left", left).put("right", left).put("top", top).put("bottom", top))
+                JSONObject().put("crop", JSONObject().put("left", cropL).put("right", cropR).put("top", cropT).put("bottom", cropB))
                     .put("mask", mask),
             ),
         )
@@ -198,7 +241,7 @@ internal fun MobileSession.layCollage(view0: TimelineView, c: Collage): Timeline
                 .put("scale", cellW / (cutW * fit))
                 .put("offsetX", cell.x + cell.w / 2 - 0.5)
                 .put("offsetY", cell.y + cell.h / 2 - 0.5)
-                .put("rotation", 0.0),
+                .put("rotation", cell.rot.toDouble()),
         )
     }
     batch.put(
@@ -206,7 +249,8 @@ internal fun MobileSession.layCollage(view0: TimelineView, c: Collage): Timeline
             .put(
                 "value",
                 JSONObject().put("ids", JSONArray(ids)).put("layout", layout).put("gap", c.gap.toDouble())
-                    .put("radius", c.radius.toDouble()).put("color", c.color),
+                    .put("radius", c.radius.toDouble()).put("color", c.color).put("style", c.style)
+                    .put("adjust", JSONObject(c.adjust.mapValues { (_, v) -> JSONArray(listOf(v.first.toDouble(), v.second.toDouble(), v.third.toDouble())) })),
             ),
     )
     return apply(JSONObject().put("op", "batch").put("commands", batch).toString(), null)
@@ -233,10 +277,10 @@ fun CollageTools(vm: EditorViewModel) {
     var tab by remember { mutableStateOf(0) }
     var swapFrom by remember { mutableStateOf<Int?>(null) }
     val layouts = collageLayouts(kept.ids.size)
-    fun lay(next: Collage) = vm.edit { layCollage(view(), next) }
+    fun lay(next: Collage) = vm.edit { layCollage(view(), next, java.io.File(vm.path, "media")) }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Layout", "Borders", "Frame").forEachIndexed { i, name -> Pill(name, tab == i) { tab = i } }
+            listOf("Layout", "Frames", "Borders", "Size").forEachIndexed { i, name -> Pill(name, tab == i) { tab = i } }
         }
         when (tab) {
             0 -> Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
@@ -245,7 +289,7 @@ fun CollageTools(vm: EditorViewModel) {
                     Pill("−", false) {
                         if (kept.ids.size > 2) {
                             val last = kept.ids.last()
-                            vm.edit { delete(listOf(last)); layCollage(view(), kept.copy(ids = kept.ids.dropLast(1), layout = 0)) }
+                            vm.edit { delete(listOf(last)); layCollage(view(), kept.copy(ids = kept.ids.dropLast(1), layout = 0), java.io.File(vm.path, "media")) }
                         } else vm.message = "A collage keeps at least two pictures"
                     }
                     Text("${kept.ids.size}", style = Type.BodyStrong.copy(color = Palette.Text), modifier = Modifier.padding(horizontal = 12.dp))
@@ -257,7 +301,7 @@ fun CollageTools(vm: EditorViewModel) {
                             vm.edit {
                                 val media = import(Media.importUri(app, vm.path, uri).absolutePath)
                                 val added = addOverlay(media.id, 0L)
-                                layCollage(added, kept.copy(ids = kept.ids + added.createdId, layout = 0))
+                                layCollage(added, kept.copy(ids = kept.ids + added.createdId, layout = 0), java.io.File(vm.path, "media"))
                             }
                         }
                     }
@@ -276,12 +320,21 @@ fun CollageTools(vm: EditorViewModel) {
                         }
                     }
                 }
+                Text("Pinch a picture to zoom, drag to move it, double-tap to reset", style = Type.Small.copy(color = Palette.TextSecondary, fontSize = 11.sp), modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp))
                 if (swapFrom != null) Text("Tap another cell to swap", style = Type.Small.copy(color = Palette.TextSecondary), modifier = Modifier.padding(horizontal = 12.dp))
                 LazyRow(Modifier.fillMaxWidth().padding(top = 8.dp), contentPadding = PaddingValues(horizontal = 10.dp)) {
-                    items(layouts.size) { i -> LayoutTile(layouts[i], i == kept.layout) { lay(kept.copy(layout = i)) } }
+                    items(layouts.size) { i -> LayoutTile(layouts[i], kept.style.isEmpty() && i == kept.layout) { lay(kept.copy(layout = i, style = "")) } }
                 }
             }
-            1 -> Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            1 -> Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                COLLAGE_STYLES.forEach { st ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { lay(kept.copy(style = st.id)) }) {
+                        StyleTile(st.id, kept.ids.size, st.id == kept.style)
+                        Text(st.name, style = Type.Small.copy(color = if (st.id == kept.style) Palette.Accent else Palette.Text, fontSize = 12.sp), modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+            2 -> Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
                 ValueSlider(kept.gap * 1000f, 0f..60f, { "%.0f".format(it) }, { v -> lay(kept.copy(gap = v / 1000f)) }, { vm.endGesture() }, title = "Width")
                 ValueSlider(kept.radius * 100f, 0f..100f, { "%.0f".format(it) }, { v -> lay(kept.copy(radius = v / 100f)) }, { vm.endGesture() }, title = "Radius")
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -301,12 +354,34 @@ fun CollageTools(vm: EditorViewModel) {
                     Pill(name, on) {
                         vm.edit {
                             setCanvas(size.first.toUInt(), size.second.toUInt())
-                            layCollage(view(), kept)
+                            layCollage(view(), kept, java.io.File(vm.path, "media"))
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** A frame drawn small: its cells in their shapes on a swatch of its ground. */
+@Composable
+private fun StyleTile(style: String, n: Int, on: Boolean) {
+    val ground = mapOf("" to 0xFFFFFFFF, "film" to 0xFF111111, "prints" to 0xFFEFE6D8, "love" to 0xFFFFB3C6, "shapes" to 0xFFB7C4FC, "party" to 0xFFFFF4D6, "floral" to 0xFFEAF6EF, "classic" to 0xFFFFFFFF)
+    Canvas(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)).background(Color(ground[style] ?: 0xFFFFFFFF)).then(if (on) Modifier.background(Color.Transparent) else Modifier)) {
+        val cells = if (style.isEmpty()) collageLayouts(n).first() else styleCells(style, n, 200, 200)
+        val ink = if (style == "film") Color(0xFFCCCCCC) else Color(0xFF8A8A8E)
+        cells.forEach { c ->
+            val at = Offset(c.x * size.width, c.y * size.height)
+            val box = Size(c.w * size.width, c.h * size.height)
+            rotate(c.rot, Offset(at.x + box.width / 2, at.y + box.height / 2)) {
+                when (c.shape) {
+                    "circle", "heart", "star" -> drawCircle(ink, minOf(box.width, box.height) / 2, Offset(at.x + box.width / 2, at.y + box.height / 2))
+                    else -> drawRect(ink, at, box)
+                }
+            }
+            if (style.isEmpty()) drawRect(Color.White, at, box, style = Stroke(1.dp.toPx()))
+        }
+        if (on) drawRect(Palette.Accent, Offset.Zero, size, style = Stroke(3.dp.toPx()))
     }
 }
 
@@ -351,4 +426,79 @@ private fun LayoutTile(cells: List<Cell>, selected: Boolean, onClick: () -> Unit
             drawRect(edge, at, box, style = Stroke(1.5.dp.toPx()))
         }
     }
+}
+
+/**
+ * Over the collage screen's picture: pinch a picture to zoom it in its space and drag to move it there,
+ * double-tap to put it back. The picture is found by where the gesture starts.
+ */
+@Composable
+fun CollageAdjust(vm: EditorViewModel, modifier: Modifier) {
+    val kept by androidx.compose.runtime.rememberUpdatedState(remember(vm.timeline?.revision) { vm.session?.collage() })
+    val media = remember { java.io.File(vm.path, "media") }
+    Box(
+        modifier.pointerInput(Unit) {
+            // the frame as the preview fits it, centred in this box
+            fun frame(): androidx.compose.ui.geometry.Rect? {
+                val t = vm.timeline ?: return null
+                val fa = t.width.toFloat() / t.height.toFloat()
+                val (w, h) = if (size.width / size.height.toFloat() > fa) size.height * fa to size.height.toFloat() else size.width.toFloat() to size.width / fa
+                return androidx.compose.ui.geometry.Rect(Offset((size.width - w) / 2, (size.height - h) / 2), Size(w, h))
+            }
+            fun cellAt(p: Offset): Pair<Int, androidx.compose.ui.geometry.Rect>? {
+                val c = kept ?: return null
+                val t = vm.timeline ?: return null
+                val f = frame() ?: return null
+                val cells = collageCells(c, t.width.toInt(), t.height.toInt()) ?: return null
+                val rects = cells.map { cell -> androidx.compose.ui.geometry.Rect(Offset(f.left + cell.x * f.width, f.top + cell.y * f.height), Size(cell.w * f.width, cell.h * f.height)) }
+                val i = rects.indexOfLast { it.contains(p) }
+                return if (i < 0) null else i to rects[i]
+            }
+            var lastTap = 0L
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val c0 = kept ?: return@awaitEachGesture
+                val (index, rect) = cellAt(down.position) ?: return@awaitEachGesture
+                val id = c0.ids.getOrNull(index) ?: return@awaitEachGesture
+                var (zoom, ox, oy) = c0.adjust[id] ?: Triple(1f, 0f, 0f)
+                // how much of the picture the space shows each way at zoom one: for turning a drag into a move
+                val clip = vm.clip(id)
+                val aspect = rect.width / rect.height
+                val mediaAspect = (clip?.mediaWidth?.toFloat() ?: 1f) / (clip?.mediaHeight?.toFloat()?.coerceAtLeast(1f) ?: 1f)
+                val shownW = if (mediaAspect > aspect) aspect / mediaAspect else 1f
+                val shownH = if (mediaAspect > aspect) 1f else mediaAspect / aspect
+                var moved = false
+                var sent = 0L
+                while (true) {
+                    val event = awaitPointerEvent()
+                    if (event.changes.none { it.pressed }) break
+                    val z = event.calculateZoom()
+                    val pan = event.calculatePan()
+                    if (z == 1f && pan == Offset.Zero) continue
+                    moved = true
+                    zoom = (zoom * z).coerceIn(1f, 6f)
+                    ox -= pan.x / rect.width * shownW / zoom
+                    oy -= pan.y / rect.height * shownH / zoom
+                    event.changes.forEach { it.consume() }
+                    val now = System.currentTimeMillis()
+                    if (now - sent > 60) {
+                        sent = now
+                        val next = c0.copy(adjust = c0.adjust + (id to Triple(zoom, ox, oy)))
+                        vm.edit { layCollage(view(), next, media) }
+                    }
+                }
+                if (moved) {
+                    val next = c0.copy(adjust = c0.adjust + (id to Triple(zoom, ox, oy)))
+                    vm.edit { layCollage(view(), next, media) }
+                } else {
+                    // a second tap soon after the first puts the picture back as it was laid
+                    val now = System.currentTimeMillis()
+                    if (now - lastTap < 350 && c0.adjust.containsKey(id)) {
+                        vm.edit { layCollage(view(), c0.copy(adjust = c0.adjust - id), media) }
+                        lastTap = 0L
+                    } else lastTap = now
+                }
+            }
+        },
+    )
 }

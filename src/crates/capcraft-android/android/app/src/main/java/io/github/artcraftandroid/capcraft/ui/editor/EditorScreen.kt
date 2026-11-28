@@ -171,6 +171,8 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
             TopBar(vm = vm, onClose = ::leave, onExport = ::export)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (!vm.fullscreen) Preview(vm, Modifier.fillMaxSize())
+                // pinch and drag a picture in its space
+                io.github.artcraftandroid.capcraft.ui.editor.panels.CollageAdjust(vm, Modifier.fillMaxSize())
             }
             Column(Modifier.fillMaxWidth().background(Palette.Timeline).navigationBarsPadding().padding(top = 10.dp, bottom = 6.dp)) {
                 io.github.artcraftandroid.capcraft.ui.editor.panels.CollageTools(vm)
