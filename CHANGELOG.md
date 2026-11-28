@@ -3,9 +3,24 @@
 CapCraft Forge is modified from CapCraft for Android at `31b4109` (4 November 2026, after v0.0.4-beta). Each change is
 dated, as the licence asks; `#` numbers are the original project's.
 
-## Unreleased
+## 0.0.9 (28 November 2026)
 
 ### 28 November 2026
+- Collage is a home tool of its own: pick two to nine photos or videos and the collage opens on its own screen - the
+  picture, and Layout, Borders and Frame under it - with the whole editor a tap away ("Edit in timeline").
+  Layout adds a picture (+) or takes the last off (-) and swaps two pictures with two taps on the cell map; Borders
+  sets the gap's width, the corners' roundness and the gap's colour; Size makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
+- Collage frames of our own, drawn in the app for any number of pictures: Film (a strip with sprocket holes), Prints
+  (turned prints on paper), Love (heart-cut pictures among doodled hearts), Shapes (circles, stars and rounded tiles on
+  a gradient), Party (gold edges, stripes and confetti), Floral (soft edges among leaves) and Classic (one big picture,
+  wide white margins). On the collage screen, pinch a picture to zoom it in its space, drag to move it, double-tap to
+  put it back; each picture keeps its framing through a change of frame or size.
+- Fixes: an export no longer crashes the app on Android 15 and later once the day's six hours of background export
+  time run out; leaving the editor saves once, off the screen's thread; a save that fails says so and keeps the editor
+  open; undo takes back a whole collage change, pinch or drag in one step; a background chosen in the editor stays
+  through collage changes; Reel FX exports are about twice as fast and hold less memory.
+- Easier to use: buttons and chips have at least a 48 dp touch area, colour dots and gallery tiles are read out by
+  name to screen readers, a collage picture can be zoomed with a slider, and small text is 12 sp.
 - Engine from Concat 0.2.13: 22 new looks (a Flash shelf - Flash, Strobe, Flicker, Beat Pulse, RGB Flash; Glitch, VHS
   Tracking, Old Film, Lens Flare, Split Screen, Mirror, Kaleidoscope, Blur Frame, Light Leak, Zoom Pulse, Duotone; the
   transitions Flash, Luma Wipe, Doors, Blinds, Mosaic and Ripple), Concat's rendering and decoding fixes (a failed
@@ -75,17 +90,6 @@ The editor's tools reorganised (the first three steps of `docs/proposals/app-cle
   guess missed is. Until a stretch has been looked at, Retouch goes by colour as before.
 
 ## 0.0.8 (24 November 2026)
-
-### 28 November 2026
-- Collage is a home tool of its own: pick two to nine photos or videos and the collage opens on its own screen - the
-  picture, and Layout, Borders and Frame under it - with the whole editor a tap away ("Edit in timeline").
-  Layout adds a picture (+) or takes the last off (-) and swaps two pictures with two taps on the cell map; Borders
-  sets the gap's width, the corners' roundness and the gap's colour; Size makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
-- Collage frames of our own, drawn in the app for any number of pictures: Film (a strip with sprocket holes), Prints
-  (turned prints on paper), Love (heart-cut pictures among doodled hearts), Shapes (circles, stars and rounded tiles on
-  a gradient), Party (gold edges, stripes and confetti), Floral (soft edges among leaves) and Classic (one big picture,
-  wide white margins). On the collage screen, pinch a picture to zoom it in its space, drag to move it, double-tap to
-  put it back; each picture keeps its framing through a change of frame or size.
 
 ### 24 November 2026
 Ideas from [FilmCraft](https://github.com/storytold/filmcraft) (Apache-2.0), written here for a phone.
