@@ -189,6 +189,7 @@ private class Shortcut(val id: String, val label: String, val icon: ImageVector,
  */
 private val SHORTCUTS = listOf(
     Shortcut("autocut", "AutoCut", LucideIcons.Clapperboard, videoOnly = false),
+    Shortcut("collage", "Collage", LucideIcons.LayoutTemplate, videoOnly = false),
     Shortcut("retouch", "Retouch", LucideIcons.Smile, videoOnly = false),
     Shortcut("phototools", "Photo tools", LucideIcons.Image, videoOnly = false),
     Shortcut("camera", "Shoot and record", LucideIcons.Camera),
@@ -503,6 +504,12 @@ fun HomeScreen(
                                 "screen" -> recordScreen()
                                 "audiotools" -> audioTools = true
                                 "phototools" -> photoTools = true
+                                // two to nine photos or videos, opened on the collage's own screen
+                                "collage" -> io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
+                                    io.github.artcraftandroid.capcraft.ui.common.MediaKinds.BOTH, multiple = true,
+                                ) { uris ->
+                                    if (uris.size < 2) message = "Pick at least two for a collage" else startProject(uris.take(9), "collage")
+                                }
                                 "templates" -> builtins = true
                                 "reel" -> io.github.artcraftandroid.capcraft.ui.common.MediaPick.open(
                                     io.github.artcraftandroid.capcraft.ui.common.MediaKinds.VIDEO, multiple = false,

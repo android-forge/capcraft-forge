@@ -1,5 +1,9 @@
 package io.github.artcraftandroid.capcraft.ui.editor
 
+import io.github.artcraftandroid.capcraft.ui.editor.panels.collage
+
+import androidx.compose.foundation.layout.Arrangement
+
 import android.app.Application
 import android.graphics.Bitmap
 import android.net.Uri
@@ -159,7 +163,27 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
     var belowPreview by remember { mutableStateOf(0f) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     Box(Modifier.fillMaxSize().background(Palette.EditorTop)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        // a collage opens on a screen of its own: the picture, and the collage's tabs under it
+        LaunchedEffect(vm.timeline != null) {
+            if (vm.timeline != null && vm.session?.collage() != null && then != "edit") vm.collageScreen = true
+        }
+        if (vm.collageScreen) Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            TopBar(vm = vm, onClose = ::leave, onExport = ::export)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (!vm.fullscreen) Preview(vm, Modifier.fillMaxSize())
+            }
+            Column(Modifier.fillMaxWidth().background(Palette.Timeline).navigationBarsPadding().padding(top = 10.dp, bottom = 6.dp)) {
+                io.github.artcraftandroid.capcraft.ui.editor.panels.CollageTools(vm)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.End) {
+                    // music, text or animation: the whole editor, a tap away
+                    Text(
+                        "Edit in timeline ›",
+                        style = Type.Small.copy(color = Palette.Accent),
+                        modifier = Modifier.clickable { vm.collageScreen = false }.padding(8.dp),
+                    )
+                }
+            }
+        } else Column(Modifier.fillMaxSize().statusBarsPadding()) {
             TopBar(vm = vm, onClose = ::leave, onExport = ::export)
             // where the tools went, said once after they moved into drawers
             LaunchedEffect(Unit) { vm.toolsMovedTip() }
