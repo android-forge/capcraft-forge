@@ -237,6 +237,9 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
      * over it from the start, each cropped into a cell of the first layout, with Layout open. All
      * photos, it exports a photo.
      */
+    /** The collage's own screen: the picture and the collage's tabs, with no timeline. */
+    var collageScreen by mutableStateOf(false)
+
     private fun startCollage(uris: List<Uri>) {
         val s = session ?: return
         viewModelScope.launch {
@@ -264,7 +267,7 @@ class EditorViewModel(app: Application, val path: String) : AndroidViewModel(app
                     exportPhoto = true
                     exportGif = false
                 }
-                panel = Panel.Collage
+                collageScreen = true
             }.onFailure { fail(it) }
         }
     }

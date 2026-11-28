@@ -5,6 +5,12 @@ dated, as the licence asks; `#` numbers are the original project's.
 
 ## 0.0.8 (24 November 2026)
 
+### 28 November 2026
+- Collage is a home tool of its own: pick two to nine photos or videos and the collage opens on its own screen - the
+  picture, and Layout, Borders and Frame under it - with the whole editor a tap away ("Edit in timeline").
+  Layout adds a picture (+) or takes the last off (-) and swaps two pictures with two taps on the cell map; Borders
+  sets the gap's width, the corners' roundness and the gap's colour; Frame makes it 1:1, 4:5, 3:4, 9:16 or 16:9.
+
 ### 24 November 2026
 Ideas from [FilmCraft](https://github.com/storytold/filmcraft) (Apache-2.0), written here for a phone.
 - Export presets for Instagram Reels (1080p, 30 fps), TikTok (1080p, 30 fps) and YouTube Shorts (1080p, 60 fps), with a
