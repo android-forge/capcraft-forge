@@ -178,8 +178,12 @@ fun EditorScreen(path: String, incoming: List<Uri>, then: String? = null, close:
                 io.github.artcraftandroid.capcraft.ui.editor.panels.CollageTools(vm)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     // undo and redo here too: the play bar that has them is the timeline's
-                    Text("Undo", style = Type.Small.copy(color = Palette.Text), modifier = Modifier.clickable { vm.step(back = true) }.padding(8.dp))
-                    Text("Redo", style = Type.Small.copy(color = Palette.Text), modifier = Modifier.clickable { vm.step(back = false) }.padding(8.dp))
+                    androidx.compose.material3.IconButton({ vm.step(back = true) }) {
+                        androidx.compose.material3.Icon(io.github.artcraftandroid.capcraft.ui.LucideIcons.Undo2, contentDescription = "Undo", tint = Palette.Text)
+                    }
+                    androidx.compose.material3.IconButton({ vm.step(back = false) }) {
+                        androidx.compose.material3.Icon(io.github.artcraftandroid.capcraft.ui.LucideIcons.Redo2, contentDescription = "Redo", tint = Palette.Text)
+                    }
                     androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                     // music, text or animation: the whole editor, a tap away
                     Text(
@@ -379,7 +383,7 @@ private fun PreparingBadge(vm: EditorViewModel, modifier: Modifier) {
     ) {
         CircularProgressIndicator(color = Palette.Accent, modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp)
         Spacer(Modifier.width(7.dp))
-        Text("Preparing clips · ${s.ready} of ${s.total} ready", style = Type.Small.copy(fontSize = 11.sp, color = Palette.Text))
+        Text("Preparing clips · ${s.ready} of ${s.total} ready", style = Type.Small.copy(fontSize = 12.sp, color = Palette.Text))
     }
 }
 
